@@ -223,14 +223,14 @@ def parse_message(message: str) -> dict:
             party = party_match.group(1).strip()
 
 
-    elif " ko " in lower_message and (
-    " diye" in lower_message
-    or " diya" in lower_message
-    or " dia" in lower_message
-    or " de diye" in lower_message
+   elif re.search(r"\bko\b", lower_message) and (
+    re.search(r"\bdiye\b", lower_message)
+    or re.search(r"\bdiya\b", lower_message)
+    or re.search(r"\bdia\b", lower_message)
+    or re.search(r"\bde diye\b", lower_message)
 ):
     transaction_type = "expense"
-    party_match = re.search(r"^([A-Za-z]+)\s+ko", message, re.IGNORECASE)
+    party_match = re.search(r"^([A-Za-z]+)\s+ko\b", message, re.IGNORECASE)
     if party_match:
         party = party_match.group(1).strip().title()
 
