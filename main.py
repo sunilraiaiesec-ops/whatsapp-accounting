@@ -175,6 +175,16 @@ def get_messages():
 
     return [
         {
+            "id": row[0],
+            "source": row[1],
+            "sender": row[2],
+            "message": row[3],
+            "created_at": str(row[4])
+        }
+        for row in rows
+    ]
+
+
 import re
 
 def parse_message(message: str) -> dict:
@@ -220,7 +230,84 @@ def parse_message(message: str) -> dict:
         "currency": currency,
     }
 
+
 @app.post("/analyze")
 async def analyze_message(input_data: MessageInput):
-    return parse_message(input_data.message)        "currency": currency
+    return parse_message(input_data.message)
+
+
+@app.post("/transaction")
+async def save_transaction(input_data: MessageInput):
+    parsed = parse_message(input_data.message)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        INSERT INTO transactions
+        (transaction_type, party, amount, currency, original_message, sender)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        RETURNING id, created_at;
+        """,
+        (
+            parsed["type"],
+            parsed["party"],
+            parsed["amount"],
+            parsed["currency"],
+            parsed["original_message"],
+            input_data.sender,
+        ),
+    )
+
+    row = cur.fetchone()
+    transaction_id, created_at = row[0], row[1]
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return {
+        "status": "saved",
+        "transaction_id": transaction_id,
+        "created_at": str(created_at),
+        **parsed,
     }
+
+
+@app.get("/transactions")
+def get_transactions():
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            id,
+            transaction_type,
+            party,
+            amount,
+            currency,
+            original_message,
+            sender,
+            created_at
+        FROM transactions
+        ORDER BY id DESC;
+    """)
+
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    return [
+        {
+            "id": row[0],
+            "type": row[1],
+            "party": row[2],
+            "amount": row[3],
+            "currency": row[4],
+            "original_message": row[5],
+            "sender": row[6],
+            "created_at": str(row[7]),
+        }
+        for row in rows
+    ]
