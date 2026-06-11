@@ -375,21 +375,28 @@ def get_receipts():
 
 @app.get("/party/{party_name}")
 def get_transactions_by_party(party_name: str):
+
     conn = get_db_connection()
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT id, transaction_type, party, amount, currency, original_message, sender, created_at
+        SELECT
+            id,
+            transaction_type,
+            party,
+            amount,
+            currency,
+            original_message,
+            sender,
+            created_at
         FROM transactions
-        WHERE LOWER(party) = LOWER(%s)
+        WHERE LOWER(TRIM(party)) = LOWER(TRIM(%s))
         ORDER BY id DESC;
     """, (party_name,))
 
     rows = cur.fetchall()
-    cur.close()
-    conn.close()
 
-    return [
+    transactions = [
         {
             "id": row[0],
             "type": row[1],
@@ -403,6 +410,29 @@ def get_transactions_by_party(party_name: str):
         for row in rows
     ]
 
+    total_received = sum(
+        row[3] for row in rows
+        if row[1] == "receipt" and row[3] is not None
+    )
+
+    total_paid = sum(
+        row[3] for row in rows
+        if row[1] in ["expense", "payment", "return_payment"]
+        and row[3] is not None
+    )
+
+    balance = total_received - total_paid
+
+    cur.close()
+    conn.close()
+
+    return {
+        "party": party_name,
+        "total_received": total_received,
+        "total_paid": total_paid,
+        "balance": balance,
+        "transactions": transactions
+    }
 
 @app.get("/summary")
 def get_summary():
