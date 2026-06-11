@@ -189,38 +189,74 @@ import re
 
 def parse_message(message: str) -> dict:
     message = message.strip()
+    lower_message = message.lower()
 
     amount_match = re.search(r"(\d[\d,]*)", message)
     amount = None
     if amount_match:
         amount = int(amount_match.group(1).replace(",", ""))
 
-    currency = "FCFA" if "fcfa" in message.lower() or "cfa" in message.lower() else None
+    currency = "FCFA" if "fcfa" in lower_message or "cfa" in lower_message else None
 
     transaction_type = "unknown"
     party = None
-    lower_message = message.lower()
+    category = None
 
+    # Receipt patterns
     if "received from" in lower_message:
         transaction_type = "receipt"
-        party_match = re.search(r"received from ([A-Za-z\s]+)", message, re.IGNORECASE)
+        party_match = re.search(r"received from\s+([A-Za-z]+)", message, re.IGNORECASE)
         if party_match:
             party = party_match.group(1).strip()
 
-    elif "give to" in lower_message:
-        transaction_type = "payment"
-        party_match = re.search(r"give to ([A-Za-z\s]+)", message, re.IGNORECASE)
+    elif lower_message.startswith("received") and "from" in lower_message:
+        transaction_type = "receipt"
+        party_match = re.search(r"from\s+([A-Za-z]+)", message, re.IGNORECASE)
         if party_match:
             party = party_match.group(1).strip()
 
+    # Expense patterns
     elif "paid" in lower_message:
         transaction_type = "expense"
         party_match = re.search(r"paid\s+([A-Za-z]+)", message, re.IGNORECASE)
         if party_match:
             party = party_match.group(1).strip()
 
+    elif "sent" in lower_message:
+        transaction_type = "expense"
+        party_match = re.search(r"sent\s+([A-Za-z]+)", message, re.IGNORECASE)
+        if party_match:
+            party = party_match.group(1).strip()
+
+    elif "gave" in lower_message:
+        transaction_type = "expense"
+        party_match = re.search(r"gave\s+([A-Za-z]+)", message, re.IGNORECASE)
+        if party_match:
+            party = party_match.group(1).strip()
+
+    elif "give to" in lower_message:
+        transaction_type = "payment"
+        party_match = re.search(r"give to\s+([A-Za-z]+)", message, re.IGNORECASE)
+        if party_match:
+            party = party_match.group(1).strip()
+
     elif "return to" in lower_message:
         transaction_type = "return_payment"
+        party_match = re.search(r"return to\s+([A-Za-z]+)", message, re.IGNORECASE)
+        if party_match:
+            party = party_match.group(1).strip()
+
+    # Category detection
+    if "transport" in lower_message:
+        category = "transport"
+    elif "rent" in lower_message:
+        category = "rent"
+    elif "salary" in lower_message:
+        category = "salary"
+    elif "rice" in lower_message:
+        category = "rice"
+    elif "loading" in lower_message:
+        category = "loading"
 
     return {
         "original_message": message,
@@ -228,8 +264,8 @@ def parse_message(message: str) -> dict:
         "party": party,
         "amount": amount,
         "currency": currency,
+        "category": category,
     }
-
 
 @app.post("/analyze")
 async def analyze_message(input_data: MessageInput):
