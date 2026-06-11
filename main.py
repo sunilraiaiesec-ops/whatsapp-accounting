@@ -311,3 +311,127 @@ def get_transactions():
         }
         for row in rows
     ]
+
+
+@app.get("/expenses")
+def get_expenses():
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT id, party, amount, currency, original_message, sender, created_at
+        FROM transactions
+        WHERE transaction_type = 'expense'
+        ORDER BY id DESC;
+    """)
+
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    return [
+        {
+            "id": row[0],
+            "party": row[1],
+            "amount": row[2],
+            "currency": row[3],
+            "original_message": row[4],
+            "sender": row[5],
+            "created_at": str(row[6])
+        }
+        for row in rows
+    ]
+
+
+@app.get("/receipts")
+def get_receipts():
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT id, party, amount, currency, original_message, sender, created_at
+        FROM transactions
+        WHERE transaction_type = 'receipt'
+        ORDER BY id DESC;
+    """)
+
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    return [
+        {
+            "id": row[0],
+            "party": row[1],
+            "amount": row[2],
+            "currency": row[3],
+            "original_message": row[4],
+            "sender": row[5],
+            "created_at": str(row[6])
+        }
+        for row in rows
+    ]
+
+
+@app.get("/party/{party_name}")
+def get_transactions_by_party(party_name: str):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT id, transaction_type, party, amount, currency, original_message, sender, created_at
+        FROM transactions
+        WHERE LOWER(party) = LOWER(%s)
+        ORDER BY id DESC;
+    """, (party_name,))
+
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    return [
+        {
+            "id": row[0],
+            "type": row[1],
+            "party": row[2],
+            "amount": row[3],
+            "currency": row[4],
+            "original_message": row[5],
+            "sender": row[6],
+            "created_at": str(row[7])
+        }
+        for row in rows
+    ]
+
+
+@app.get("/summary")
+def get_summary():
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            COALESCE(SUM(CASE WHEN transaction_type = 'receipt' THEN amount ELSE 0 END), 0) AS total_receipts,
+            COALESCE(SUM(CASE WHEN transaction_type = 'expense' THEN amount ELSE 0 END), 0) AS total_expenses,
+            COALESCE(SUM(CASE WHEN transaction_type = 'payment' THEN amount ELSE 0 END), 0) AS total_payments,
+            COALESCE(SUM(CASE WHEN transaction_type = 'return_payment' THEN amount ELSE 0 END), 0) AS total_returns
+        FROM transactions;
+    """)
+
+    row = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    total_receipts = row[0]
+    total_expenses = row[1]
+    total_payments = row[2]
+    total_returns = row[3]
+
+    return {
+        "total_receipts": total_receipts,
+        "total_expenses": total_expenses,
+        "total_payments": total_payments,
+        "total_returns": total_returns,
+        "net_balance": total_receipts - total_expenses - total_payments - total_returns
+    }
