@@ -209,9 +209,6 @@ async def analyze_message(input_data: MessageInput):
 
     elif "paid" in lower_message:
         transaction_type = "expense"
-
-    elif "paid" in lower_message:
-        transaction_type = "expense"
         party_match = re.search(r"paid\s+([A-Za-z]+)", message, re.IGNORECASE)
         if party_match:
             party = party_match.group(1).strip()
