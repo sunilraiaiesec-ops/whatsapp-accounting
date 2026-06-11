@@ -175,27 +175,13 @@ def get_messages():
 
     return [
         {
-            "id": row[0],
-            "source": row[1],
-            "sender": row[2],
-            "message": row[3],
-            "created_at": str(row[4])
-        }
-        for row in rows
-    ]
-
-
 import re
 
-
-@app.post("/analyze")
-async def analyze_message(input_data: MessageInput):
-
-    message = input_data.message.strip()
+def parse_message(message: str) -> dict:
+    message = message.strip()
 
     amount_match = re.search(r"(\d[\d,]*)", message)
     amount = None
-
     if amount_match:
         amount = int(amount_match.group(1).replace(",", ""))
 
@@ -203,7 +189,6 @@ async def analyze_message(input_data: MessageInput):
 
     transaction_type = "unknown"
     party = None
-
     lower_message = message.lower()
 
     if "received from" in lower_message:
@@ -232,5 +217,10 @@ async def analyze_message(input_data: MessageInput):
         "type": transaction_type,
         "party": party,
         "amount": amount,
-        "currency": currency
+        "currency": currency,
+    }
+
+@app.post("/analyze")
+async def analyze_message(input_data: MessageInput):
+    return parse_message(input_data.message)        "currency": currency
     }
