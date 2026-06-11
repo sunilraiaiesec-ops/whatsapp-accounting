@@ -37,7 +37,18 @@ def create_tables():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
-
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS transactions (
+            id SERIAL PRIMARY KEY,
+            transaction_type TEXT,
+            party TEXT,
+            amount INTEGER,
+            currency TEXT,
+            original_message TEXT,
+            sender TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
     conn.commit()
     cur.close()
     conn.close()
