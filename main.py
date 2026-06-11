@@ -172,3 +172,54 @@ def get_messages():
         }
         for row in rows
     ]
+
+
+import re
+
+
+@app.post("/analyze")
+async def analyze_message(input_data: MessageInput):
+
+    message = input_data.message.strip()
+
+    amount_match = re.search(r"(\d[\d,]*)", message)
+    amount = None
+
+    if amount_match:
+        amount = int(amount_match.group(1).replace(",", ""))
+
+    currency = "FCFA" if "fcfa" in message.lower() or "cfa" in message.lower() else None
+
+    transaction_type = "unknown"
+    party = None
+
+    lower_message = message.lower()
+
+    if "received from" in lower_message:
+        transaction_type = "receipt"
+        party_match = re.search(r"received from ([A-Za-z\s]+)", message, re.IGNORECASE)
+        if party_match:
+            party = party_match.group(1).strip()
+
+    elif "give to" in lower_message:
+        transaction_type = "payment"
+        party_match = re.search(r"give to ([A-Za-z\s]+)", message, re.IGNORECASE)
+        if party_match:
+            party = party_match.group(1).strip()
+
+    elif "paid" in lower_message:
+        transaction_type = "expense"
+
+    elif "deposit" in lower_message:
+        transaction_type = "bank_deposit"
+
+    elif "return to" in lower_message:
+        transaction_type = "return_payment"
+
+    return {
+        "original_message": message,
+        "type": transaction_type,
+        "party": party,
+        "amount": amount,
+        "currency": currency
+    }
