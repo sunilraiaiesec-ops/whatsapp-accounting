@@ -12,6 +12,11 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 class MessageInput(BaseModel):
     sender: str
     message: str
+    
+
+class WhatsAppInput(BaseModel):
+    from_user: str
+    text: str
 
 
 def get_db_connection():
@@ -96,9 +101,12 @@ async def save_test_message(input_data: MessageInput):
 
 
 @app.post("/webhook/whatsapp")
-async def whatsapp_webhook(request: Request):
+async def whatsapp_webhook(data: WhatsAppInput):
 
-    data = await request.json()
+    raw_data = {
+        "from_user": data.from_user,
+        "text": data.text
+    }
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -112,9 +120,9 @@ async def whatsapp_webhook(request: Request):
         """,
         (
             "whatsapp",
-            "unknown",
-            json.dumps(data),
-            json.dumps(data)
+            data.from_user,
+            data.text,
+            json.dumps(raw_data)
         )
     )
 
@@ -126,7 +134,9 @@ async def whatsapp_webhook(request: Request):
 
     return {
         "status": "received",
-        "message_id": message_id
+        "message_id": message_id,
+        "sender": data.from_user,
+        "message": data.text
     }
 
 
