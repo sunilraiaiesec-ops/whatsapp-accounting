@@ -222,6 +222,19 @@ def parse_message(message: str) -> dict:
         if party_match:
             party = party_match.group(1).strip()
 
+
+    elif " ko " in lower_message and (
+    " diye" in lower_message
+    or " diya" in lower_message
+    or " dia" in lower_message
+    or " de diye" in lower_message
+):
+    transaction_type = "expense"
+    party_match = re.search(r"^([A-Za-z]+)\s+ko", message, re.IGNORECASE)
+    if party_match:
+        party = party_match.group(1).strip().title()
+
+    
     elif "sent" in lower_message:
         transaction_type = "expense"
         party_match = re.search(r"sent\s+([A-Za-z]+)", message, re.IGNORECASE)
