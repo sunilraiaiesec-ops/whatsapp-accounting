@@ -211,10 +211,10 @@ async def analyze_message(input_data: MessageInput):
         transaction_type = "expense"
 
     elif "paid" in lower_message:
-    transaction_type = "expense"
-    party_match = re.search(r"paid ([A-Za-z\s]+)", message, re.IGNORECASE)
-    if party_match:
-        party = party_match.group(1).strip()
+      transaction_type = "expense"
+      party_match = re.search(r"paid ([A-Za-z\s]+)", message, re.IGNORECASE)
+      if party_match:
+         party = party_match.group(1).strip()
 
     elif "return to" in lower_message:
         transaction_type = "return_payment"
