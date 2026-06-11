@@ -222,17 +222,16 @@ def parse_message(message: str) -> dict:
         if party_match:
             party = party_match.group(1).strip()
 
-
-   elif re.search(r"\bko\b", lower_message) and (
-    re.search(r"\bdiye\b", lower_message)
-    or re.search(r"\bdiya\b", lower_message)
-    or re.search(r"\bdia\b", lower_message)
-    or re.search(r"\bde diye\b", lower_message)
-):
-    transaction_type = "expense"
-    party_match = re.search(r"^([A-Za-z]+)\s+ko\b", message, re.IGNORECASE)
-    if party_match:
-        party = party_match.group(1).strip().title()
+    elif re.search(r"\bko\b", lower_message) and (
+        re.search(r"\bdiye\b", lower_message)
+        or re.search(r"\bdiya\b", lower_message)
+        or re.search(r"\bdia\b", lower_message)
+        or re.search(r"\bde diye\b", lower_message)
+    ):
+        transaction_type = "expense"
+        party_match = re.search(r"^([A-Za-z]+)\s+ko\b", message, re.IGNORECASE)
+        if party_match:
+            party = party_match.group(1).strip().title()
 
     
     elif "sent" in lower_message:
