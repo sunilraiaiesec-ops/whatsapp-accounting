@@ -2,10 +2,16 @@ import os
 import json
 import psycopg2
 from fastapi import FastAPI, Request
+from pydantic import BaseModel
 
 app = FastAPI()
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
+
+
+class MessageInput(BaseModel):
+    sender: str
+    message: str
 
 
 def get_db_connection():
@@ -47,11 +53,14 @@ def home():
 
 
 @app.post("/message")
-async def save_test_message(request: Request):
-    data = await request.json()
+async def save_test_message(input_data: MessageInput):
+    message_text = input_data.message
+    sender = input_data.sender
 
-    message_text = data.get("message", "")
-    sender = data.get("sender", "manual-test")
+    raw_data = {
+        "sender": sender,
+        "message": message_text
+    }
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -62,7 +71,7 @@ async def save_test_message(request: Request):
         VALUES (%s, %s, %s, %s)
         RETURNING id;
         """,
-        ("manual", sender, message_text, json.dumps(data))
+        ("manual", sender, message_text, json.dumps(raw_data))
     )
 
     message_id = cur.fetchone()[0]
@@ -74,6 +83,7 @@ async def save_test_message(request: Request):
     return {
         "status": "saved",
         "message_id": message_id,
+        "sender": sender,
         "message": message_text
     }
 
