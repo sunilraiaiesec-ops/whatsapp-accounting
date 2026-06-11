@@ -54,6 +54,7 @@ def home():
 
 @app.post("/message")
 async def save_test_message(input_data: MessageInput):
+
     message_text = input_data.message
     sender = input_data.sender
 
@@ -67,11 +68,17 @@ async def save_test_message(input_data: MessageInput):
 
     cur.execute(
         """
-        INSERT INTO messages (source, sender, message_text, raw_data)
+        INSERT INTO messages
+        (source, sender, message_text, raw_data)
         VALUES (%s, %s, %s, %s)
         RETURNING id;
         """,
-        ("manual", sender, message_text, json.dumps(raw_data))
+        (
+            "manual",
+            sender,
+            message_text,
+            json.dumps(raw_data)
+        )
     )
 
     message_id = cur.fetchone()[0]
@@ -90,6 +97,7 @@ async def save_test_message(input_data: MessageInput):
 
 @app.post("/webhook/whatsapp")
 async def whatsapp_webhook(request: Request):
+
     data = await request.json()
 
     conn = get_db_connection()
@@ -97,11 +105,17 @@ async def whatsapp_webhook(request: Request):
 
     cur.execute(
         """
-        INSERT INTO messages (source, sender, message_text, raw_data)
+        INSERT INTO messages
+        (source, sender, message_text, raw_data)
         VALUES (%s, %s, %s, %s)
         RETURNING id;
         """,
-        ("whatsapp", "unknown", json.dumps(data), json.dumps(data))
+        (
+            "whatsapp",
+            "unknown",
+            json.dumps(data),
+            json.dumps(data)
+        )
     )
 
     message_id = cur.fetchone()[0]
@@ -114,3 +128,37 @@ async def whatsapp_webhook(request: Request):
         "status": "received",
         "message_id": message_id
     }
+
+
+@app.get("/messages")
+def get_messages():
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            id,
+            source,
+            sender,
+            message_text,
+            created_at
+        FROM messages
+        ORDER BY id DESC;
+    """)
+
+    rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return [
+        {
+            "id": row[0],
+            "source": row[1],
+            "sender": row[2],
+            "message": row[3],
+            "created_at": str(row[4])
+        }
+        for row in rows
+    ]
