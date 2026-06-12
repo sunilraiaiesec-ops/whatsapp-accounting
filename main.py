@@ -121,9 +121,6 @@ async def save_test_message(input_data: MessageInput):
 @app.post("/webhook/whatsapp")
 async def whatsapp_webhook(data: WhatsAppInput):
 
-    @app.post("/webhook/whatsapp")
-async def whatsapp_webhook(data: WhatsAppInput):
-
     message_text = data.text
     sender = data.from_user
 
