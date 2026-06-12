@@ -359,6 +359,7 @@ def get_transactions():
             party,
             amount,
             currency,
+            category,
             original_message,
             sender,
             created_at
