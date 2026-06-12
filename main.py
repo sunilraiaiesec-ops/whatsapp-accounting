@@ -50,6 +50,12 @@ def create_tables():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
+    cur.execute("""
+    ALTER TABLE transactions
+    ADD COLUMN IF NOT EXISTS category TEXT;
+""")
+
+    
     conn.commit()
     cur.close()
     conn.close()
