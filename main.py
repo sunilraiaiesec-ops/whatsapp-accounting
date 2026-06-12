@@ -378,9 +378,10 @@ def get_transactions():
             "party": row[2],
             "amount": row[3],
             "currency": row[4],
-            "original_message": row[5],
-            "sender": row[6],
-            "created_at": str(row[7]),
+            "category": row[5],
+            "original_message": row[6],
+            "sender": row[7],
+            "created_at": str(row[8]),
         }
         for row in rows
     ]
