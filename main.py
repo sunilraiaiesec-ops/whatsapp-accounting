@@ -317,8 +317,8 @@ async def save_transaction(input_data: MessageInput):
     cur.execute(
         """
         INSERT INTO transactions
-        (transaction_type, party, amount, currency, original_message, sender)
-        VALUES (%s, %s, %s, %s, %s, %s)
+        (transaction_type, party, amount, currency, category, original_message, sender)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         RETURNING id, created_at;
         """,
         (
@@ -326,6 +326,7 @@ async def save_transaction(input_data: MessageInput):
             parsed["party"],
             parsed["amount"],
             parsed["currency"],
+            parsed["category"],
             parsed["original_message"],
             input_data.sender,
         ),
