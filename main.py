@@ -121,10 +121,18 @@ async def save_test_message(input_data: MessageInput):
 @app.post("/webhook/whatsapp")
 async def whatsapp_webhook(data: WhatsAppInput):
 
+    @app.post("/webhook/whatsapp")
+async def whatsapp_webhook(data: WhatsAppInput):
+
+    message_text = data.text
+    sender = data.from_user
+
     raw_data = {
-        "from_user": data.from_user,
-        "text": data.text
+        "from_user": sender,
+        "text": message_text
     }
+
+    parsed = parse_message(message_text)
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -138,23 +146,43 @@ async def whatsapp_webhook(data: WhatsAppInput):
         """,
         (
             "whatsapp",
-            data.from_user,
-            data.text,
+            sender,
+            message_text,
             json.dumps(raw_data)
         )
     )
 
     message_id = cur.fetchone()[0]
 
+    cur.execute(
+        """
+        INSERT INTO transactions
+        (transaction_type, party, amount, currency, category, original_message, sender)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        RETURNING id;
+        """,
+        (
+            parsed["type"],
+            parsed["party"],
+            parsed["amount"],
+            parsed["currency"],
+            parsed["category"],
+            parsed["original_message"],
+            sender,
+        )
+    )
+
+    transaction_id = cur.fetchone()[0]
+
     conn.commit()
     cur.close()
     conn.close()
 
     return {
-        "status": "received",
+        "status": "received_and_saved",
         "message_id": message_id,
-        "sender": data.from_user,
-        "message": data.text
+        "transaction_id": transaction_id,
+        **parsed
     }
 
 
