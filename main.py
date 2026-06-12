@@ -218,7 +218,10 @@ def parse_message(message: str) -> dict:
     elif re.search(r"\bse\b", lower_message) and (
         re.search(r"\bliye\b", lower_message)
         or re.search(r"\bliya\b", lower_message)
+        or re.search(r"\blia\b", lower_message)
+        or re.search(r"\bli\b", lower_message)
         or re.search(r"\bmila\b", lower_message)
+        or re.search(r"\bmile\b", lower_message)
         or re.search(r"\breceived\b", lower_message)
     ):
         transaction_type = "receipt"
