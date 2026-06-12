@@ -118,6 +118,22 @@ async def save_test_message(input_data: MessageInput):
     }
 
 
+VERIFY_TOKEN = "my_whatsapp_verify_token"
+
+
+@app.get("/webhook/whatsapp")
+def verify_whatsapp_webhook(request: Request):
+
+    mode = request.query_params.get("hub.mode")
+    token = request.query_params.get("hub.verify_token")
+    challenge = request.query_params.get("hub.challenge")
+
+    if mode == "subscribe" and token == VERIFY_TOKEN:
+        return int(challenge)
+
+    return {"error": "Verification failed"}
+
+
 @app.post("/webhook/whatsapp")
 async def whatsapp_webhook(data: WhatsAppInput):
 
