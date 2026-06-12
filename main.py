@@ -44,6 +44,7 @@ def create_tables():
             party TEXT,
             amount INTEGER,
             currency TEXT,
+            category TEXT,
             original_message TEXT,
             sender TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
