@@ -215,7 +215,7 @@ def parse_message(message: str) -> dict:
         if party_match:
             party = party_match.group(1).strip()
 
-        elif re.search(r"\bse\b", lower_message) and (
+    elif re.search(r"\bse\b", lower_message) and (
         re.search(r"\bliye\b", lower_message)
         or re.search(r"\bliya\b", lower_message)
         or re.search(r"\bmila\b", lower_message)
