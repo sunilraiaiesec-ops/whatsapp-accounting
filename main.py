@@ -344,7 +344,9 @@ async def _handle_image_message(
     cur.close()
     conn.close()
 
-    reply = format_delivery_confirmation(fields, employee["name"], status)
+    reply = format_delivery_confirmation(
+        fields, employee["name"], status, extraction_raw if isinstance(extraction_raw, dict) else None
+    )
     replied = await send_whatsapp_text(sender, reply)
 
     return {
@@ -828,6 +830,9 @@ def list_delivery_notes():
             "status": row["status"],
             "employee_name": row["employee_name"],
             "extraction_error": (row["extraction_raw"] or {}).get("error"),
+            "field_labels": (row["extraction_raw"] or {}).get("field_labels") or {},
+            "blank_on_form": (row["extraction_raw"] or {}).get("blank_on_form") or [],
+            "blank_field_labels": (row["extraction_raw"] or {}).get("blank_field_labels") or [],
             "created_at": str(row["created_at"]),
         }
         for row in rows
@@ -872,6 +877,9 @@ def deliveries_dashboard(request: Request):
     for row in deliveries:
         raw = row.get("extraction_raw") or {}
         row["extraction_error"] = raw.get("error")
+        row["field_labels"] = raw.get("field_labels") or {}
+        row["blank_on_form"] = raw.get("blank_on_form") or []
+        row["blank_field_labels"] = raw.get("blank_field_labels") or []
 
     return templates.TemplateResponse(
         request,

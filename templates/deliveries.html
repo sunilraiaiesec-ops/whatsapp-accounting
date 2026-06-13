@@ -67,6 +67,16 @@
       font-size: 0.9rem;
     }
     .error-hint { color: #c0392b; font-size: 0.75rem; margin-top: 4px; }
+    .blank-hint { color: #e67e22; font-size: 0.75rem; margin-top: 4px; }
+    .blank-tag {
+      display: inline-block;
+      background: #fef5e7;
+      color: #b9770e;
+      padding: 1px 6px;
+      border-radius: 4px;
+      margin: 2px 2px 0 0;
+      font-size: 0.7rem;
+    }
     .empty { text-align: center; padding: 40px; color: #999; background: #fff; border-radius: 10px; }
     .section-title { font-size: 1.1rem; margin-bottom: 12px; font-weight: 600; }
   </style>
@@ -113,6 +123,7 @@
         <th>Truck</th>
         <th>Driver</th>
         <th>Route</th>
+        <th>Left blank on form</th>
         <th>Submitted by</th>
         <th>Status</th>
       </tr>
@@ -132,6 +143,15 @@
         <td>{{ d.truck_number or "—" }}</td>
         <td>{{ d.driver_name or "—" }}</td>
         <td>{{ d.route_note or "—" }}</td>
+        <td>
+          {% if d.blank_field_labels %}
+            {% for label in d.blank_field_labels %}
+              <span class="blank-tag">{{ label }}</span>
+            {% endfor %}
+          {% else %}
+            —
+          {% endif %}
+        </td>
         <td>{{ d.employee_name or "—" }}</td>
         <td><span class="badge {{ d.status }}">{{ d.status }}</span>
           {% if d.extraction_error %}

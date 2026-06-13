@@ -28,34 +28,71 @@ DELIVERY_FIELDS = [
     "delivered_at",
 ]
 
-EXTRACTION_PROMPT = """You are reading a goods delivery note photo for RR FOODS SARL (Cameroon).
-Extract all handwritten and printed fields from this delivery note form.
-
-Return ONLY valid JSON with these keys (use null if missing or blank):
-{
-  "document_number": "string",
-  "document_type": "string",
-  "route_note": "string",
-  "client_name": "string",
-  "delivery_date": "string",
-  "description": "string",
-  "quantity": number or null,
-  "quantity_unit": "string",
-  "unit_weight": "string",
-  "total_weight": "string",
-  "truck_number": "string",
-  "driver_name": "string",
-  "driver_phone": "string",
-  "driver_id_number": "string",
-  "transporter": "string",
-  "delivered_at": "string"
+DEFAULT_FIELD_LABELS = {
+    "document_number": "Document No.",
+    "document_type": "Document Type",
+    "route_note": "Route",
+    "client_name": "Client Name",
+    "delivery_date": "Delivery Date",
+    "description": "Description",
+    "quantity": "Quantity",
+    "quantity_unit": "Quantity Unit",
+    "unit_weight": "Unit Weight",
+    "total_weight": "Total Weight",
+    "truck_number": "Truck No.",
+    "driver_name": "Driver Name",
+    "driver_phone": "Driver Phone",
+    "driver_id_number": "Driver ID",
+    "transporter": "Transporter",
+    "delivered_at": "Delivered At",
 }
 
-Rules:
+EXTRACTION_PROMPT = """You are reading a goods delivery note photo for RR FOODS SARL (Cameroon).
+The form has printed headings/labels with handwritten or typed values beside them.
+
+Return ONLY valid JSON with this structure:
+{
+  "document_number": "string or null",
+  "document_type": "string or null",
+  "route_note": "string or null",
+  "client_name": "string or null",
+  "delivery_date": "string or null",
+  "description": "string or null",
+  "quantity": number or null,
+  "quantity_unit": "string or null",
+  "unit_weight": "string or null",
+  "total_weight": "string or null",
+  "truck_number": "string or null",
+  "driver_name": "string or null",
+  "driver_phone": "string or null",
+  "driver_id_number": "string or null",
+  "transporter": "string or null",
+  "delivered_at": "string or null",
+  "field_labels": {
+    "document_number": "exact printed heading on form",
+    "client_name": "exact printed heading on form",
+    "...": "one entry per field key listed above"
+  },
+  "blank_on_form": ["field_key", "..."]
+}
+
+Rules for values:
+- Use null when the value area is empty, illegible, or not filled in
 - document_type is usually "Goods Delivery Note"
 - quantity should be a number only (e.g. 1280), not text
-- Keep names and text exactly as written on the form
+- Keep filled names and text exactly as written on the form
 - delivery_date as written on form (e.g. 09/06/2026)
+
+Rules for field_labels (IMPORTANT):
+- For EVERY field whose printed heading/label is visible on the form, add an entry to field_labels
+- Copy the heading text exactly as printed (English or French), e.g. "Client Name", "Nom du client", "Qty", "Poids total"
+- Include labels even when the warehouse manager left that field blank
+
+Rules for blank_on_form (IMPORTANT):
+- List field keys where the printed label IS visible on the form BUT no value was written in
+- Example: if "Driver Phone" label is printed but the phone box is empty, include "driver_phone"
+- Do NOT list fields that are not visible on this form at all
+- Use the same keys as the value fields above
 """
 
 
@@ -81,6 +118,47 @@ def normalize_delivery_fields(raw: dict) -> dict:
             value = value.strip() or None
         result[field] = value
     return result
+
+
+def parse_form_audit(raw: dict) -> dict:
+    labels = raw.get("field_labels") or {}
+    if not isinstance(labels, dict):
+        labels = {}
+
+    blank_keys = raw.get("blank_on_form") or []
+    if not isinstance(blank_keys, list):
+        blank_keys = []
+
+    normalized_labels: dict[str, str] = {}
+    for field in DELIVERY_FIELDS:
+        label = labels.get(field)
+        if isinstance(label, str) and label.strip():
+            normalized_labels[field] = label.strip()
+        elif field in labels:
+            normalized_labels[field] = DEFAULT_FIELD_LABELS[field]
+
+    blank_on_form = []
+    for key in blank_keys:
+        if isinstance(key, str) and key in DELIVERY_FIELDS and key not in blank_on_form:
+            blank_on_form.append(key)
+
+    blank_field_labels = [
+        normalized_labels.get(field) or DEFAULT_FIELD_LABELS[field]
+        for field in blank_on_form
+    ]
+
+    return {
+        "field_labels": normalized_labels,
+        "blank_on_form": blank_on_form,
+        "blank_field_labels": blank_field_labels,
+    }
+
+
+def blank_fields_summary(audit: dict) -> Optional[str]:
+    labels = audit.get("blank_field_labels") or []
+    if not labels:
+        return None
+    return ", ".join(labels)
 
 
 def delivery_status(fields: dict) -> str:
@@ -152,7 +230,13 @@ async def extract_delivery_note(
         text = data["candidates"][0]["content"]["parts"][0]["text"]
         raw = _parse_json_from_text(text)
         fields = normalize_delivery_fields(raw)
-        return fields, {"raw_response": raw, "caption": caption, "model": GEMINI_MODEL}
+        audit = parse_form_audit(raw)
+        return fields, {
+            "raw_response": raw,
+            "caption": caption,
+            "model": GEMINI_MODEL,
+            **audit,
+        }
     except (KeyError, IndexError, json.JSONDecodeError) as exc:
         empty = {field: None for field in DELIVERY_FIELDS}
         return empty, {

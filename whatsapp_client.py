@@ -82,7 +82,12 @@ async def download_whatsapp_media(media_id: str) -> tuple[bytes, str]:
         return media_response.content, mime_type.split(";")[0]
 
 
-def format_delivery_confirmation(fields: dict, employee_name: Optional[str], status: str) -> str:
+def format_delivery_confirmation(
+    fields: dict,
+    employee_name: Optional[str],
+    status: str,
+    audit: Optional[dict] = None,
+) -> str:
     logged_by = f"\nLogged by: {employee_name}" if employee_name else ""
     client = fields.get("client_name") or "unknown client"
     doc_no = fields.get("document_number") or "—"
@@ -90,19 +95,29 @@ def format_delivery_confirmation(fields: dict, employee_name: Optional[str], sta
     unit = fields.get("quantity_unit") or ""
     qty_text = f"{qty:,} {unit}".strip() if qty else "quantity unknown"
 
+    blank_summary = None
+    if audit:
+        labels = audit.get("blank_field_labels") or []
+        if labels:
+            blank_summary = ", ".join(labels)
+
     if status == "pending_review":
-        return (
+        msg = (
             "⚠️ Delivery note photo saved for review.\n"
             "We could not read all fields clearly. An admin will check it."
-            f"{logged_by}"
         )
+        if blank_summary:
+            msg += f"\n\nLeft blank on form: {blank_summary}"
+        return msg + logged_by
 
-    return (
+    msg = (
         f"✅ Delivery note #{doc_no} saved\n"
         f"Client: {client}\n"
         f"Qty: {qty_text}"
-        f"{logged_by}"
     )
+    if blank_summary:
+        msg += f"\n\n⚠️ Left blank on form: {blank_summary}"
+    return msg + logged_by
 
 
 async def send_whatsapp_text(to_phone: str, body: str) -> bool:
