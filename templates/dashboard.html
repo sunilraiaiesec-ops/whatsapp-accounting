@@ -114,6 +114,7 @@
         {% endfor %}
       </select>
     </form>
+    <a class="btn" href="/parties">Parties</a>
     <a class="btn" href="/deliveries">Delivery notes</a>
     <a class="btn" href="/docs">API Docs</a>
   </div>
@@ -137,7 +138,13 @@
       <tr>
         <td>{{ t.created_at.strftime("%Y-%m-%d %H:%M") if t.created_at else "" }}</td>
         <td><span class="badge {{ t.transaction_type }}">{{ t.transaction_type }}</span></td>
-        <td>{{ t.party or "—" }}</td>
+        <td>
+          {% if t.party_id %}
+            <a href="/parties/{{ t.party_id }}" style="color:#2980b9;text-decoration:none;">{{ t.party or "—" }}</a>
+          {% else %}
+            {{ t.party or "—" }}
+          {% endif %}
+        </td>
         <td>
           {% if t.amount %}{{ "{:,}".format(t.amount) }}{% else %}—{% endif %}
           {% if t.currency %} {{ t.currency }}{% endif %}

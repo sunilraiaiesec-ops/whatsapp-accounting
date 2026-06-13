@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Parties — WhatsApp Accounting</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f4f6f8;
+      color: #1a1a2e;
+      padding: 24px;
+      line-height: 1.5;
+    }
+    h1 { font-size: 1.5rem; margin-bottom: 4px; }
+    .subtitle { color: #666; margin-bottom: 24px; font-size: 0.9rem; }
+    .nav { margin-bottom: 20px; }
+    .nav a {
+      margin-right: 12px;
+      color: #2980b9;
+      text-decoration: none;
+      font-size: 0.9rem;
+    }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .card {
+      background: #fff;
+      border-radius: 10px;
+      padding: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    .card .label { font-size: 0.8rem; color: #888; text-transform: uppercase; }
+    .card .value { font-size: 1.6rem; font-weight: 700; margin-top: 4px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+      font-size: 0.85rem;
+    }
+    th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; }
+    th { background: #fafafa; font-weight: 600; color: #555; font-size: 0.75rem; text-transform: uppercase; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: capitalize;
+    }
+    .badge.customer { background: #ebf5fb; color: #2980b9; }
+    .badge.supplier { background: #fdecea; color: #c0392b; }
+    .badge.both { background: #f0f0f0; color: #555; }
+    .positive { color: #27ae60; font-weight: 600; }
+    .negative { color: #c0392b; font-weight: 600; }
+    .party-link { color: #2980b9; text-decoration: none; font-weight: 600; }
+    .party-link:hover { text-decoration: underline; }
+    .empty { text-align: center; padding: 40px; color: #999; background: #fff; border-radius: 10px; }
+    .section-title { font-size: 1.1rem; margin-bottom: 12px; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="nav">
+    <a href="/dashboard">← Cash transactions</a>
+    <a href="/deliveries">Delivery notes</a>
+    <a href="/docs">API Docs</a>
+  </div>
+
+  <h1>Parties</h1>
+  <p class="subtitle">Customers and suppliers — cash totals and deliveries linked by name</p>
+
+  <div class="cards">
+    <div class="card">
+      <div class="label">Total parties</div>
+      <div class="value">{{ summary.total_parties }}</div>
+    </div>
+    <div class="card">
+      <div class="label">With deliveries</div>
+      <div class="value">{{ summary.with_deliveries }}</div>
+    </div>
+    <div class="card">
+      <div class="label">With transactions</div>
+      <div class="value">{{ summary.with_transactions }}</div>
+    </div>
+  </div>
+
+  <div class="section-title">All parties</div>
+
+  {% if parties %}
+  <table>
+    <thead>
+      <tr>
+        <th>Party</th>
+        <th>Type</th>
+        <th>Received from them</th>
+        <th>Paid to them</th>
+        <th>Net cash</th>
+        <th>Deliveries</th>
+        <th>Qty delivered</th>
+        <th>Transactions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in parties %}
+      <tr>
+        <td><a class="party-link" href="/parties/{{ p.id }}">{{ p.name }}</a></td>
+        <td><span class="badge {{ p.party_type }}">{{ p.party_type }}</span></td>
+        <td>{{ "{:,}".format(p.total_received) }} FCFA</td>
+        <td>{{ "{:,}".format(p.total_paid) }} FCFA</td>
+        <td class="{% if p.net_cash > 0 %}positive{% elif p.net_cash < 0 %}negative{% endif %}">
+          {{ "{:,}".format(p.net_cash) }} FCFA
+        </td>
+        <td>{{ p.delivery_count }}</td>
+        <td>{% if p.total_quantity_delivered %}{{ "{:,}".format(p.total_quantity_delivered) }}{% else %}—{% endif %}</td>
+        <td>{{ p.transaction_count }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">
+    No parties yet. They appear automatically when you log cash transactions or delivery notes with a client name.
+  </div>
+  {% endif %}
+</body>
+</html>

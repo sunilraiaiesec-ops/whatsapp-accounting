@@ -84,6 +84,7 @@
 <body>
   <div class="nav">
     <a href="/dashboard">← Cash transactions</a>
+    <a href="/parties">Parties</a>
     <a href="/docs">API Docs</a>
   </div>
 
@@ -134,7 +135,13 @@
       <tr>
         <td>{{ d.created_at.strftime("%Y-%m-%d %H:%M") if d.created_at else "" }}</td>
         <td>{{ d.document_number or "—" }}</td>
-        <td>{{ d.client_name or "—" }}</td>
+        <td>
+          {% if d.party_id %}
+            <a href="/parties/{{ d.party_id }}" style="color:#2980b9;text-decoration:none;">{{ d.client_name or "—" }}</a>
+          {% else %}
+            {{ d.client_name or "—" }}
+          {% endif %}
+        </td>
         <td>{{ d.description or "—" }}</td>
         <td>
           {% if d.quantity %}{{ "{:,}".format(d.quantity) }}{% else %}—{% endif %}

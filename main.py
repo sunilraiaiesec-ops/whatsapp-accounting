@@ -19,6 +19,14 @@ from db import (
 )
 from delivery_extractor import delivery_status, extract_delivery_note
 from models import EmployeeInput, EmployeeUpdate, MessageInput
+from parties import (
+    format_party_balance_line,
+    get_party_detail,
+    insert_transaction,
+    list_parties_with_balances,
+    resolve_party_for_delivery,
+    resolve_party_for_transaction,
+)
 from parser import parse_message, transaction_status
 from whatsapp_client import (
     download_whatsapp_media,
@@ -53,7 +61,7 @@ def home():
         "database": "connected",
         "stage": "1-team-pilot",
         "parser_version": PARSER_VERSION,
-        "features": ["text_transactions", "delivery_note_photos"],
+        "features": ["text_transactions", "delivery_note_photos", "party_ledger"],
         "gemini_configured": bool(os.environ.get("GOOGLE_API_KEY")),
         "gemini_model": os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"),
     }
@@ -89,28 +97,13 @@ async def save_test_message(input_data: MessageInput):
     )
     message_id = cur.fetchone()[0]
 
-    cur.execute(
-        """
-        INSERT INTO transactions
-        (business_id, transaction_type, party, amount, currency, category,
-         original_message, sender, employee_id, status)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        RETURNING id;
-        """,
-        (
-            DEFAULT_BUSINESS_ID,
-            parsed["type"],
-            parsed["party"],
-            parsed["amount"],
-            parsed["currency"],
-            parsed["category"],
-            parsed["original_message"],
-            sender,
-            employee["id"] if employee else None,
-            status,
-        ),
+    transaction_id, party_id = insert_transaction(
+        cur,
+        parsed,
+        sender,
+        employee["id"] if employee else None,
+        status,
     )
-    transaction_id = cur.fetchone()[0]
 
     conn.commit()
     cur.close()
@@ -208,34 +201,20 @@ async def _handle_text_message(sender, message_text, whatsapp_message_id, employ
     )
     message_id = cur.fetchone()[0]
 
-    cur.execute(
-        """
-        INSERT INTO transactions
-        (business_id, transaction_type, party, amount, currency, category,
-         original_message, sender, employee_id, status, whatsapp_message_id)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        RETURNING id;
-        """,
-        (
-            DEFAULT_BUSINESS_ID,
-            parsed["type"],
-            parsed["party"],
-            parsed["amount"],
-            parsed["currency"],
-            parsed["category"],
-            parsed["original_message"],
-            sender,
-            employee["id"],
-            status,
-            whatsapp_message_id,
-        ),
+    transaction_id, party_id = insert_transaction(
+        cur,
+        parsed,
+        sender,
+        employee["id"],
+        status,
+        whatsapp_message_id=whatsapp_message_id,
     )
-    transaction_id = cur.fetchone()[0]
     conn.commit()
     cur.close()
     conn.close()
 
-    reply = format_confirmation(parsed, employee["name"], status)
+    party_balance = format_party_balance_line(party_id) if party_id else None
+    reply = format_confirmation(parsed, employee["name"], status, party_balance)
     replied = await send_whatsapp_text(sender, reply)
 
     return {
@@ -301,21 +280,24 @@ async def _handle_image_message(
     )
     message_id = cur.fetchone()[0]
 
+    party_id = resolve_party_for_delivery(cur, fields.get("client_name"))
+
     cur.execute(
         """
         INSERT INTO delivery_notes
-        (business_id, employee_id, sender, whatsapp_message_id, whatsapp_media_id,
+        (business_id, employee_id, party_id, sender, whatsapp_message_id, whatsapp_media_id,
          document_number, document_type, route_note, client_name, delivery_date,
          description, quantity, quantity_unit, unit_weight, total_weight,
          truck_number, driver_name, driver_phone, driver_id_number,
          transporter, delivered_at, status, extraction_raw)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s, %s, %s)
+                %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id;
         """,
         (
             DEFAULT_BUSINESS_ID,
             employee["id"],
+            party_id,
             sender,
             whatsapp_message_id,
             media_id,
@@ -403,30 +385,15 @@ async def save_transaction(input_data: MessageInput):
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute(
-        """
-        INSERT INTO transactions
-        (business_id, transaction_type, party, amount, currency, category,
-         original_message, sender, employee_id, status)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        RETURNING id, created_at;
-        """,
-        (
-            DEFAULT_BUSINESS_ID,
-            parsed["type"],
-            parsed["party"],
-            parsed["amount"],
-            parsed["currency"],
-            parsed["category"],
-            parsed["original_message"],
-            input_data.sender,
-            employee["id"] if employee else None,
-            status,
-        ),
+    transaction_id, party_id = insert_transaction(
+        cur,
+        parsed,
+        input_data.sender,
+        employee["id"] if employee else None,
+        status,
     )
-
-    row = cur.fetchone()
-    transaction_id, created_at = row[0], row[1]
+    cur.execute("SELECT created_at FROM transactions WHERE id = %s;", (transaction_id,))
+    created_at = cur.fetchone()[0]
 
     conn.commit()
     cur.close()
@@ -435,6 +402,7 @@ async def save_transaction(input_data: MessageInput):
     return {
         "status": "saved",
         "transaction_id": transaction_id,
+        "party_id": party_id,
         "created_at": str(created_at),
         "review_status": status,
         **parsed,
@@ -861,7 +829,7 @@ def deliveries_dashboard(request: Request):
             d.id, d.document_number, d.client_name, d.delivery_date,
             d.description, d.quantity, d.quantity_unit, d.total_weight,
             d.truck_number, d.driver_name, d.driver_phone, d.route_note, d.status,
-            d.extraction_raw, d.created_at, e.name AS employee_name
+            d.party_id, d.extraction_raw, d.created_at, e.name AS employee_name
         FROM delivery_notes d
         LEFT JOIN employees e ON e.id = d.employee_id
         WHERE d.business_id = %s
@@ -892,6 +860,55 @@ def deliveries_dashboard(request: Request):
     )
 
 
+@app.get("/parties", response_class=HTMLResponse)
+def parties_dashboard(request: Request):
+    parties = list_parties_with_balances()
+    summary = {
+        "total_parties": len(parties),
+        "with_deliveries": sum(1 for p in parties if p["delivery_count"] > 0),
+        "with_transactions": sum(1 for p in parties if p["transaction_count"] > 0),
+    }
+    return templates.TemplateResponse(
+        request,
+        "parties.html",
+        {"parties": parties, "summary": summary},
+    )
+
+
+@app.get("/parties/{party_id}", response_class=HTMLResponse)
+def party_detail_page(request: Request, party_id: int):
+    party = get_party_detail(party_id)
+    if not party:
+        raise HTTPException(status_code=404, detail="Party not found")
+    return templates.TemplateResponse(
+        request,
+        "party_detail.html",
+        {"party": party},
+    )
+
+
+@app.get("/parties-list")
+def list_parties_api():
+    return list_parties_with_balances()
+
+
+@app.get("/parties/{party_id}/detail")
+def get_party_api(party_id: int):
+    party = get_party_detail(party_id)
+    if not party:
+        raise HTTPException(status_code=404, detail="Party not found")
+    return {
+        **party,
+        "created_at": str(party["created_at"]) if party.get("created_at") else None,
+        "transactions": [
+            {**t, "created_at": str(t["created_at"])} for t in party["transactions"]
+        ],
+        "deliveries": [
+            {**d, "created_at": str(d["created_at"])} for d in party["deliveries"]
+        ],
+    }
+
+
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard(request: Request, employee_id: Optional[int] = None):
     conn = get_db_connection()
@@ -917,7 +934,7 @@ def dashboard(request: Request, employee_id: Optional[int] = None):
 
     query = """
         SELECT
-            t.id, t.transaction_type, t.party, t.amount, t.currency,
+            t.id, t.transaction_type, t.party, t.party_id, t.amount, t.currency,
             t.category, t.original_message, t.status, t.created_at,
             e.name AS employee_name
         FROM transactions t

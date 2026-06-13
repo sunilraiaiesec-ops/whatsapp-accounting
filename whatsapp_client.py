@@ -19,7 +19,12 @@ def format_amount(amount: Optional[int], currency: Optional[str]) -> str:
     return " ".join(parts)
 
 
-def format_confirmation(parsed: dict, employee_name: Optional[str], status: str) -> str:
+def format_confirmation(
+    parsed: dict,
+    employee_name: Optional[str],
+    status: str,
+    party_balance: Optional[str] = None,
+) -> str:
     type_labels = {
         "expense": "Expense",
         "receipt": "Receipt",
@@ -47,7 +52,8 @@ def format_confirmation(parsed: dict, employee_name: Optional[str], status: str)
 
     return (
         f"✅ Saved: {label} {amount_text} → {party}{category_text}"
-        f"{logged_by}"
+        + (f"\n{party_balance}" if party_balance else "")
+        + logged_by
     )
 
 
