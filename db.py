@@ -83,18 +83,6 @@ def create_tables():
     for statement in migrations:
         cur.execute(statement)
 
-    cur.execute(
-        "UPDATE messages SET business_id = %s WHERE business_id IS NULL;",
-        (DEFAULT_BUSINESS_ID,),
-    )
-    cur.execute(
-        "UPDATE transactions SET business_id = %s WHERE business_id IS NULL;",
-        (DEFAULT_BUSINESS_ID,),
-    )
-    cur.execute(
-        "UPDATE transactions SET status = 'confirmed' WHERE status IS NULL;"
-    )
-
     business_name = os.environ.get("BUSINESS_NAME", "My Business")
     cur.execute("SELECT id FROM businesses WHERE id = %s;", (DEFAULT_BUSINESS_ID,))
     if not cur.fetchone():
@@ -106,6 +94,18 @@ def create_tables():
             "SELECT setval(pg_get_serial_sequence('businesses', 'id'), "
             "GREATEST((SELECT MAX(id) FROM businesses), 1));"
         )
+
+    cur.execute(
+        "UPDATE messages SET business_id = %s WHERE business_id IS NULL;",
+        (DEFAULT_BUSINESS_ID,),
+    )
+    cur.execute(
+        "UPDATE transactions SET business_id = %s WHERE business_id IS NULL;",
+        (DEFAULT_BUSINESS_ID,),
+    )
+    cur.execute(
+        "UPDATE transactions SET status = 'confirmed' WHERE status IS NULL;"
+    )
 
     conn.commit()
     cur.close()

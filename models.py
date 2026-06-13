@@ -1,3 +1,5 @@
+from typing import Optional
+
 from pydantic import BaseModel
 
 
@@ -9,4 +11,4 @@ class MessageInput(BaseModel):
 class EmployeeInput(BaseModel):
     phone: str
     name: str
-    role: str | None = None
+    role: Optional[str] = None

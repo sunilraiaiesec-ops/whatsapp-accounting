@@ -6,6 +6,7 @@ import psycopg2.extras
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from typing import Optional
 
 from db import (
     DEFAULT_BUSINESS_ID,
@@ -289,7 +290,7 @@ async def save_transaction(input_data: MessageInput):
 
 
 @app.get("/transactions")
-def get_transactions(status: str | None = None):
+def get_transactions(status: Optional[str] = None):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
@@ -583,7 +584,7 @@ def confirm_transaction(transaction_id: int):
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
-def dashboard(request: Request, employee_id: int | None = None):
+def dashboard(request: Request, employee_id: Optional[int] = None):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 

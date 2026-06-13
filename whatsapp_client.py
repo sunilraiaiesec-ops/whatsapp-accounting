@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 
 import httpx
 
@@ -7,7 +8,7 @@ WHATSAPP_PHONE_NUMBER_ID = os.environ.get("WHATSAPP_PHONE_NUMBER_ID")
 WHATSAPP_API_VERSION = os.environ.get("WHATSAPP_API_VERSION", "v21.0")
 
 
-def format_amount(amount: int | None, currency: str | None) -> str:
+def format_amount(amount: Optional[int], currency: Optional[str]) -> str:
     if amount is None:
         return "unknown amount"
     parts = [f"{amount:,}"]
@@ -16,7 +17,7 @@ def format_amount(amount: int | None, currency: str | None) -> str:
     return " ".join(parts)
 
 
-def format_confirmation(parsed: dict, employee_name: str | None, status: str) -> str:
+def format_confirmation(parsed: dict, employee_name: Optional[str], status: str) -> str:
     type_labels = {
         "expense": "Expense",
         "receipt": "Receipt",
