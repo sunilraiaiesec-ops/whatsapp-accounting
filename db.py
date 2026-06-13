@@ -101,10 +101,25 @@ def create_tables():
     """)
 
     cur.execute("""
+        CREATE TABLE IF NOT EXISTS products (
+            id SERIAL PRIMARY KEY,
+            business_id INTEGER REFERENCES businesses(id),
+            name TEXT NOT NULL,
+            normalized_name TEXT NOT NULL,
+            default_unit TEXT,
+            default_unit_price_fcfa INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (business_id, normalized_name)
+        );
+    """)
+
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS delivery_notes (
             id SERIAL PRIMARY KEY,
             business_id INTEGER REFERENCES businesses(id),
             employee_id INTEGER REFERENCES employees(id),
+            party_id INTEGER REFERENCES parties(id),
+            product_id INTEGER REFERENCES products(id),
             sender TEXT,
             whatsapp_message_id TEXT UNIQUE,
             whatsapp_media_id TEXT,
@@ -118,6 +133,8 @@ def create_tables():
             quantity_unit TEXT,
             unit_weight TEXT,
             total_weight TEXT,
+            unit_price_fcfa INTEGER,
+            line_total_fcfa INTEGER,
             truck_number TEXT,
             driver_name TEXT,
             driver_phone TEXT,
@@ -141,6 +158,9 @@ def create_tables():
         "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS party_id INTEGER REFERENCES parties(id);",
         "ALTER TABLE delivery_notes ADD COLUMN IF NOT EXISTS party_id INTEGER REFERENCES parties(id);",
         "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS category_id INTEGER REFERENCES categories(id);",
+        "ALTER TABLE delivery_notes ADD COLUMN IF NOT EXISTS product_id INTEGER REFERENCES products(id);",
+        "ALTER TABLE delivery_notes ADD COLUMN IF NOT EXISTS unit_price_fcfa INTEGER;",
+        "ALTER TABLE delivery_notes ADD COLUMN IF NOT EXISTS line_total_fcfa INTEGER;",
     ]
     for statement in migrations:
         cur.execute(statement)
@@ -179,6 +199,10 @@ def create_tables():
     seed_categories()
     backfill_party_links()
     backfill_category_links()
+
+    from products import backfill_delivery_products
+
+    backfill_delivery_products()
 
 
 def can_submit_delivery_note(employee: dict) -> bool:

@@ -87,6 +87,14 @@
       </div>
     </div>
     <div class="card">
+      <div class="label">Goods delivered</div>
+      <div class="value">{{ "{:,}".format(party.total_goods_value) }} FCFA</div>
+    </div>
+    <div class="card">
+      <div class="label">Still owed</div>
+      <div class="value negative">{% if party.amount_owed %}{{ "{:,}".format(party.amount_owed) }} FCFA{% else %}—{% endif %}</div>
+    </div>
+    <div class="card">
       <div class="label">Deliveries</div>
       <div class="value">{{ party.delivery_count }}</div>
     </div>
@@ -126,6 +134,28 @@
   <div class="empty">No cash transactions linked to this party yet.</div>
   {% endif %}
 
+  {% if party.products_summary %}
+  <div class="section-title">Products delivered</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Product</th>
+        <th>Total qty</th>
+        <th>Total value</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in party.products_summary %}
+      <tr>
+        <td>{{ row.name }}</td>
+        <td>{{ "{:,}".format(row.total_quantity) }}</td>
+        <td>{% if row.total_value %}{{ "{:,}".format(row.total_value) }} FCFA{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
   <div class="section-title">Delivery notes</div>
   {% if party.deliveries %}
   <table>
@@ -135,6 +165,7 @@
         <th>Doc #</th>
         <th>Description</th>
         <th>Qty</th>
+        <th>Value</th>
         <th>Weight</th>
         <th>Status</th>
       </tr>
@@ -144,11 +175,12 @@
       <tr>
         <td>{{ d.created_at.strftime("%Y-%m-%d %H:%M") if d.created_at else "" }}</td>
         <td>{{ d.document_number or "—" }}</td>
-        <td>{{ d.description or "—" }}</td>
+        <td>{{ d.product_name or d.description or "—" }}</td>
         <td>
           {% if d.quantity %}{{ "{:,}".format(d.quantity) }}{% else %}—{% endif %}
           {% if d.quantity_unit %} {{ d.quantity_unit }}{% endif %}
         </td>
+        <td>{% if d.line_total_fcfa %}{{ "{:,}".format(d.line_total_fcfa) }} FCFA{% else %}—{% endif %}</td>
         <td>{{ d.total_weight or "—" }}</td>
         <td><span class="badge {{ d.status }}">{{ d.status }}</span></td>
       </tr>

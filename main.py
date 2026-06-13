@@ -18,8 +18,14 @@ from db import (
     normalize_phone,
 )
 from categories import get_category_summary, list_categories
+from products import (
+    get_weekly_deliveries_by_client,
+    list_products,
+    prepare_delivery_product_fields,
+    update_product_price,
+)
 from delivery_extractor import delivery_status, extract_delivery_note
-from models import EmployeeInput, EmployeeUpdate, MessageInput
+from models import EmployeeInput, EmployeeUpdate, MessageInput, ProductUpdate
 from parties import (
     format_party_balance_line,
     get_party_detail,
@@ -62,7 +68,13 @@ def home():
         "database": "connected",
         "stage": "1-team-pilot",
         "parser_version": PARSER_VERSION,
-        "features": ["text_transactions", "delivery_note_photos", "party_ledger", "categories"],
+        "features": [
+            "text_transactions",
+            "delivery_note_photos",
+            "party_ledger",
+            "categories",
+            "delivery_products",
+        ],
         "gemini_configured": bool(os.environ.get("GOOGLE_API_KEY")),
         "gemini_model": os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"),
     }
@@ -282,23 +294,26 @@ async def _handle_image_message(
     message_id = cur.fetchone()[0]
 
     party_id = resolve_party_for_delivery(cur, fields.get("client_name"))
+    product_meta = prepare_delivery_product_fields(cur, fields)
 
     cur.execute(
         """
         INSERT INTO delivery_notes
-        (business_id, employee_id, party_id, sender, whatsapp_message_id, whatsapp_media_id,
+        (business_id, employee_id, party_id, product_id, sender, whatsapp_message_id, whatsapp_media_id,
          document_number, document_type, route_note, client_name, delivery_date,
          description, quantity, quantity_unit, unit_weight, total_weight,
+         unit_price_fcfa, line_total_fcfa,
          truck_number, driver_name, driver_phone, driver_id_number,
          transporter, delivered_at, status, extraction_raw)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id;
         """,
         (
             DEFAULT_BUSINESS_ID,
             employee["id"],
             party_id,
+            product_meta["product_id"],
             sender,
             whatsapp_message_id,
             media_id,
@@ -312,6 +327,8 @@ async def _handle_image_message(
             fields.get("quantity_unit"),
             fields.get("unit_weight"),
             fields.get("total_weight"),
+            product_meta["unit_price_fcfa"],
+            product_meta["line_total_fcfa"],
             fields.get("truck_number"),
             fields.get("driver_name"),
             fields.get("driver_phone"),
@@ -327,9 +344,16 @@ async def _handle_image_message(
     cur.close()
     conn.close()
 
+    fields["line_total_fcfa"] = product_meta["line_total_fcfa"]
+    fields["unit_price_fcfa"] = product_meta["unit_price_fcfa"]
+
     reply = format_delivery_confirmation(
         fields, employee["name"], status, extraction_raw if isinstance(extraction_raw, dict) else None
     )
+    if party_id and status == "confirmed":
+        balance_line = format_party_balance_line(party_id)
+        if balance_line:
+            reply += f"\n\n{balance_line}"
     replied = await send_whatsapp_text(sender, reply)
 
     return {
@@ -830,9 +854,12 @@ def deliveries_dashboard(request: Request):
             d.id, d.document_number, d.client_name, d.delivery_date,
             d.description, d.quantity, d.quantity_unit, d.total_weight,
             d.truck_number, d.driver_name, d.driver_phone, d.route_note, d.status,
-            d.party_id, d.extraction_raw, d.created_at, e.name AS employee_name
+            d.party_id, d.line_total_fcfa, d.unit_price_fcfa,
+            pr.name AS product_name,
+            d.extraction_raw, d.created_at, e.name AS employee_name
         FROM delivery_notes d
         LEFT JOIN employees e ON e.id = d.employee_id
+        LEFT JOIN products pr ON pr.id = d.product_id
         WHERE d.business_id = %s
         ORDER BY d.id DESC
         LIMIT 100;
@@ -850,15 +877,50 @@ def deliveries_dashboard(request: Request):
         row["blank_on_form"] = raw.get("blank_on_form") or []
         row["blank_field_labels"] = raw.get("blank_field_labels") or []
 
+    weekly_deliveries = get_weekly_deliveries_by_client()
+
     return templates.TemplateResponse(
         request,
         "deliveries.html",
         {
             "summary": summary,
             "deliveries": deliveries,
+            "weekly_deliveries": weekly_deliveries,
             "gemini_configured": bool(os.environ.get("GOOGLE_API_KEY")),
         },
     )
+
+
+@app.get("/products", response_class=HTMLResponse)
+def products_dashboard(request: Request):
+    products = list_products()
+    return templates.TemplateResponse(
+        request,
+        "products.html",
+        {"products": products},
+    )
+
+
+@app.get("/products-list")
+def products_api():
+    return list_products()
+
+
+@app.patch("/products/{product_id}")
+def patch_product(product_id: int, data: ProductUpdate):
+    if data.default_unit_price_fcfa is None:
+        raise HTTPException(status_code=400, detail="default_unit_price_fcfa is required")
+    if data.default_unit_price_fcfa < 0:
+        raise HTTPException(status_code=400, detail="Price must be zero or positive")
+    product = update_product_price(product_id, data.default_unit_price_fcfa)
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return product
+
+
+@app.get("/deliveries/weekly-by-client")
+def weekly_deliveries_api():
+    return get_weekly_deliveries_by_client()
 
 
 @app.get("/categories", response_class=HTMLResponse)

@@ -156,7 +156,8 @@ def _party_balance_sql() -> str:
             COALESCE(tx.total_paid, 0) AS total_paid,
             COALESCE(tx.transaction_count, 0) AS transaction_count,
             COALESCE(dn.delivery_count, 0) AS delivery_count,
-            COALESCE(dn.total_quantity, 0) AS total_quantity_delivered
+            COALESCE(dn.total_quantity, 0) AS total_quantity_delivered,
+            COALESCE(dn.total_goods_value, 0) AS total_goods_value
         FROM parties p
         LEFT JOIN (
             SELECT
@@ -177,9 +178,10 @@ def _party_balance_sql() -> str:
             SELECT
                 party_id,
                 COUNT(*) AS delivery_count,
-                COALESCE(SUM(quantity), 0) AS total_quantity
+                COALESCE(SUM(quantity), 0) AS total_quantity,
+                COALESCE(SUM(line_total_fcfa), 0) AS total_goods_value
             FROM delivery_notes
-            WHERE business_id = %s AND party_id IS NOT NULL
+            WHERE business_id = %s AND party_id IS NOT NULL AND status = 'confirmed'
             GROUP BY party_id
         ) dn ON dn.party_id = p.id
         WHERE p.business_id = %s
@@ -201,11 +203,14 @@ def list_parties_with_balances(business_id: int = DEFAULT_BUSINESS_ID) -> list[d
     for row in rows:
         total_received = int(row["total_received"] or 0)
         total_paid = int(row["total_paid"] or 0)
+        total_goods = int(row["total_goods_value"] or 0)
         result.append({
             **dict(row),
             "net_cash": total_received - total_paid,
             "total_received": total_received,
             "total_paid": total_paid,
+            "total_goods_value": total_goods,
+            "amount_owed": max(total_goods - total_received, 0),
             "transaction_count": int(row["transaction_count"] or 0),
             "delivery_count": int(row["delivery_count"] or 0),
             "total_quantity_delivered": int(row["total_quantity_delivered"] or 0),
@@ -229,6 +234,7 @@ def get_party_detail(party_id: int, business_id: int = DEFAULT_BUSINESS_ID) -> O
 
     total_received = int(party["total_received"] or 0)
     total_paid = int(party["total_paid"] or 0)
+    total_goods = int(party["total_goods_value"] or 0)
 
     cur.execute(
         """
@@ -245,16 +251,34 @@ def get_party_detail(party_id: int, business_id: int = DEFAULT_BUSINESS_ID) -> O
 
     cur.execute(
         """
-        SELECT id, document_number, client_name, description, quantity,
-               quantity_unit, total_weight, status, created_at
-        FROM delivery_notes
-        WHERE business_id = %s AND party_id = %s
-        ORDER BY id DESC
+        SELECT
+            dn.id, dn.document_number, dn.client_name, dn.description, dn.quantity,
+            dn.quantity_unit, dn.total_weight, dn.unit_price_fcfa, dn.line_total_fcfa,
+            dn.status, dn.created_at,
+            pr.name AS product_name
+        FROM delivery_notes dn
+        LEFT JOIN products pr ON pr.id = dn.product_id
+        WHERE dn.business_id = %s AND dn.party_id = %s
+        ORDER BY dn.id DESC
         LIMIT 100;
         """,
         (business_id, party_id),
     )
     deliveries = cur.fetchall()
+
+    cur.execute(
+        """
+        SELECT pr.name, COALESCE(SUM(dn.quantity), 0) AS total_quantity,
+               COALESCE(SUM(dn.line_total_fcfa), 0) AS total_value
+        FROM delivery_notes dn
+        JOIN products pr ON pr.id = dn.product_id
+        WHERE dn.business_id = %s AND dn.party_id = %s AND dn.status = 'confirmed'
+        GROUP BY pr.id, pr.name
+        ORDER BY total_quantity DESC;
+        """,
+        (business_id, party_id),
+    )
+    products_summary = cur.fetchall()
 
     cur.close()
     conn.close()
@@ -264,8 +288,11 @@ def get_party_detail(party_id: int, business_id: int = DEFAULT_BUSINESS_ID) -> O
         "net_cash": total_received - total_paid,
         "total_received": total_received,
         "total_paid": total_paid,
+        "total_goods_value": total_goods,
+        "amount_owed": max(total_goods - total_received, 0),
         "transactions": [dict(row) for row in transactions],
         "deliveries": [dict(row) for row in deliveries],
+        "products_summary": [dict(row) for row in products_summary],
     }
 
 
@@ -311,10 +338,18 @@ def format_party_balance_line(party_id: int, business_id: int = DEFAULT_BUSINESS
     detail = get_party_detail(party_id, business_id)
     if not detail:
         return None
-    net = detail["net_cash"]
     name = detail["name"]
+    lines = []
+    if detail.get("total_goods_value"):
+        lines.append(f"Goods delivered: {detail['total_goods_value']:,} FCFA")
+        owed = detail.get("amount_owed", 0)
+        if owed:
+            lines.append(f"Still owed: {owed:,} FCFA")
+    net = detail["net_cash"]
     if net > 0:
-        return f"{name} balance: {net:,} FCFA received from them (net)"
-    if net < 0:
-        return f"{name} balance: {abs(net):,} FCFA paid to them (net)"
-    return f"{name} balance: 0 FCFA (even)"
+        lines.append(f"Cash net received: {net:,} FCFA")
+    elif net < 0:
+        lines.append(f"Cash net paid: {abs(net):,} FCFA")
+    if not lines:
+        return f"{name} balance: 0 FCFA (even)"
+    return f"{name} — " + " · ".join(lines)

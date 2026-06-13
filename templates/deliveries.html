@@ -85,6 +85,7 @@
   <div class="nav">
     <a href="/dashboard">← Cash transactions</a>
     <a href="/parties">Parties</a>
+    <a href="/products">Products</a>
     <a href="/categories">Categories</a>
     <a href="/docs">API Docs</a>
   </div>
@@ -110,6 +111,30 @@
     </div>
   </div>
 
+  {% if weekly_deliveries %}
+  <div class="section-title">This week by client</div>
+  <table style="margin-bottom: 24px;">
+    <thead>
+      <tr>
+        <th>Client</th>
+        <th>Deliveries</th>
+        <th>Quantity</th>
+        <th>Goods value</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for w in weekly_deliveries %}
+      <tr>
+        <td><a href="/parties/{{ w.party_id }}" style="color:#2980b9;text-decoration:none;">{{ w.client_name }}</a></td>
+        <td>{{ w.delivery_count }}</td>
+        <td>{{ "{:,}".format(w.total_quantity) }}</td>
+        <td>{% if w.total_goods_value %}{{ "{:,}".format(w.total_goods_value) }} FCFA{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
   <div class="section-title">Recent delivery notes</div>
 
   {% if deliveries %}
@@ -121,6 +146,7 @@
         <th>Client</th>
         <th>Description</th>
         <th>Qty</th>
+        <th>Goods value</th>
         <th>Weight</th>
         <th>Truck</th>
         <th>Driver</th>
@@ -148,6 +174,7 @@
           {% if d.quantity %}{{ "{:,}".format(d.quantity) }}{% else %}—{% endif %}
           {% if d.quantity_unit %} {{ d.quantity_unit }}{% endif %}
         </td>
+        <td>{% if d.line_total_fcfa %}{{ "{:,}".format(d.line_total_fcfa) }} FCFA{% else %}—{% endif %}</td>
         <td>{{ d.total_weight or d.unit_weight or "—" }}</td>
         <td>{{ d.truck_number or "—" }}</td>
         <td>{{ d.driver_name or "—" }}</td>

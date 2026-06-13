@@ -14,6 +14,10 @@ class EmployeeInput(BaseModel):
     role: Optional[str] = None
 
 
+class ProductUpdate(BaseModel):
+    default_unit_price_fcfa: Optional[int] = None
+
+
 class EmployeeUpdate(BaseModel):
     name: Optional[str] = None
     role: Optional[str] = None

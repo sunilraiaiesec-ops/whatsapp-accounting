@@ -154,6 +154,8 @@ def format_delivery_confirmation(
         msg = header + "\n".join(receipt_lines)
     else:
         msg = header + "No fields could be read from the photo."
+    if fields.get("line_total_fcfa"):
+        msg += f"\nGoods value: {fields['line_total_fcfa']:,} FCFA"
     if blank_summary:
         msg += f"\n\n⚠️ Left blank on form: {blank_summary}"
     return msg + logged_by

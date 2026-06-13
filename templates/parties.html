@@ -70,6 +70,7 @@
   <div class="nav">
     <a href="/dashboard">← Cash transactions</a>
     <a href="/categories">Categories</a>
+    <a href="/products">Products</a>
     <a href="/deliveries">Delivery notes</a>
     <a href="/docs">API Docs</a>
   </div>
@@ -103,6 +104,8 @@
         <th>Received from them</th>
         <th>Paid to them</th>
         <th>Net cash</th>
+        <th>Goods delivered</th>
+        <th>Still owed</th>
         <th>Deliveries</th>
         <th>Qty delivered</th>
         <th>Transactions</th>
@@ -118,6 +121,8 @@
         <td class="{% if p.net_cash > 0 %}positive{% elif p.net_cash < 0 %}negative{% endif %}">
           {{ "{:,}".format(p.net_cash) }} FCFA
         </td>
+        <td>{% if p.total_goods_value %}{{ "{:,}".format(p.total_goods_value) }} FCFA{% else %}—{% endif %}</td>
+        <td class="negative">{% if p.amount_owed %}{{ "{:,}".format(p.amount_owed) }} FCFA{% else %}—{% endif %}</td>
         <td>{{ p.delivery_count }}</td>
         <td>{% if p.total_quantity_delivered %}{{ "{:,}".format(p.total_quantity_delivered) }}{% else %}—{% endif %}</td>
         <td>{{ p.transaction_count }}</td>

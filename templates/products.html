@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Products — WhatsApp Accounting</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f4f6f8;
+      color: #1a1a2e;
+      padding: 24px;
+      line-height: 1.5;
+    }
+    h1 { font-size: 1.5rem; margin-bottom: 4px; }
+    .subtitle { color: #666; margin-bottom: 24px; font-size: 0.9rem; }
+    .nav { margin-bottom: 20px; }
+    .nav a { margin-right: 12px; color: #2980b9; text-decoration: none; font-size: 0.9rem; }
+    .hint {
+      background: #fff;
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin-bottom: 20px;
+      font-size: 0.9rem;
+      color: #555;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+      font-size: 0.85rem;
+    }
+    th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; }
+    th { background: #fafafa; font-weight: 600; color: #555; font-size: 0.75rem; text-transform: uppercase; }
+    .empty { text-align: center; padding: 40px; color: #999; background: #fff; border-radius: 10px; }
+    code { background: #f0f0f0; padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <div class="nav">
+    <a href="/dashboard">← Cash transactions</a>
+    <a href="/deliveries">Delivery notes</a>
+    <a href="/parties">Parties</a>
+    <a href="/docs">API Docs</a>
+  </div>
+
+  <h1>Products</h1>
+  <p class="subtitle">Auto-created from delivery note descriptions — set unit prices to calculate goods value</p>
+
+  <div class="hint">
+    Set a price with the API: <code>PATCH /products/{id}</code> body
+    <code>{"default_unit_price_fcfa": 15000}</code>.
+    Past confirmed deliveries for that product are recalculated automatically.
+  </div>
+
+  {% if products %}
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Product</th>
+        <th>Unit</th>
+        <th>Unit price (FCFA)</th>
+        <th>Deliveries</th>
+        <th>Total qty shipped</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in products %}
+      <tr>
+        <td>{{ p.id }}</td>
+        <td>{{ p.name }}</td>
+        <td>{{ p.default_unit or "—" }}</td>
+        <td>{% if p.default_unit_price_fcfa %}{{ "{:,}".format(p.default_unit_price_fcfa) }}{% else %}—{% endif %}</td>
+        <td>{{ p.delivery_count }}</td>
+        <td>{% if p.total_quantity_delivered %}{{ "{:,}".format(p.total_quantity_delivered) }}{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">
+    No products yet. They are created when warehouse managers send delivery note photos with a description.
+  </div>
+  {% endif %}
+</body>
+</html>
