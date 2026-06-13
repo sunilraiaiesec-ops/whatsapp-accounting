@@ -71,6 +71,36 @@ def create_tables():
         );
     """)
 
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS delivery_notes (
+            id SERIAL PRIMARY KEY,
+            business_id INTEGER REFERENCES businesses(id),
+            employee_id INTEGER REFERENCES employees(id),
+            sender TEXT,
+            whatsapp_message_id TEXT UNIQUE,
+            whatsapp_media_id TEXT,
+            document_number TEXT,
+            document_type TEXT,
+            route_note TEXT,
+            client_name TEXT,
+            delivery_date TEXT,
+            description TEXT,
+            quantity INTEGER,
+            quantity_unit TEXT,
+            unit_weight TEXT,
+            total_weight TEXT,
+            truck_number TEXT,
+            driver_name TEXT,
+            driver_phone TEXT,
+            driver_id_number TEXT,
+            transporter TEXT,
+            delivered_at TEXT,
+            status TEXT DEFAULT 'pending_review',
+            extraction_raw JSONB,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+
     migrations = [
         "ALTER TABLE messages ADD COLUMN IF NOT EXISTS business_id INTEGER REFERENCES businesses(id);",
         "ALTER TABLE messages ADD COLUMN IF NOT EXISTS whatsapp_message_id TEXT;",

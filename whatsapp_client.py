@@ -56,6 +56,47 @@ def format_unauthorized_reply() -> str:
     )
 
 
+async def download_whatsapp_media(media_id: str) -> tuple[bytes, str]:
+    if not WHATSAPP_ACCESS_TOKEN:
+        raise RuntimeError("WHATSAPP_ACCESS_TOKEN not configured")
+
+    headers = {"Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}"}
+    meta_url = f"https://graph.facebook.com/{WHATSAPP_API_VERSION}/{media_id}"
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        meta_response = await client.get(meta_url, headers=headers)
+        meta_response.raise_for_status()
+        media_url = meta_response.json()["url"]
+
+        media_response = await client.get(media_url, headers=headers)
+        media_response.raise_for_status()
+        mime_type = media_response.headers.get("content-type", "image/jpeg")
+        return media_response.content, mime_type.split(";")[0]
+
+
+def format_delivery_confirmation(fields: dict, employee_name: Optional[str], status: str) -> str:
+    logged_by = f"\nLogged by: {employee_name}" if employee_name else ""
+    client = fields.get("client_name") or "unknown client"
+    doc_no = fields.get("document_number") or "—"
+    qty = fields.get("quantity")
+    unit = fields.get("quantity_unit") or ""
+    qty_text = f"{qty:,} {unit}".strip() if qty else "quantity unknown"
+
+    if status == "pending_review":
+        return (
+            "⚠️ Delivery note photo saved for review.\n"
+            "We could not read all fields clearly. An admin will check it."
+            f"{logged_by}"
+        )
+
+    return (
+        f"✅ Delivery note #{doc_no} saved\n"
+        f"Client: {client}\n"
+        f"Qty: {qty_text}"
+        f"{logged_by}"
+    )
+
+
 async def send_whatsapp_text(to_phone: str, body: str) -> bool:
     if not WHATSAPP_ACCESS_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
         return False

@@ -16,10 +16,13 @@ from db import (
     message_exists,
     normalize_phone,
 )
+from delivery_extractor import delivery_status, extract_delivery_note
 from models import EmployeeInput, EmployeeUpdate, MessageInput
 from parser import parse_message, transaction_status
 from whatsapp_client import (
+    download_whatsapp_media,
     format_confirmation,
+    format_delivery_confirmation,
     format_unauthorized_reply,
     send_whatsapp_text,
 )
@@ -37,7 +40,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="WhatsApp Accounting", lifespan=lifespan)
 
 
-PARSER_VERSION = "v2-million-names"
+PARSER_VERSION = "v3-delivery-photos"
 
 
 @app.get("/")
@@ -48,6 +51,7 @@ def home():
         "database": "connected",
         "stage": "1-team-pilot",
         "parser_version": PARSER_VERSION,
+        "features": ["text_transactions", "delivery_note_photos"],
     }
 
 
@@ -139,8 +143,8 @@ async def whatsapp_webhook(request: Request):
         value = data["entry"][0]["changes"][0]["value"]
         message = value["messages"][0]
         sender = message["from"]
-        message_text = message["text"]["body"]
         whatsapp_message_id = message.get("id")
+        message_type = message.get("type")
     except (KeyError, IndexError, TypeError):
         return {"status": "ignored"}
 
@@ -152,9 +156,28 @@ async def whatsapp_webhook(request: Request):
         await send_whatsapp_text(sender, format_unauthorized_reply())
         return {"status": "rejected_unregistered_sender", "sender": sender}
 
+    if message_type == "text":
+        return await _handle_text_message(
+            sender, message["text"]["body"], whatsapp_message_id, employee
+        )
+
+    if message_type == "image":
+        image = message.get("image", {})
+        return await _handle_image_message(
+            sender,
+            image.get("id"),
+            image.get("mime_type", "image/jpeg"),
+            image.get("caption"),
+            whatsapp_message_id,
+            employee,
+        )
+
+    return {"status": "ignored", "reason": f"unsupported_type_{message_type}"}
+
+
+async def _handle_text_message(sender, message_text, whatsapp_message_id, employee):
     parsed = parse_message(message_text)
     status = transaction_status(parsed)
-
     raw_data = {"from_user": sender, "text": message_text}
 
     conn = get_db_connection()
@@ -201,22 +224,130 @@ async def whatsapp_webhook(request: Request):
         ),
     )
     transaction_id = cur.fetchone()[0]
-
     conn.commit()
     cur.close()
     conn.close()
 
-    employee_name = employee["name"]
-    reply = format_confirmation(parsed, employee_name, status)
+    reply = format_confirmation(parsed, employee["name"], status)
     replied = await send_whatsapp_text(sender, reply)
 
     return {
         "status": "received_and_saved",
+        "kind": "transaction",
         "message_id": message_id,
         "transaction_id": transaction_id,
         "review_status": status,
         "whatsapp_reply_sent": replied,
         **parsed,
+    }
+
+
+async def _handle_image_message(
+    sender, media_id, mime_type, caption, whatsapp_message_id, employee
+):
+    if not media_id:
+        return {"status": "ignored", "reason": "missing_media_id"}
+
+    try:
+        image_bytes, mime_type = await download_whatsapp_media(media_id)
+        fields, extraction_raw = await extract_delivery_note(
+            image_bytes, mime_type, caption
+        )
+    except Exception as exc:
+        fields = {key: None for key in [
+            "document_number", "document_type", "route_note", "client_name",
+            "delivery_date", "description", "quantity", "quantity_unit",
+            "unit_weight", "total_weight", "truck_number", "driver_name",
+            "driver_phone", "driver_id_number", "transporter", "delivered_at",
+        ]}
+        extraction_raw = {"error": str(exc)}
+        status = "pending_review"
+    else:
+        status = delivery_status(fields)
+
+    message_text = caption or "[delivery note photo]"
+    raw_data = {
+        "from_user": sender,
+        "type": "image",
+        "media_id": media_id,
+        "caption": caption,
+    }
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        INSERT INTO messages
+        (business_id, source, sender, message_text, raw_data, whatsapp_message_id)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        RETURNING id;
+        """,
+        (
+            DEFAULT_BUSINESS_ID,
+            "whatsapp",
+            sender,
+            message_text,
+            json.dumps(raw_data),
+            whatsapp_message_id,
+        ),
+    )
+    message_id = cur.fetchone()[0]
+
+    cur.execute(
+        """
+        INSERT INTO delivery_notes
+        (business_id, employee_id, sender, whatsapp_message_id, whatsapp_media_id,
+         document_number, document_type, route_note, client_name, delivery_date,
+         description, quantity, quantity_unit, unit_weight, total_weight,
+         truck_number, driver_name, driver_phone, driver_id_number,
+         transporter, delivered_at, status, extraction_raw)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING id;
+        """,
+        (
+            DEFAULT_BUSINESS_ID,
+            employee["id"],
+            sender,
+            whatsapp_message_id,
+            media_id,
+            fields.get("document_number"),
+            fields.get("document_type"),
+            fields.get("route_note"),
+            fields.get("client_name"),
+            fields.get("delivery_date"),
+            fields.get("description"),
+            fields.get("quantity"),
+            fields.get("quantity_unit"),
+            fields.get("unit_weight"),
+            fields.get("total_weight"),
+            fields.get("truck_number"),
+            fields.get("driver_name"),
+            fields.get("driver_phone"),
+            fields.get("driver_id_number"),
+            fields.get("transporter"),
+            fields.get("delivered_at"),
+            status,
+            json.dumps(extraction_raw),
+        ),
+    )
+    delivery_id = cur.fetchone()[0]
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    reply = format_delivery_confirmation(fields, employee["name"], status)
+    replied = await send_whatsapp_text(sender, reply)
+
+    return {
+        "status": "received_and_saved",
+        "kind": "delivery_note",
+        "message_id": message_id,
+        "delivery_id": delivery_id,
+        "review_status": status,
+        "whatsapp_reply_sent": replied,
+        **fields,
     }
 
 
@@ -642,6 +773,99 @@ def confirm_transaction(transaction_id: int):
         raise HTTPException(status_code=404, detail="Transaction not found")
 
     return {"status": "confirmed", "transaction_id": transaction_id}
+
+
+@app.get("/delivery-notes")
+def list_delivery_notes():
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        """
+        SELECT
+            d.id, d.document_number, d.document_type, d.route_note,
+            d.client_name, d.delivery_date, d.description, d.quantity,
+            d.quantity_unit, d.unit_weight, d.total_weight, d.truck_number,
+            d.driver_name, d.driver_phone, d.driver_id_number, d.transporter,
+            d.delivered_at, d.status, d.created_at,
+            e.name AS employee_name
+        FROM delivery_notes d
+        LEFT JOIN employees e ON e.id = d.employee_id
+        WHERE d.business_id = %s
+        ORDER BY d.id DESC;
+        """,
+        (DEFAULT_BUSINESS_ID,),
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    return [
+        {
+            "id": row["id"],
+            "document_number": row["document_number"],
+            "document_type": row["document_type"],
+            "route_note": row["route_note"],
+            "client_name": row["client_name"],
+            "delivery_date": row["delivery_date"],
+            "description": row["description"],
+            "quantity": row["quantity"],
+            "quantity_unit": row["quantity_unit"],
+            "unit_weight": row["unit_weight"],
+            "total_weight": row["total_weight"],
+            "truck_number": row["truck_number"],
+            "driver_name": row["driver_name"],
+            "driver_phone": row["driver_phone"],
+            "driver_id_number": row["driver_id_number"],
+            "transporter": row["transporter"],
+            "delivered_at": row["delivered_at"],
+            "status": row["status"],
+            "employee_name": row["employee_name"],
+            "created_at": str(row["created_at"]),
+        }
+        for row in rows
+    ]
+
+
+@app.get("/deliveries", response_class=HTMLResponse)
+def deliveries_dashboard(request: Request):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    cur.execute(
+        """
+        SELECT COUNT(*) AS total,
+               COALESCE(SUM(CASE WHEN status = 'pending_review' THEN 1 ELSE 0 END), 0) AS pending_review
+        FROM delivery_notes
+        WHERE business_id = %s;
+        """,
+        (DEFAULT_BUSINESS_ID,),
+    )
+    summary = cur.fetchone()
+
+    cur.execute(
+        """
+        SELECT
+            d.id, d.document_number, d.client_name, d.delivery_date,
+            d.description, d.quantity, d.quantity_unit, d.total_weight,
+            d.truck_number, d.driver_name, d.route_note, d.status,
+            d.created_at, e.name AS employee_name
+        FROM delivery_notes d
+        LEFT JOIN employees e ON e.id = d.employee_id
+        WHERE d.business_id = %s
+        ORDER BY d.id DESC
+        LIMIT 100;
+        """,
+        (DEFAULT_BUSINESS_ID,),
+    )
+    deliveries = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    return templates.TemplateResponse(
+        request,
+        "deliveries.html",
+        {"summary": summary, "deliveries": deliveries},
+    )
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
