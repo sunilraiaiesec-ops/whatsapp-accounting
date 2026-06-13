@@ -37,6 +37,15 @@ from parties import (
     resolve_party_for_transaction,
 )
 from parser import parse_message, transaction_status
+from review import (
+    confirm_delivery_note,
+    confirm_transaction as confirm_pending_transaction,
+    get_review_counts,
+    list_pending_deliveries,
+    list_pending_transactions,
+    reject_delivery_note,
+    reject_transaction,
+)
 from whatsapp_client import (
     download_whatsapp_media,
     format_confirmation,
@@ -78,6 +87,7 @@ def home():
             "party_ledger",
             "categories",
             "delivery_products",
+            "review_queue",
         ],
         "gemini_configured": bool(os.environ.get("GOOGLE_API_KEY")),
         "gemini_model": os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"),
@@ -759,26 +769,64 @@ def update_employee(employee_id: int, input_data: EmployeeUpdate):
 
 @app.patch("/transactions/{transaction_id}/confirm")
 def confirm_transaction(transaction_id: int):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        UPDATE transactions
-        SET status = 'confirmed'
-        WHERE id = %s AND business_id = %s
-        RETURNING id;
-        """,
-        (transaction_id, DEFAULT_BUSINESS_ID),
-    )
-    row = cur.fetchone()
-    conn.commit()
-    cur.close()
-    conn.close()
-
-    if not row:
-        raise HTTPException(status_code=404, detail="Transaction not found")
-
+    if not confirm_pending_transaction(transaction_id):
+        raise HTTPException(
+            status_code=404,
+            detail="Transaction not found or not pending review",
+        )
     return {"status": "confirmed", "transaction_id": transaction_id}
+
+
+@app.patch("/transactions/{transaction_id}/reject")
+def reject_transaction_endpoint(transaction_id: int):
+    if not reject_transaction(transaction_id):
+        raise HTTPException(
+            status_code=404,
+            detail="Transaction not found or not pending review",
+        )
+    return {"status": "rejected", "transaction_id": transaction_id}
+
+
+@app.patch("/delivery-notes/{delivery_id}/confirm")
+def confirm_delivery_endpoint(delivery_id: int):
+    updated_id = confirm_delivery_note(delivery_id)
+    if not updated_id:
+        raise HTTPException(
+            status_code=404,
+            detail="Delivery note not found or not pending review",
+        )
+    return {"status": "confirmed", "delivery_id": updated_id}
+
+
+@app.patch("/delivery-notes/{delivery_id}/reject")
+def reject_delivery_endpoint(delivery_id: int):
+    if not reject_delivery_note(delivery_id):
+        raise HTTPException(
+            status_code=404,
+            detail="Delivery note not found or not pending review",
+        )
+    return {"status": "rejected", "delivery_id": delivery_id}
+
+
+@app.get("/review", response_class=HTMLResponse)
+def review_dashboard(request: Request):
+    counts = get_review_counts()
+    transactions = list_pending_transactions()
+    deliveries = list_pending_deliveries()
+    return templates.TemplateResponse(
+        request,
+        "review.html",
+        {
+            "counts": counts,
+            "transactions": transactions,
+            "deliveries": deliveries,
+        },
+    )
+
+
+@app.get("/review-count")
+def review_count_api():
+    return get_review_counts()
 
 
 @app.get("/delivery-notes")
@@ -882,6 +930,7 @@ def deliveries_dashboard(request: Request):
         row["blank_field_labels"] = raw.get("blank_field_labels") or []
 
     weekly_deliveries = get_weekly_deliveries_by_client()
+    review_counts = get_review_counts()
 
     return templates.TemplateResponse(
         request,
@@ -891,6 +940,7 @@ def deliveries_dashboard(request: Request):
             "deliveries": deliveries,
             "weekly_deliveries": weekly_deliveries,
             "gemini_configured": bool(os.environ.get("GOOGLE_API_KEY")),
+            "review_counts": review_counts,
         },
     )
 
@@ -1047,6 +1097,7 @@ def dashboard(request: Request, employee_id: Optional[int] = None):
 
     net_balance = summary["total_receipts"] - summary["total_expenses"]
     category_summary = get_category_summary(period="month")
+    review_counts = get_review_counts()
 
     return templates.TemplateResponse(
         request,
@@ -1058,5 +1109,6 @@ def dashboard(request: Request, employee_id: Optional[int] = None):
             "transactions": transactions,
             "selected_employee_id": employee_id,
             "category_summary": category_summary,
+            "review_counts": review_counts,
         },
     )

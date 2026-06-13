@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Review Queue — WhatsApp Accounting</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f4f6f8;
+      color: #1a1a2e;
+      padding: 24px;
+      line-height: 1.5;
+    }
+    h1 { font-size: 1.5rem; margin-bottom: 4px; }
+    .subtitle { color: #666; margin-bottom: 24px; font-size: 0.9rem; }
+    .nav { margin-bottom: 20px; }
+    .nav a {
+      margin-right: 12px;
+      color: #2980b9;
+      text-decoration: none;
+      font-size: 0.9rem;
+    }
+    .nav a.active { font-weight: 700; color: #1a5276; }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .card {
+      background: #fff;
+      border-radius: 10px;
+      padding: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    .card .label { font-size: 0.8rem; color: #888; text-transform: uppercase; }
+    .card .value { font-size: 1.6rem; font-weight: 700; margin-top: 4px; }
+    .card.warning .value { color: #e67e22; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+      font-size: 0.85rem;
+      margin-bottom: 28px;
+    }
+    th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; vertical-align: top; }
+    th { background: #fafafa; font-weight: 600; color: #555; font-size: 0.75rem; text-transform: uppercase; }
+    .section-title { font-size: 1.1rem; margin-bottom: 12px; font-weight: 600; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      background: #fef5e7;
+      color: #e67e22;
+    }
+    .badge.expense { background: #fdecea; color: #c0392b; }
+    .badge.receipt { background: #e8f8ef; color: #27ae60; }
+    .badge.payment { background: #ebf5fb; color: #2980b9; }
+    .badge.unknown { background: #f0f0f0; color: #666; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .btn {
+      padding: 6px 12px;
+      border-radius: 6px;
+      border: none;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn.confirm { background: #27ae60; color: #fff; }
+    .btn.confirm:hover { background: #219a52; }
+    .btn.reject { background: #fff; color: #c0392b; border: 1px solid #e6b0aa; }
+    .btn.reject:hover { background: #fdecea; }
+    .btn:disabled { opacity: 0.5; cursor: wait; }
+    .empty {
+      text-align: center;
+      padding: 32px;
+      color: #27ae60;
+      background: #fff;
+      border-radius: 10px;
+      margin-bottom: 24px;
+    }
+    .hint { color: #888; font-size: 0.82rem; margin-top: 4px; }
+    .error-hint { color: #c0392b; font-size: 0.75rem; margin-top: 4px; }
+    .blank-tag {
+      display: inline-block;
+      background: #fef5e7;
+      color: #b9770e;
+      padding: 1px 6px;
+      border-radius: 4px;
+      margin: 2px 2px 0 0;
+      font-size: 0.7rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="nav">
+    <a href="/dashboard">Cash transactions</a>
+    <a href="/review" class="active">Review queue</a>
+    <a href="/parties">Parties</a>
+    <a href="/products">Products</a>
+    <a href="/categories">Categories</a>
+    <a href="/deliveries">Delivery notes</a>
+    <a href="/docs">API Docs</a>
+  </div>
+
+  <h1>Review Queue</h1>
+  <p class="subtitle">Confirm or reject entries the bot could not auto-approve</p>
+
+  <div class="cards">
+    <div class="card warning">
+      <div class="label">Pending cash</div>
+      <div class="value">{{ counts.pending_transactions }}</div>
+    </div>
+    <div class="card warning">
+      <div class="label">Pending deliveries</div>
+      <div class="value">{{ counts.pending_deliveries }}</div>
+    </div>
+    <div class="card">
+      <div class="label">Total to review</div>
+      <div class="value">{{ counts.total }}</div>
+    </div>
+  </div>
+
+  {% if counts.total == 0 %}
+  <div class="empty">
+    All caught up — nothing waiting for review.
+  </div>
+  {% endif %}
+
+  {% if transactions %}
+  <div class="section-title">Cash transactions</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Type</th>
+        <th>Party</th>
+        <th>Amount</th>
+        <th>Category</th>
+        <th>Employee</th>
+        <th>Message</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in transactions %}
+      <tr id="tx-row-{{ t.id }}">
+        <td>{{ t.created_at.strftime("%Y-%m-%d %H:%M") if t.created_at else "" }}</td>
+        <td><span class="badge {{ t.transaction_type }}">{{ t.transaction_type }}</span></td>
+        <td>{{ t.party or "—" }}</td>
+        <td>
+          {% if t.amount %}{{ "{:,}".format(t.amount) }}{% else %}—{% endif %}
+          {% if t.currency %} {{ t.currency }}{% endif %}
+        </td>
+        <td>{{ t.category or "—" }}</td>
+        <td>{{ t.employee_name or "—" }}</td>
+        <td>{{ t.original_message }}</td>
+        <td>
+          <div class="actions">
+            <button class="btn confirm" onclick="reviewAction('transaction', {{ t.id }}, 'confirm')">Confirm</button>
+            <button class="btn reject" onclick="reviewAction('transaction', {{ t.id }}, 'reject')">Reject</button>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% if deliveries %}
+  <div class="section-title">Delivery notes</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Doc #</th>
+        <th>Client</th>
+        <th>Description</th>
+        <th>Qty</th>
+        <th>Submitted by</th>
+        <th>Issues</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for d in deliveries %}
+      <tr id="dn-row-{{ d.id }}">
+        <td>{{ d.created_at.strftime("%Y-%m-%d %H:%M") if d.created_at else "" }}</td>
+        <td>{{ d.document_number or "—" }}</td>
+        <td>{{ d.client_name or "—" }}</td>
+        <td>{{ d.description or "—" }}</td>
+        <td>
+          {% if d.quantity %}{{ "{:,}".format(d.quantity) }}{% else %}—{% endif %}
+          {% if d.quantity_unit %} {{ d.quantity_unit }}{% endif %}
+        </td>
+        <td>{{ d.employee_name or "—" }}</td>
+        <td>
+          {% if d.extraction_error %}
+          <div class="error-hint">{{ d.extraction_error }}</div>
+          {% endif %}
+          {% if d.blank_field_labels %}
+            {% for label in d.blank_field_labels %}
+              <span class="blank-tag">{{ label }}</span>
+            {% endfor %}
+          {% elif not d.extraction_error %}
+          <span class="hint">Missing key fields</span>
+          {% endif %}
+        </td>
+        <td>
+          <div class="actions">
+            <button class="btn confirm" onclick="reviewAction('delivery', {{ d.id }}, 'confirm')">Confirm</button>
+            <button class="btn reject" onclick="reviewAction('delivery', {{ d.id }}, 'reject')">Reject</button>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <p class="hint">
+    Confirmed entries count toward party balances and reports. Rejected entries are kept for audit but excluded from totals.
+  </p>
+
+  <script>
+    async function reviewAction(kind, id, action) {
+      const row = document.getElementById(kind === "transaction" ? `tx-row-${id}` : `dn-row-${id}`);
+      const buttons = row.querySelectorAll("button");
+      buttons.forEach((btn) => { btn.disabled = true; });
+
+      const path = kind === "transaction"
+        ? `/transactions/${id}/${action}`
+        : `/delivery-notes/${id}/${action}`;
+
+      try {
+        const response = await fetch(path, { method: "PATCH" });
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          alert(data.detail || "Action failed");
+          buttons.forEach((btn) => { btn.disabled = false; });
+          return;
+        }
+        row.remove();
+        const totalEl = document.querySelector(".cards .card:last-child .value");
+        if (totalEl) {
+          const remaining = document.querySelectorAll("tbody tr").length;
+          totalEl.textContent = remaining;
+        }
+        if (document.querySelectorAll("tbody tr").length === 0) {
+          location.reload();
+        }
+      } catch (err) {
+        alert("Network error — try again");
+        buttons.forEach((btn) => { btn.disabled = false; });
+      }
+    }
+  </script>
+</body>
+</html>

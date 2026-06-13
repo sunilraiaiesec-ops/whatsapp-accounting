@@ -74,7 +74,22 @@
     .badge.payment { background: #ebf5fb; color: #2980b9; }
     .badge.unknown { background: #f0f0f0; color: #666; }
     .badge.pending { background: #fef5e7; color: #e67e22; }
+    .badge.pending_review { background: #fef5e7; color: #e67e22; }
     .badge.confirmed { background: #e8f8ef; color: #27ae60; }
+    .badge.rejected { background: #f0f0f0; color: #888; }
+    .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .btn-sm {
+      padding: 4px 10px;
+      border-radius: 6px;
+      border: none;
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-sm.confirm { background: #27ae60; color: #fff; }
+    .btn-sm.reject { background: #fff; color: #c0392b; border: 1px solid #e6b0aa; }
+    a.card-link { text-decoration: none; color: inherit; display: block; }
+    a.card-link:hover .card { box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
     .empty { text-align: center; padding: 40px; color: #999; }
     .section-title { font-size: 1.1rem; margin-bottom: 12px; font-weight: 600; }
   </style>
@@ -102,6 +117,14 @@
     </div>
   </div>
 
+  {% if review_counts.total > 0 %}
+  <p style="margin-bottom: 16px;">
+    <a href="/review" style="color:#e67e22;font-weight:600;text-decoration:none;">
+      → {{ review_counts.total }} item{{ "s" if review_counts.total != 1 else "" }} waiting in review queue
+    </a>
+  </p>
+  {% endif %}
+
   <div class="toolbar">
     <span class="section-title">Recent Transactions</span>
     <form method="get" action="/dashboard" style="margin-left: auto;">
@@ -114,6 +137,7 @@
         {% endfor %}
       </select>
     </form>
+    <a class="btn" href="/review">Review{% if review_counts.total %} ({{ review_counts.total }}){% endif %}</a>
     <a class="btn" href="/parties">Parties</a>
     <a class="btn" href="/products">Products</a>
     <a class="btn" href="/categories">Categories</a>
@@ -145,6 +169,7 @@
         <th>Employee</th>
         <th>Status</th>
         <th>Message</th>
+        <th></th>
       </tr>
     </thead>
     <tbody>
@@ -167,6 +192,14 @@
         <td>{{ t.employee_name or "—" }}</td>
         <td><span class="badge {{ t.status }}">{{ t.status }}</span></td>
         <td>{{ t.original_message }}</td>
+        <td>
+          {% if t.status == 'pending_review' %}
+          <div class="actions">
+            <button class="btn-sm confirm" onclick="reviewAction('transaction', {{ t.id }}, 'confirm')">Confirm</button>
+            <button class="btn-sm reject" onclick="reviewAction('transaction', {{ t.id }}, 'reject')">Reject</button>
+          </div>
+          {% endif %}
+        </td>
       </tr>
       {% endfor %}
     </tbody>
@@ -177,5 +210,16 @@
     Example: <strong>Paid Ahmed 50000 FCFA transport</strong>
   </div>
   {% endif %}
+
+  <script>
+    async function reviewAction(kind, id, action) {
+      const path = kind === "transaction"
+        ? `/transactions/${id}/${action}`
+        : `/delivery-notes/${id}/${action}`;
+      const response = await fetch(path, { method: "PATCH" });
+      if (response.ok) location.reload();
+      else alert("Action failed — item may already be reviewed");
+    }
+  </script>
 </body>
 </html>

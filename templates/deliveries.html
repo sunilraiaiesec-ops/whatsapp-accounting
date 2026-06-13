@@ -57,6 +57,19 @@
     }
     .badge.confirmed { background: #e8f8ef; color: #27ae60; }
     .badge.pending { background: #fef5e7; color: #e67e22; }
+    .badge.pending_review { background: #fef5e7; color: #e67e22; }
+    .badge.rejected { background: #f0f0f0; color: #888; }
+    .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .btn-sm {
+      padding: 4px 10px;
+      border-radius: 6px;
+      border: none;
+      font-size: 0.72rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-sm.confirm { background: #27ae60; color: #fff; }
+    .btn-sm.reject { background: #fff; color: #c0392b; border: 1px solid #e6b0aa; }
     .alert {
       background: #fdecea;
       border: 1px solid #f5c6cb;
@@ -84,6 +97,7 @@
 <body>
   <div class="nav">
     <a href="/dashboard">← Cash transactions</a>
+    <a href="/review">Review{% if review_counts.total %} ({{ review_counts.total }}){% endif %}</a>
     <a href="/parties">Parties</a>
     <a href="/products">Products</a>
     <a href="/categories">Categories</a>
@@ -110,6 +124,14 @@
       <div class="value">{{ summary.pending_review }}</div>
     </div>
   </div>
+
+  {% if review_counts.total > 0 %}
+  <p style="margin-bottom: 16px;">
+    <a href="/review" style="color:#e67e22;font-weight:600;text-decoration:none;">
+      → Open review queue ({{ review_counts.total }} pending)
+    </a>
+  </p>
+  {% endif %}
 
   {% if weekly_deliveries %}
   <div class="section-title">This week by client</div>
@@ -155,6 +177,7 @@
         <th>Left blank on form</th>
         <th>Submitted by</th>
         <th>Status</th>
+        <th></th>
       </tr>
     </thead>
     <tbody>
@@ -195,6 +218,14 @@
           <div class="error-hint">{{ d.extraction_error }}</div>
           {% endif %}
         </td>
+        <td>
+          {% if d.status == 'pending_review' %}
+          <div class="actions">
+            <button class="btn-sm confirm" onclick="reviewAction('delivery', {{ d.id }}, 'confirm')">Confirm</button>
+            <button class="btn-sm reject" onclick="reviewAction('delivery', {{ d.id }}, 'reject')">Reject</button>
+          </div>
+          {% endif %}
+        </td>
       </tr>
       {% endfor %}
     </tbody>
@@ -205,5 +236,14 @@
     Hassan or Ameet: send a <strong>photo</strong> of the goods delivery note to the business WhatsApp number.
   </div>
   {% endif %}
+
+  <script>
+    async function reviewAction(kind, id, action) {
+      const path = `/delivery-notes/${id}/${action}`;
+      const response = await fetch(path, { method: "PATCH" });
+      if (response.ok) location.reload();
+      else alert("Action failed — item may already be reviewed");
+    }
+  </script>
 </body>
 </html>
