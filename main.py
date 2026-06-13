@@ -1,13 +1,15 @@
 import asyncio
 import json
+import logging
 import os
 from contextlib import asynccontextmanager
+from typing import Any, Optional
 
+import psycopg2
 import psycopg2.extras
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from typing import Optional
 
 from db import (
     DEFAULT_BUSINESS_ID,
@@ -18,6 +20,7 @@ from db import (
     message_exists,
     normalize_phone,
     run_startup_backfills,
+    try_claim_whatsapp_message,
 )
 from categories import get_category_summary, list_categories
 from products import (
@@ -27,6 +30,7 @@ from products import (
     update_product_price,
 )
 from delivery_extractor import delivery_status, extract_delivery_note
+from deliveries import find_existing_delivery_by_document, normalize_document_number
 from models import EmployeeInput, EmployeeUpdate, MessageInput, ProductUpdate
 from parties import (
     format_party_balance_line,
@@ -50,10 +54,15 @@ from whatsapp_client import (
     download_whatsapp_media,
     format_confirmation,
     format_delivery_confirmation,
+    format_delivery_received_ack,
     format_delivery_unauthorized_reply,
+    format_duplicate_delivery_reply,
     format_unauthorized_reply,
+    format_unsupported_message_reply,
     send_whatsapp_text,
 )
+
+logger = logging.getLogger("uvicorn.error")
 
 VERIFY_TOKEN = (os.environ.get("VERIFY_TOKEN") or "my_whatsapp_verify_token").strip()
 templates = Jinja2Templates(directory="templates")
@@ -162,44 +171,117 @@ def verify_whatsapp_webhook(request: Request):
 @app.post("/webhook/whatsapp")
 async def whatsapp_webhook(request: Request):
     data = await request.json()
-
-    try:
-        value = data["entry"][0]["changes"][0]["value"]
-        message = value["messages"][0]
-        sender = message["from"]
-        whatsapp_message_id = message.get("id")
-        message_type = message.get("type")
-    except (KeyError, IndexError, TypeError):
+    payload = _parse_incoming_whatsapp_message(data)
+    if not payload:
         return {"status": "ignored"}
 
+    whatsapp_message_id = payload["whatsapp_message_id"]
     if message_exists(whatsapp_message_id):
         return {"status": "duplicate"}
 
-    employee = get_employee_by_phone(sender)
-    if not employee:
-        await send_whatsapp_text(sender, format_unauthorized_reply())
-        return {"status": "rejected_unregistered_sender", "sender": sender}
-
-    if message_type == "text":
-        return await _handle_text_message(
-            sender, message["text"]["body"], whatsapp_message_id, employee
-        )
-
-    if message_type == "image":
-        if not can_submit_delivery_note(employee):
-            await send_whatsapp_text(sender, format_delivery_unauthorized_reply())
-            return {"status": "rejected_delivery_photo", "sender": sender}
-        image = message.get("image", {})
-        return await _handle_image_message(
-            sender,
-            image.get("id"),
-            image.get("mime_type", "image/jpeg"),
-            image.get("caption"),
+    media = _extract_delivery_media(payload["message"])
+    if media:
+        if not try_claim_whatsapp_message(
             whatsapp_message_id,
-            employee,
-        )
+            payload["sender"],
+            "[delivery note photo - processing]",
+            {"status": "processing", "type": payload["message_type"]},
+        ):
+            return {"status": "duplicate"}
 
-    return {"status": "ignored", "reason": f"unsupported_type_{message_type}"}
+        employee = get_employee_by_phone(payload["sender"])
+        if not employee:
+            asyncio.create_task(_process_whatsapp_payload(payload, media))
+            return {"status": "accepted"}
+
+        if not can_submit_delivery_note(employee):
+            asyncio.create_task(_process_whatsapp_payload(payload, media))
+            return {"status": "accepted"}
+
+        await send_whatsapp_text(payload["sender"], format_delivery_received_ack())
+        asyncio.create_task(_process_whatsapp_payload(payload, media))
+        return {"status": "accepted"}
+
+    return await _process_whatsapp_payload(payload, None)
+
+
+def _parse_incoming_whatsapp_message(data: dict) -> Optional[dict[str, Any]]:
+    try:
+        value = data["entry"][0]["changes"][0]["value"]
+        if "messages" not in value:
+            return None
+        message = value["messages"][0]
+        return {
+            "sender": message["from"],
+            "whatsapp_message_id": message.get("id"),
+            "message_type": message.get("type"),
+            "message": message,
+        }
+    except (KeyError, IndexError, TypeError):
+        return None
+
+
+def _extract_delivery_media(message: dict) -> Optional[tuple[str, str, Optional[str]]]:
+    message_type = message.get("type")
+    if message_type == "image":
+        image = message.get("image", {})
+        media_id = image.get("id")
+        if media_id:
+            return media_id, image.get("mime_type", "image/jpeg"), image.get("caption")
+    if message_type == "document":
+        doc = message.get("document", {})
+        mime = (doc.get("mime_type") or "").lower()
+        if mime.startswith("image/") and doc.get("id"):
+            return doc.get("id"), mime, doc.get("caption")
+    return None
+
+
+async def _process_whatsapp_payload(
+    payload: dict[str, Any],
+    media: Optional[tuple[str, str, Optional[str]]],
+):
+    sender = payload["sender"]
+    whatsapp_message_id = payload["whatsapp_message_id"]
+    message_type = payload["message_type"]
+    message = payload["message"]
+
+    try:
+        if message_exists(whatsapp_message_id) and not media:
+            return {"status": "duplicate"}
+
+        employee = get_employee_by_phone(sender)
+        if not employee:
+            await send_whatsapp_text(sender, format_unauthorized_reply())
+            return {"status": "rejected_unregistered_sender", "sender": sender}
+
+        if message_type == "text":
+            return await _handle_text_message(
+                sender, message["text"]["body"], whatsapp_message_id, employee
+            )
+
+        if media:
+            if not can_submit_delivery_note(employee):
+                await send_whatsapp_text(sender, format_delivery_unauthorized_reply())
+                return {"status": "rejected_delivery_photo", "sender": sender}
+            media_id, mime_type, caption = media
+            return await _handle_image_message(
+                sender, media_id, mime_type, caption, whatsapp_message_id, employee,
+                message_type=message_type,
+            )
+
+        await send_whatsapp_text(
+            sender,
+            format_unsupported_message_reply(message_type or "unknown"),
+        )
+        return {"status": "ignored", "reason": f"unsupported_type_{message_type}"}
+    except Exception:
+        logger.exception("WhatsApp message processing failed: %s", whatsapp_message_id)
+        if employee := get_employee_by_phone(sender):
+            await send_whatsapp_text(
+                sender,
+                "⚠️ Something went wrong saving your message. Please try again in a minute.",
+            )
+        return {"status": "error"}
 
 
 async def _handle_text_message(sender, message_text, whatsapp_message_id, employee):
@@ -256,7 +338,8 @@ async def _handle_text_message(sender, message_text, whatsapp_message_id, employ
 
 
 async def _handle_image_message(
-    sender, media_id, mime_type, caption, whatsapp_message_id, employee
+    sender, media_id, mime_type, caption, whatsapp_message_id, employee,
+    message_type: str = "image",
 ):
     if not media_id:
         return {"status": "ignored", "reason": "missing_media_id"}
@@ -278,10 +361,13 @@ async def _handle_image_message(
     else:
         status = delivery_status(fields)
 
+    doc_normalized = normalize_document_number(fields.get("document_number"))
+    existing_delivery = find_existing_delivery_by_document(fields.get("document_number"))
+
     message_text = caption or "[delivery note photo]"
     raw_data = {
         "from_user": sender,
-        "type": "image",
+        "type": message_type,
         "media_id": media_id,
         "caption": caption,
     }
@@ -291,69 +377,141 @@ async def _handle_image_message(
 
     cur.execute(
         """
-        INSERT INTO messages
-        (business_id, source, sender, message_text, raw_data, whatsapp_message_id)
-        VALUES (%s, %s, %s, %s, %s, %s)
+        UPDATE messages
+        SET message_text = %s, raw_data = %s
+        WHERE whatsapp_message_id = %s
         RETURNING id;
         """,
         (
-            DEFAULT_BUSINESS_ID,
-            "whatsapp",
-            sender,
             message_text,
             json.dumps(raw_data),
             whatsapp_message_id,
         ),
     )
-    message_id = cur.fetchone()[0]
+    row = cur.fetchone()
+    if row:
+        message_id = row[0]
+    else:
+        cur.execute(
+            """
+            INSERT INTO messages
+            (business_id, source, sender, message_text, raw_data, whatsapp_message_id)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING id;
+            """,
+            (
+                DEFAULT_BUSINESS_ID,
+                "whatsapp",
+                sender,
+                message_text,
+                json.dumps(raw_data),
+                whatsapp_message_id,
+            ),
+        )
+        message_id = cur.fetchone()[0]
+
+    if existing_delivery:
+        conn.commit()
+        cur.close()
+        conn.close()
+        reply = format_duplicate_delivery_reply(existing_delivery, employee["name"])
+        replied = await send_whatsapp_text(sender, reply)
+        return {
+            "status": "duplicate_delivery",
+            "kind": "delivery_note",
+            "message_id": message_id,
+            "existing_delivery_id": existing_delivery["id"],
+            "document_number": fields.get("document_number"),
+            "whatsapp_reply_sent": replied,
+        }
 
     party_id = resolve_party_for_delivery(cur, fields.get("client_name"))
     product_meta = prepare_delivery_product_fields(cur, fields)
 
-    cur.execute(
-        """
-        INSERT INTO delivery_notes
-        (business_id, employee_id, party_id, product_id, sender, whatsapp_message_id, whatsapp_media_id,
-         document_number, document_type, route_note, client_name, delivery_date,
-         description, quantity, quantity_unit, unit_weight, total_weight,
-         unit_price_fcfa, line_total_fcfa,
-         truck_number, driver_name, driver_phone, driver_id_number,
-         transporter, delivered_at, status, extraction_raw)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        RETURNING id;
-        """,
-        (
-            DEFAULT_BUSINESS_ID,
-            employee["id"],
-            party_id,
-            product_meta["product_id"],
-            sender,
-            whatsapp_message_id,
-            media_id,
-            fields.get("document_number"),
-            fields.get("document_type"),
-            fields.get("route_note"),
-            fields.get("client_name"),
-            fields.get("delivery_date"),
-            fields.get("description"),
-            fields.get("quantity"),
-            fields.get("quantity_unit"),
-            fields.get("unit_weight"),
-            fields.get("total_weight"),
-            product_meta["unit_price_fcfa"],
-            product_meta["line_total_fcfa"],
-            fields.get("truck_number"),
-            fields.get("driver_name"),
-            fields.get("driver_phone"),
-            fields.get("driver_id_number"),
-            fields.get("transporter"),
-            fields.get("delivered_at"),
-            status,
-            json.dumps(extraction_raw),
-        ),
-    )
-    delivery_id = cur.fetchone()[0]
+    try:
+        cur.execute(
+            """
+            INSERT INTO delivery_notes
+            (business_id, employee_id, party_id, product_id, sender, whatsapp_message_id, whatsapp_media_id,
+             document_number, document_number_normalized, document_type, route_note, client_name, delivery_date,
+             description, quantity, quantity_unit, unit_weight, total_weight,
+             unit_price_fcfa, line_total_fcfa,
+             truck_number, driver_name, driver_phone, driver_id_number,
+             transporter, delivered_at, status, extraction_raw)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id;
+            """,
+            (
+                DEFAULT_BUSINESS_ID,
+                employee["id"],
+                party_id,
+                product_meta["product_id"],
+                sender,
+                whatsapp_message_id,
+                media_id,
+                fields.get("document_number"),
+                doc_normalized,
+                fields.get("document_type"),
+                fields.get("route_note"),
+                fields.get("client_name"),
+                fields.get("delivery_date"),
+                fields.get("description"),
+                fields.get("quantity"),
+                fields.get("quantity_unit"),
+                fields.get("unit_weight"),
+                fields.get("total_weight"),
+                product_meta["unit_price_fcfa"],
+                product_meta["line_total_fcfa"],
+                fields.get("truck_number"),
+                fields.get("driver_name"),
+                fields.get("driver_phone"),
+                fields.get("driver_id_number"),
+                fields.get("transporter"),
+                fields.get("delivered_at"),
+                status,
+                json.dumps(extraction_raw),
+            ),
+        )
+        delivery_id = cur.fetchone()[0]
+    except psycopg2.errors.UniqueViolation:
+        conn.rollback()
+        cur.close()
+        conn.close()
+        existing_delivery = find_existing_delivery_by_document(fields.get("document_number"))
+        if not existing_delivery:
+            raise
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE messages
+            SET message_text = %s, raw_data = %s
+            WHERE whatsapp_message_id = %s
+            RETURNING id;
+            """,
+            (
+                message_text,
+                json.dumps({**raw_data, "duplicate_of_delivery_id": existing_delivery["id"]}),
+                whatsapp_message_id,
+            ),
+        )
+        row = cur.fetchone()
+        message_id = row[0] if row else None
+        conn.commit()
+        cur.close()
+        conn.close()
+        reply = format_duplicate_delivery_reply(existing_delivery, employee["name"])
+        replied = await send_whatsapp_text(sender, reply)
+        return {
+            "status": "duplicate_delivery",
+            "kind": "delivery_note",
+            "message_id": message_id,
+            "existing_delivery_id": existing_delivery["id"],
+            "document_number": fields.get("document_number"),
+            "whatsapp_reply_sent": replied,
+        }
+
     conn.commit()
     cur.close()
     conn.close()

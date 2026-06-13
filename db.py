@@ -1,5 +1,6 @@
 import logging
 import os
+from typing import Optional
 
 import psycopg2
 import psycopg2.extras
@@ -166,9 +167,16 @@ def create_tables():
         "ALTER TABLE delivery_notes ADD COLUMN IF NOT EXISTS product_id INTEGER REFERENCES products(id);",
         "ALTER TABLE delivery_notes ADD COLUMN IF NOT EXISTS unit_price_fcfa INTEGER;",
         "ALTER TABLE delivery_notes ADD COLUMN IF NOT EXISTS line_total_fcfa INTEGER;",
+        "ALTER TABLE delivery_notes ADD COLUMN IF NOT EXISTS document_number_normalized TEXT;",
     ]
     for statement in migrations:
         cur.execute(statement)
+
+    cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS delivery_notes_business_doc_norm_unique
+        ON delivery_notes (business_id, document_number_normalized)
+        WHERE document_number_normalized IS NOT NULL AND status != 'rejected';
+    """)
 
     business_name = os.environ.get("BUSINESS_NAME", "My Business")
     cur.execute("SELECT id FROM businesses WHERE id = %s;", (DEFAULT_BUSINESS_ID,))
@@ -209,6 +217,8 @@ def run_startup_backfills() -> None:
         ("parties", "parties", "backfill_party_links"),
         ("categories", "categories", "backfill_category_links"),
         ("products", "products", "backfill_delivery_products"),
+        ("delivery_doc_numbers", "deliveries", "backfill_document_number_normalized"),
+        ("delivery_roles", "db", "fix_delivery_submitter_roles"),
     )
     for label, module_name, fn_name in steps:
         try:
@@ -221,8 +231,33 @@ def run_startup_backfills() -> None:
 
 def can_submit_delivery_note(employee: dict) -> bool:
     role = (employee.get("role") or "").lower()
-    allowed_phrases = ("owner", "warehouse manager")
-    return any(phrase in role for phrase in allowed_phrases)
+    return any(phrase in role for phrase in ("owner", "warehouse"))
+
+
+def fix_delivery_submitter_roles(business_id: int = DEFAULT_BUSINESS_ID) -> None:
+    """Ensure warehouse staff can submit delivery note photos."""
+    updates = [
+        ("Hassan RR Cameroon", "Warehouse manager"),
+        ("Ameet Kumar", "Warehouse manager"),
+        ("Ameet Kumar (PK)", "Warehouse manager"),
+    ]
+    conn = get_db_connection()
+    cur = conn.cursor()
+    for name, role in updates:
+        cur.execute(
+            """
+            UPDATE employees
+            SET role = %s
+            WHERE business_id = %s
+              AND name = %s
+              AND lower(coalesce(role, '')) NOT LIKE '%warehouse%'
+              AND lower(coalesce(role, '')) NOT LIKE '%owner%';
+            """,
+            (role, business_id, name),
+        )
+    conn.commit()
+    cur.close()
+    conn.close()
 
 
 def get_employee_by_phone(phone: str, business_id: int = DEFAULT_BUSINESS_ID):
@@ -259,3 +294,40 @@ def message_exists(whatsapp_message_id: str) -> bool:
     cur.close()
     conn.close()
     return exists
+
+
+def try_claim_whatsapp_message(
+    whatsapp_message_id: str,
+    sender: str,
+    message_text: str = "[processing]",
+    raw_data: Optional[dict] = None,
+) -> bool:
+    """Reserve a WhatsApp message id before async processing (prevents double handling)."""
+    if not whatsapp_message_id:
+        return False
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            INSERT INTO messages
+            (business_id, source, sender, message_text, raw_data, whatsapp_message_id)
+            VALUES (%s, %s, %s, %s, %s, %s);
+            """,
+            (
+                DEFAULT_BUSINESS_ID,
+                "whatsapp",
+                sender,
+                message_text,
+                psycopg2.extras.Json(raw_data or {}),
+                whatsapp_message_id,
+            ),
+        )
+        conn.commit()
+        return True
+    except psycopg2.errors.UniqueViolation:
+        conn.rollback()
+        return False
+    finally:
+        cur.close()
+        conn.close()

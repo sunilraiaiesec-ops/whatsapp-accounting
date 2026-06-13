@@ -67,7 +67,21 @@ def format_unauthorized_reply() -> str:
 def format_delivery_unauthorized_reply() -> str:
     return (
         "⛔ Only owners and warehouse managers can submit delivery note photos.\n"
-        "Please send text money updates in this format:\n"
+        "Ask your admin to set your role to Warehouse manager.\n"
+        "Text money updates work for all registered staff:\n"
+        "Paid Ahmed 50000 FCFA transport"
+    )
+
+
+def format_delivery_received_ack() -> str:
+    return "📷 Received — reading your delivery note…"
+
+
+def format_unsupported_message_reply(message_type: str) -> str:
+    return (
+        f"⚠️ Message type '{message_type}' is not supported.\n"
+        "For delivery notes, send a photo of the form (camera icon, not as a file).\n"
+        "For cash updates, send text like:\n"
         "Paid Ahmed 50000 FCFA transport"
     )
 
@@ -120,6 +134,22 @@ def _delivery_receipt_lines(fields: dict, audit: Optional[dict] = None) -> list[
         label = labels.get(key) or DEFAULT_FIELD_LABELS.get(key, key.replace("_", " ").title())
         lines.append(f"{label}: {value}")
     return lines
+
+
+def format_duplicate_delivery_reply(
+    existing: dict,
+    employee_name: Optional[str],
+) -> str:
+    doc_no = existing.get("document_number") or "—"
+    client = existing.get("client_name") or "unknown client"
+    logged_by = existing.get("employee_name") or "a team member"
+    submitted_by = f"\nYou: {employee_name}" if employee_name else ""
+    return (
+        f"ℹ️ Delivery note #{doc_no} was already saved ({client}).\n"
+        f"First logged by: {logged_by}\n"
+        "No duplicate was created."
+        f"{submitted_by}"
+    )
 
 
 def format_delivery_confirmation(
