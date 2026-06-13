@@ -5,7 +5,7 @@ import httpx
 
 WHATSAPP_ACCESS_TOKEN = (os.environ.get("WHATSAPP_ACCESS_TOKEN") or "").strip() or None
 WHATSAPP_PHONE_NUMBER_ID = (os.environ.get("WHATSAPP_PHONE_NUMBER_ID") or "").strip() or None
-WHATSAPP_API_VERSION = os.environ.get("WHATSAPP_API_VERSION", "v21.0")
+WHATSAPP_API_VERSION = (os.environ.get("WHATSAPP_API_VERSION") or "v21.0").strip()
 
 
 def format_amount(amount: Optional[int], currency: Optional[str]) -> str:

@@ -7,7 +7,7 @@ from typing import Any, Optional, Tuple
 import httpx
 
 GOOGLE_API_KEY = (os.environ.get("GOOGLE_API_KEY") or "").strip() or None
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
+GEMINI_MODEL = (os.environ.get("GEMINI_MODEL") or "gemini-3.5-flash").strip()
 
 DELIVERY_FIELDS = [
     "document_number",

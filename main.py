@@ -29,7 +29,7 @@ from whatsapp_client import (
     send_whatsapp_text,
 )
 
-VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "my_whatsapp_verify_token")
+VERIFY_TOKEN = (os.environ.get("VERIFY_TOKEN") or "my_whatsapp_verify_token").strip()
 templates = Jinja2Templates(directory="templates")
 
 
