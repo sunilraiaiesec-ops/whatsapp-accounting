@@ -56,6 +56,14 @@ def format_unauthorized_reply() -> str:
     )
 
 
+def format_delivery_unauthorized_reply() -> str:
+    return (
+        "⛔ Only owners and warehouse managers can submit delivery note photos.\n"
+        "Please send text money updates in this format:\n"
+        "Paid Ahmed 50000 FCFA transport"
+    )
+
+
 async def download_whatsapp_media(media_id: str) -> tuple[bytes, str]:
     if not WHATSAPP_ACCESS_TOKEN:
         raise RuntimeError("WHATSAPP_ACCESS_TOKEN not configured")

@@ -142,6 +142,12 @@ def create_tables():
     conn.close()
 
 
+def can_submit_delivery_note(employee: dict) -> bool:
+    role = (employee.get("role") or "").lower()
+    allowed_phrases = ("owner", "warehouse manager")
+    return any(phrase in role for phrase in allowed_phrases)
+
+
 def get_employee_by_phone(phone: str, business_id: int = DEFAULT_BUSINESS_ID):
     normalized = normalize_phone(phone)
     conn = get_db_connection()

@@ -12,6 +12,7 @@ from db import (
     DEFAULT_BUSINESS_ID,
     create_tables,
     get_db_connection,
+    can_submit_delivery_note,
     get_employee_by_phone,
     message_exists,
     normalize_phone,
@@ -23,6 +24,7 @@ from whatsapp_client import (
     download_whatsapp_media,
     format_confirmation,
     format_delivery_confirmation,
+    format_delivery_unauthorized_reply,
     format_unauthorized_reply,
     send_whatsapp_text,
 )
@@ -52,6 +54,8 @@ def home():
         "stage": "1-team-pilot",
         "parser_version": PARSER_VERSION,
         "features": ["text_transactions", "delivery_note_photos"],
+        "gemini_configured": bool(os.environ.get("GOOGLE_API_KEY")),
+        "gemini_model": os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"),
     }
 
 
@@ -162,6 +166,9 @@ async def whatsapp_webhook(request: Request):
         )
 
     if message_type == "image":
+        if not can_submit_delivery_note(employee):
+            await send_whatsapp_text(sender, format_delivery_unauthorized_reply())
+            return {"status": "rejected_delivery_photo", "sender": sender}
         image = message.get("image", {})
         return await _handle_image_message(
             sender,
@@ -786,7 +793,7 @@ def list_delivery_notes():
             d.client_name, d.delivery_date, d.description, d.quantity,
             d.quantity_unit, d.unit_weight, d.total_weight, d.truck_number,
             d.driver_name, d.driver_phone, d.driver_id_number, d.transporter,
-            d.delivered_at, d.status, d.created_at,
+            d.delivered_at, d.status, d.extraction_raw, d.created_at,
             e.name AS employee_name
         FROM delivery_notes d
         LEFT JOIN employees e ON e.id = d.employee_id
@@ -820,6 +827,7 @@ def list_delivery_notes():
             "delivered_at": row["delivered_at"],
             "status": row["status"],
             "employee_name": row["employee_name"],
+            "extraction_error": (row["extraction_raw"] or {}).get("error"),
             "created_at": str(row["created_at"]),
         }
         for row in rows
@@ -848,7 +856,7 @@ def deliveries_dashboard(request: Request):
             d.id, d.document_number, d.client_name, d.delivery_date,
             d.description, d.quantity, d.quantity_unit, d.total_weight,
             d.truck_number, d.driver_name, d.route_note, d.status,
-            d.created_at, e.name AS employee_name
+            d.extraction_raw, d.created_at, e.name AS employee_name
         FROM delivery_notes d
         LEFT JOIN employees e ON e.id = d.employee_id
         WHERE d.business_id = %s
@@ -861,10 +869,18 @@ def deliveries_dashboard(request: Request):
     cur.close()
     conn.close()
 
+    for row in deliveries:
+        raw = row.get("extraction_raw") or {}
+        row["extraction_error"] = raw.get("error")
+
     return templates.TemplateResponse(
         request,
         "deliveries.html",
-        {"summary": summary, "deliveries": deliveries},
+        {
+            "summary": summary,
+            "deliveries": deliveries,
+            "gemini_configured": bool(os.environ.get("GOOGLE_API_KEY")),
+        },
     )
 
 

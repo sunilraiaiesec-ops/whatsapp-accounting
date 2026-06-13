@@ -7,7 +7,7 @@ from typing import Any, Optional, Tuple
 import httpx
 
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
 
 DELIVERY_FIELDS = [
     "document_number",
@@ -133,10 +133,27 @@ async def extract_delivery_note(
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(url, json=payload)
-        response.raise_for_status()
+        if response.status_code != 200:
+            error_body = response.text
+            empty = {field: None for field in DELIVERY_FIELDS}
+            return empty, {
+                "error": f"Gemini API error {response.status_code}",
+                "details": error_body[:500],
+                "model": GEMINI_MODEL,
+                "caption": caption,
+            }
         data = response.json()
 
-    text = data["candidates"][0]["content"]["parts"][0]["text"]
-    raw = _parse_json_from_text(text)
-    fields = normalize_delivery_fields(raw)
-    return fields, {"raw_response": raw, "caption": caption}
+    try:
+        text = data["candidates"][0]["content"]["parts"][0]["text"]
+        raw = _parse_json_from_text(text)
+        fields = normalize_delivery_fields(raw)
+        return fields, {"raw_response": raw, "caption": caption, "model": GEMINI_MODEL}
+    except (KeyError, IndexError, json.JSONDecodeError) as exc:
+        empty = {field: None for field in DELIVERY_FIELDS}
+        return empty, {
+            "error": f"Failed to parse Gemini response: {exc}",
+            "response": data,
+            "model": GEMINI_MODEL,
+            "caption": caption,
+        }
