@@ -37,6 +37,9 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="WhatsApp Accounting", lifespan=lifespan)
 
 
+PARSER_VERSION = "v2-million-names"
+
+
 @app.get("/")
 def home():
     return {
@@ -44,6 +47,7 @@ def home():
         "project": "whatsapp-accounting",
         "database": "connected",
         "stage": "1-team-pilot",
+        "parser_version": PARSER_VERSION,
     }
 
 

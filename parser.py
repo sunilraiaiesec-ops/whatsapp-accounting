@@ -15,8 +15,12 @@ MULTIPLIERS = {
 }
 
 
+NAME_PATTERN = r"[\w\s.'-]+"
+
+
 def parse_amount(message: str) -> Optional[int]:
-    lower_message = message.lower()
+    lower_message = message.lower().replace("million", " million ").replace("millions", " millions ")
+    lower_message = re.sub(r"\s+", " ", lower_message).strip()
 
     scaled_match = re.search(
         r"(\d[\d,]*)\s*(k|m|million|millions|billion|billions|lakh|lakhs|lac|lacs)\b",
@@ -49,7 +53,7 @@ def parse_message(message: str) -> dict:
     if "received from" in lower_message:
         transaction_type = "receipt"
         party_match = re.search(
-            r"received from\s+([A-Za-z][A-Za-z\s]+?)$", message, re.IGNORECASE
+            rf"received from\s+({NAME_PATTERN})$", message, re.IGNORECASE | re.UNICODE
         )
         if party_match:
             party = party_match.group(1).strip()
@@ -57,7 +61,7 @@ def parse_message(message: str) -> dict:
     elif lower_message.startswith("received") and "from" in lower_message:
         transaction_type = "receipt"
         party_match = re.search(
-            r"from\s+([A-Za-z][A-Za-z\s]+?)$", message, re.IGNORECASE
+            rf"from\s+({NAME_PATTERN})$", message, re.IGNORECASE | re.UNICODE
         )
         if party_match:
             party = party_match.group(1).strip()
