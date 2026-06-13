@@ -128,11 +128,15 @@ async def extract_delivery_note(
 
     url = (
         f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{GEMINI_MODEL}:generateContent?key={GOOGLE_API_KEY}"
+        f"{GEMINI_MODEL}:generateContent"
     )
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": GOOGLE_API_KEY,
+    }
 
     async with httpx.AsyncClient(timeout=60.0) as client:
-        response = await client.post(url, json=payload)
+        response = await client.post(url, json=payload, headers=headers)
         if response.status_code != 200:
             error_body = response.text
             empty = {field: None for field in DELIVERY_FIELDS}
