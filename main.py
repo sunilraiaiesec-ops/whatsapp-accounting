@@ -283,10 +283,9 @@ def parse_message(message: str) -> dict:
             party = party_match.group(1).strip().title()# Expense patterns
     elif "paid" in lower_message:
         transaction_type = "expense"
-        party_match = re.search(r"paid\s+([A-Za-z]+)", message, re.IGNORECASE)
+        party_match = re.search(r"\bto\s+(.+?)(?:\s+for\s+|$)", message, re.IGNORECASE)
         if party_match:
             party = party_match.group(1).strip()
-
     
 
     elif re.search(r"\bko\b", lower_message) and (
