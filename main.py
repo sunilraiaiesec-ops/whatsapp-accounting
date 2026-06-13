@@ -860,7 +860,7 @@ def deliveries_dashboard(request: Request):
         SELECT
             d.id, d.document_number, d.client_name, d.delivery_date,
             d.description, d.quantity, d.quantity_unit, d.total_weight,
-            d.truck_number, d.driver_name, d.route_note, d.status,
+            d.truck_number, d.driver_name, d.driver_phone, d.route_note, d.status,
             d.extraction_raw, d.created_at, e.name AS employee_name
         FROM delivery_notes d
         LEFT JOIN employees e ON e.id = d.employee_id

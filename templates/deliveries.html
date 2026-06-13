@@ -122,6 +122,7 @@
         <th>Weight</th>
         <th>Truck</th>
         <th>Driver</th>
+        <th>Driver phone</th>
         <th>Route</th>
         <th>Left blank on form</th>
         <th>Submitted by</th>
@@ -142,6 +143,7 @@
         <td>{{ d.total_weight or d.unit_weight or "—" }}</td>
         <td>{{ d.truck_number or "—" }}</td>
         <td>{{ d.driver_name or "—" }}</td>
+        <td>{{ d.driver_phone or "—" }}</td>
         <td>{{ d.route_note or "—" }}</td>
         <td>
           {% if d.blank_field_labels %}
