@@ -12,3 +12,8 @@ class EmployeeInput(BaseModel):
     phone: str
     name: str
     role: Optional[str] = None
+
+
+class EmployeeUpdate(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None

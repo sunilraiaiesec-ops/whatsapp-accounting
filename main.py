@@ -16,9 +16,13 @@ from db import (
     message_exists,
     normalize_phone,
 )
-from models import EmployeeInput, MessageInput
+from models import EmployeeInput, EmployeeUpdate, MessageInput
 from parser import parse_message, transaction_status
-from whatsapp_client import format_confirmation, send_whatsapp_text
+from whatsapp_client import (
+    format_confirmation,
+    format_unauthorized_reply,
+    send_whatsapp_text,
+)
 
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "my_whatsapp_verify_token")
 templates = Jinja2Templates(directory="templates")
@@ -140,6 +144,10 @@ async def whatsapp_webhook(request: Request):
         return {"status": "duplicate"}
 
     employee = get_employee_by_phone(sender)
+    if not employee:
+        await send_whatsapp_text(sender, format_unauthorized_reply())
+        return {"status": "rejected_unregistered_sender", "sender": sender}
+
     parsed = parse_message(message_text)
     status = transaction_status(parsed)
 
@@ -183,7 +191,7 @@ async def whatsapp_webhook(request: Request):
             parsed["category"],
             parsed["original_message"],
             sender,
-            employee["id"] if employee else None,
+            employee["id"],
             status,
             whatsapp_message_id,
         ),
@@ -194,7 +202,7 @@ async def whatsapp_webhook(request: Request):
     cur.close()
     conn.close()
 
-    employee_name = employee["name"] if employee else None
+    employee_name = employee["name"]
     reply = format_confirmation(parsed, employee_name, status)
     replied = await send_whatsapp_text(sender, reply)
 
@@ -503,6 +511,9 @@ def create_employee(input_data: EmployeeInput):
             """
             INSERT INTO employees (business_id, phone, name, role)
             VALUES (%s, %s, %s, %s)
+            ON CONFLICT (business_id, phone) DO UPDATE SET
+                name = EXCLUDED.name,
+                role = COALESCE(EXCLUDED.role, employees.role)
             RETURNING id, phone, name, role, created_at;
             """,
             (DEFAULT_BUSINESS_ID, phone, input_data.name, input_data.role),
@@ -511,12 +522,7 @@ def create_employee(input_data: EmployeeInput):
         conn.commit()
     except Exception as exc:
         conn.rollback()
-        if "unique" in str(exc).lower():
-            raise HTTPException(
-                status_code=409,
-                detail="Employee with this phone number already exists",
-            ) from exc
-        raise
+        raise HTTPException(status_code=500, detail="Failed to save employee") from exc
     finally:
         cur.close()
         conn.close()
@@ -557,6 +563,57 @@ def list_employees():
         }
         for row in rows
     ]
+
+
+@app.patch("/employees/{employee_id}")
+def update_employee(employee_id: int, input_data: EmployeeUpdate):
+    if input_data.name is None and input_data.role is None:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        "SELECT id FROM employees WHERE id = %s AND business_id = %s;",
+        (employee_id, DEFAULT_BUSINESS_ID),
+    )
+    if not cur.fetchone():
+        cur.close()
+        conn.close()
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    fields = []
+    values = []
+    if input_data.name is not None:
+        fields.append("name = %s")
+        values.append(input_data.name)
+    if input_data.role is not None:
+        fields.append("role = %s")
+        values.append(input_data.role)
+
+    values.extend([employee_id, DEFAULT_BUSINESS_ID])
+    cur.execute(
+        f"""
+        UPDATE employees
+        SET {", ".join(fields)}
+        WHERE id = %s AND business_id = %s
+        RETURNING id, phone, name, role, is_active, created_at;
+        """,
+        values,
+    )
+    row = cur.fetchone()
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return {
+        "id": row[0],
+        "phone": row[1],
+        "name": row[2],
+        "role": row[3],
+        "is_active": row[4],
+        "created_at": str(row[5]),
+    }
 
 
 @app.patch("/transactions/{transaction_id}/confirm")

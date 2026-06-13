@@ -49,6 +49,13 @@ def format_confirmation(parsed: dict, employee_name: Optional[str], status: str)
     )
 
 
+def format_unauthorized_reply() -> str:
+    return (
+        "⛔ This phone number is not registered to log business transactions.\n"
+        "Please contact your business admin to be added to the team."
+    )
+
+
 async def send_whatsapp_text(to_phone: str, body: str) -> bool:
     if not WHATSAPP_ACCESS_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
         return False

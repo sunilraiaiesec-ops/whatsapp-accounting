@@ -34,6 +34,14 @@ def test_unknown_message_pending_review():
     assert transaction_status(result) == "pending_review"
 
 
+def test_received_million_multiword_party():
+    result = parse_message("received 20 million from Elhaji Saidou")
+    assert result["type"] == "receipt"
+    assert result["party"] == "Elhaji Saidou"
+    assert result["amount"] == 20_000_000
+    assert transaction_status(result) == "confirmed"
+
+
 def test_missing_amount_pending_review():
     result = parse_message("Paid Ahmed for transport")
     assert result["type"] == "expense"

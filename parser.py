@@ -1,14 +1,44 @@
 import re
+from typing import Optional
+
+MULTIPLIERS = {
+    "k": 1_000,
+    "m": 1_000_000,
+    "million": 1_000_000,
+    "millions": 1_000_000,
+    "billion": 1_000_000_000,
+    "billions": 1_000_000_000,
+    "lakh": 100_000,
+    "lakhs": 100_000,
+    "lac": 100_000,
+    "lacs": 100_000,
+}
+
+
+def parse_amount(message: str) -> Optional[int]:
+    lower_message = message.lower()
+
+    scaled_match = re.search(
+        r"(\d[\d,]*)\s*(k|m|million|millions|billion|billions|lakh|lakhs|lac|lacs)\b",
+        lower_message,
+    )
+    if scaled_match:
+        base = int(scaled_match.group(1).replace(",", ""))
+        multiplier = MULTIPLIERS[scaled_match.group(2)]
+        return base * multiplier
+
+    amount_match = re.search(r"(\d[\d,]*)", message)
+    if amount_match:
+        return int(amount_match.group(1).replace(",", ""))
+
+    return None
 
 
 def parse_message(message: str) -> dict:
     message = message.strip()
     lower_message = message.lower()
 
-    amount_match = re.search(r"(\d[\d,]*)", message)
-    amount = None
-    if amount_match:
-        amount = int(amount_match.group(1).replace(",", ""))
+    amount = parse_amount(message)
 
     currency = "FCFA" if "fcfa" in lower_message or "cfa" in lower_message else None
 
@@ -18,13 +48,17 @@ def parse_message(message: str) -> dict:
 
     if "received from" in lower_message:
         transaction_type = "receipt"
-        party_match = re.search(r"received from\s+([A-Za-z]+)", message, re.IGNORECASE)
+        party_match = re.search(
+            r"received from\s+([A-Za-z][A-Za-z\s]+?)$", message, re.IGNORECASE
+        )
         if party_match:
             party = party_match.group(1).strip()
 
     elif lower_message.startswith("received") and "from" in lower_message:
         transaction_type = "receipt"
-        party_match = re.search(r"from\s+([A-Za-z]+)", message, re.IGNORECASE)
+        party_match = re.search(
+            r"from\s+([A-Za-z][A-Za-z\s]+?)$", message, re.IGNORECASE
+        )
         if party_match:
             party = party_match.group(1).strip()
 
