@@ -134,7 +134,7 @@ def backfill_category_links(business_id: int = DEFAULT_BUSINESS_ID) -> None:
     )
     rows = cur.fetchall()
     for tx_id, message, tx_type, category in rows:
-        hint = category.lower().replace(" ", "_") if category else None
+        hint = category.lower().replace(" ", "_") if isinstance(category, str) and category else None
         if hint in SLUG_ALIASES:
             hint = SLUG_ALIASES[hint]
         category_id, category_name = resolve_category(cur, message, tx_type, hint_slug=hint, business_id=business_id)

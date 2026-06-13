@@ -1,13 +1,18 @@
+import logging
 import os
 
 import psycopg2
 import psycopg2.extras
+
+logger = logging.getLogger("uvicorn.error")
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 DEFAULT_BUSINESS_ID = int(os.environ.get("DEFAULT_BUSINESS_ID", "1"))
 
 
 def get_db_connection():
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL environment variable is not set")
     return psycopg2.connect(DATABASE_URL)
 
 
@@ -193,16 +198,25 @@ def create_tables():
     cur.close()
     conn.close()
 
-    from parties import backfill_party_links
-    from categories import backfill_category_links, seed_categories
+    from categories import seed_categories
 
     seed_categories()
-    backfill_party_links()
-    backfill_category_links()
 
-    from products import backfill_delivery_products
 
-    backfill_delivery_products()
+def run_startup_backfills() -> None:
+    """Link legacy rows to parties, categories, and products. Safe to retry."""
+    steps = (
+        ("parties", "parties", "backfill_party_links"),
+        ("categories", "categories", "backfill_category_links"),
+        ("products", "products", "backfill_delivery_products"),
+    )
+    for label, module_name, fn_name in steps:
+        try:
+            module = __import__(module_name, fromlist=[fn_name])
+            getattr(module, fn_name)()
+            logger.info("Startup backfill finished: %s", label)
+        except Exception:
+            logger.exception("Startup backfill failed: %s", label)
 
 
 def can_submit_delivery_note(employee: dict) -> bool:

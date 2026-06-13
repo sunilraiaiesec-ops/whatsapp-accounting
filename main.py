@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 from contextlib import asynccontextmanager
@@ -16,6 +17,7 @@ from db import (
     get_employee_by_phone,
     message_exists,
     normalize_phone,
+    run_startup_backfills,
 )
 from categories import get_category_summary, list_categories
 from products import (
@@ -51,7 +53,9 @@ templates = Jinja2Templates(directory="templates")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     create_tables()
+    backfill_task = asyncio.create_task(asyncio.to_thread(run_startup_backfills))
     yield
+    backfill_task.cancel()
 
 
 app = FastAPI(title="WhatsApp Accounting", lifespan=lifespan)
