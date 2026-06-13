@@ -135,10 +135,16 @@ def verify_whatsapp_webhook(request: Request):
 
 
 @app.post("/webhook/whatsapp")
-async def whatsapp_webhook(data: WhatsAppInput):
+async def whatsapp_webhook(request: Request):
+    data = await request.json()
 
-    message_text = data.text
-    sender = data.from_user
+    try:
+        value = data["entry"][0]["changes"][0]["value"]
+        message = value["messages"][0]
+        sender = message["from"]
+        message_text = message["text"]["body"]
+    except Exception:
+        return {"status": "ignored"}
 
     raw_data = {
         "from_user": sender,
@@ -181,7 +187,7 @@ async def whatsapp_webhook(data: WhatsAppInput):
             parsed["currency"],
             parsed["category"],
             parsed["original_message"],
-            sender,
+            sender
         )
     )
 
@@ -197,7 +203,6 @@ async def whatsapp_webhook(data: WhatsAppInput):
         "transaction_id": transaction_id,
         **parsed
     }
-
 
 @app.get("/messages")
 def get_messages():
