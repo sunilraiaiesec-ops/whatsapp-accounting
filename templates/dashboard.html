@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WhatsApp Accounting</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f4f6f8;
+      color: #1a1a2e;
+      padding: 24px;
+      line-height: 1.5;
+    }
+    h1 { font-size: 1.5rem; margin-bottom: 4px; }
+    .subtitle { color: #666; margin-bottom: 24px; font-size: 0.9rem; }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .card {
+      background: #fff;
+      border-radius: 10px;
+      padding: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    .card .label { font-size: 0.8rem; color: #888; text-transform: uppercase; letter-spacing: 0.04em; }
+    .card .value { font-size: 1.6rem; font-weight: 700; margin-top: 4px; }
+    .card.warning .value { color: #e67e22; }
+    .card.positive .value { color: #27ae60; }
+    .card.negative .value { color: #c0392b; }
+    .toolbar {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    select, a.btn {
+      padding: 8px 14px;
+      border-radius: 6px;
+      border: 1px solid #ddd;
+      background: #fff;
+      font-size: 0.9rem;
+      cursor: pointer;
+      text-decoration: none;
+      color: #333;
+    }
+    a.btn:hover { background: #f0f0f0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+      font-size: 0.88rem;
+    }
+    th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid #eee; }
+    th { background: #fafafa; font-weight: 600; color: #555; font-size: 0.78rem; text-transform: uppercase; }
+    tr:last-child td { border-bottom: none; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .badge.expense { background: #fdecea; color: #c0392b; }
+    .badge.receipt { background: #e8f8ef; color: #27ae60; }
+    .badge.payment { background: #ebf5fb; color: #2980b9; }
+    .badge.unknown { background: #f0f0f0; color: #666; }
+    .badge.pending { background: #fef5e7; color: #e67e22; }
+    .badge.confirmed { background: #e8f8ef; color: #27ae60; }
+    .empty { text-align: center; padding: 40px; color: #999; }
+    .section-title { font-size: 1.1rem; margin-bottom: 12px; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <h1>WhatsApp Accounting</h1>
+  <p class="subtitle">Team pilot dashboard — entries from your business WhatsApp number</p>
+
+  <div class="cards">
+    <div class="card positive">
+      <div class="label">Total Receipts</div>
+      <div class="value">{{ "{:,}".format(summary.total_receipts) }}</div>
+    </div>
+    <div class="card negative">
+      <div class="label">Total Expenses</div>
+      <div class="value">{{ "{:,}".format(summary.total_expenses) }}</div>
+    </div>
+    <div class="card {% if net_balance >= 0 %}positive{% else %}negative{% endif %}">
+      <div class="label">Net Balance</div>
+      <div class="value">{{ "{:,}".format(net_balance) }}</div>
+    </div>
+    <div class="card warning">
+      <div class="label">Needs Review</div>
+      <div class="value">{{ summary.pending_review }}</div>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <span class="section-title">Recent Transactions</span>
+    <form method="get" action="/dashboard" style="margin-left: auto;">
+      <select name="employee_id" onchange="this.form.submit()">
+        <option value="">All employees</option>
+        {% for emp in employees %}
+        <option value="{{ emp.id }}" {% if selected_employee_id == emp.id %}selected{% endif %}>
+          {{ emp.name }}{% if emp.role %} ({{ emp.role }}){% endif %}
+        </option>
+        {% endfor %}
+      </select>
+    </form>
+    <a class="btn" href="/docs">API Docs</a>
+  </div>
+
+  {% if transactions %}
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Type</th>
+        <th>Party</th>
+        <th>Amount</th>
+        <th>Category</th>
+        <th>Employee</th>
+        <th>Status</th>
+        <th>Message</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in transactions %}
+      <tr>
+        <td>{{ t.created_at.strftime("%Y-%m-%d %H:%M") if t.created_at else "" }}</td>
+        <td><span class="badge {{ t.transaction_type }}">{{ t.transaction_type }}</span></td>
+        <td>{{ t.party or "—" }}</td>
+        <td>
+          {% if t.amount %}{{ "{:,}".format(t.amount) }}{% else %}—{% endif %}
+          {% if t.currency %} {{ t.currency }}{% endif %}
+        </td>
+        <td>{{ t.category or "—" }}</td>
+        <td>{{ t.employee_name or "—" }}</td>
+        <td><span class="badge {{ t.status }}">{{ t.status }}</span></td>
+        <td>{{ t.original_message }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="card empty">
+    No transactions yet. Have your team message the business WhatsApp number.<br><br>
+    Example: <strong>Paid Ahmed 50000 FCFA transport</strong>
+  </div>
+  {% endif %}
+</body>
+</html>
