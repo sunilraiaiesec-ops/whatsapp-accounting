@@ -115,9 +115,22 @@
       </select>
     </form>
     <a class="btn" href="/parties">Parties</a>
+    <a class="btn" href="/categories">Categories</a>
     <a class="btn" href="/deliveries">Delivery notes</a>
     <a class="btn" href="/docs">API Docs</a>
   </div>
+
+  {% if category_summary.expenses %}
+  <div class="section-title" style="margin-top: 8px;">Top expenses this month</div>
+  <div class="cards" style="margin-bottom: 20px;">
+    {% for row in category_summary.expenses[:3] %}
+    <div class="card">
+      <div class="label">{{ row.name }}</div>
+      <div class="value" style="font-size:1.2rem;color:#c0392b;">{{ "{:,}".format(row.total_amount) }} FCFA</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
 
   {% if transactions %}
   <table>

@@ -86,6 +86,21 @@ def create_tables():
     """)
 
     cur.execute("""
+        CREATE TABLE IF NOT EXISTS categories (
+            id SERIAL PRIMARY KEY,
+            business_id INTEGER REFERENCES businesses(id),
+            name TEXT NOT NULL,
+            slug TEXT NOT NULL,
+            category_type TEXT NOT NULL,
+            keywords TEXT,
+            sort_order INTEGER DEFAULT 0,
+            is_active BOOLEAN DEFAULT TRUE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (business_id, slug)
+        );
+    """)
+
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS delivery_notes (
             id SERIAL PRIMARY KEY,
             business_id INTEGER REFERENCES businesses(id),
@@ -125,6 +140,7 @@ def create_tables():
         "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS whatsapp_message_id TEXT;",
         "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS party_id INTEGER REFERENCES parties(id);",
         "ALTER TABLE delivery_notes ADD COLUMN IF NOT EXISTS party_id INTEGER REFERENCES parties(id);",
+        "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS category_id INTEGER REFERENCES categories(id);",
     ]
     for statement in migrations:
         cur.execute(statement)
@@ -158,8 +174,11 @@ def create_tables():
     conn.close()
 
     from parties import backfill_party_links
+    from categories import backfill_category_links, seed_categories
 
+    seed_categories()
     backfill_party_links()
+    backfill_category_links()
 
 
 def can_submit_delivery_note(employee: dict) -> bool:

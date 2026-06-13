@@ -4,6 +4,7 @@ from typing import Any, Optional
 
 import psycopg2.extras
 
+from categories import apply_category_to_parsed
 from db import DEFAULT_BUSINESS_ID, get_db_connection
 
 RECEIVED_TYPES = ("receipt",)
@@ -277,13 +278,14 @@ def insert_transaction(
     business_id: int = DEFAULT_BUSINESS_ID,
     whatsapp_message_id: Optional[str] = None,
 ) -> tuple[int, Optional[int]]:
+    apply_category_to_parsed(cur, parsed, business_id=business_id)
     party_id = resolve_party_for_transaction(cur, parsed.get("party"), parsed.get("type") or "unknown")
     cur.execute(
         """
         INSERT INTO transactions
         (business_id, transaction_type, party, party_id, amount, currency, category,
-         original_message, sender, employee_id, status, whatsapp_message_id)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+         category_id, original_message, sender, employee_id, status, whatsapp_message_id)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id;
         """,
         (
@@ -294,6 +296,7 @@ def insert_transaction(
             parsed["amount"],
             parsed["currency"],
             parsed["category"],
+            parsed.get("category_id"),
             parsed["original_message"],
             sender,
             employee_id,

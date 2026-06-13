@@ -17,6 +17,7 @@ from db import (
     message_exists,
     normalize_phone,
 )
+from categories import get_category_summary, list_categories
 from delivery_extractor import delivery_status, extract_delivery_note
 from models import EmployeeInput, EmployeeUpdate, MessageInput
 from parties import (
@@ -61,7 +62,7 @@ def home():
         "database": "connected",
         "stage": "1-team-pilot",
         "parser_version": PARSER_VERSION,
-        "features": ["text_transactions", "delivery_note_photos", "party_ledger"],
+        "features": ["text_transactions", "delivery_note_photos", "party_ledger", "categories"],
         "gemini_configured": bool(os.environ.get("GOOGLE_API_KEY")),
         "gemini_model": os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"),
     }
@@ -860,6 +861,31 @@ def deliveries_dashboard(request: Request):
     )
 
 
+@app.get("/categories", response_class=HTMLResponse)
+def categories_dashboard(request: Request, period: str = "month"):
+    if period not in ("month", "all"):
+        period = "month"
+    summary = get_category_summary(period=period)
+    categories = list_categories()
+    return templates.TemplateResponse(
+        request,
+        "categories.html",
+        {"summary": summary, "categories": categories},
+    )
+
+
+@app.get("/categories-list")
+def categories_api():
+    return list_categories()
+
+
+@app.get("/categories/summary")
+def categories_summary_api(period: str = "month"):
+    if period not in ("month", "all"):
+        period = "month"
+    return get_category_summary(period=period)
+
+
 @app.get("/parties", response_class=HTMLResponse)
 def parties_dashboard(request: Request):
     parties = list_parties_with_balances()
@@ -954,6 +980,7 @@ def dashboard(request: Request, employee_id: Optional[int] = None):
     conn.close()
 
     net_balance = summary["total_receipts"] - summary["total_expenses"]
+    category_summary = get_category_summary(period="month")
 
     return templates.TemplateResponse(
         request,
@@ -964,5 +991,6 @@ def dashboard(request: Request, employee_id: Optional[int] = None):
             "employees": employees,
             "transactions": transactions,
             "selected_employee_id": employee_id,
+            "category_summary": category_summary,
         },
     )

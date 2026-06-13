@@ -138,6 +138,10 @@ def parse_message(message: str) -> dict:
         category = "rice"
     elif "loading" in lower_message:
         category = "loading"
+    elif "marketing" in lower_message or "pub" in lower_message:
+        category = "marketing"
+    elif "warehouse" in lower_message or "entrepot" in lower_message:
+        category = "warehouse"
 
     return {
         "original_message": message,
