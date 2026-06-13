@@ -3,6 +3,8 @@ from typing import Optional
 
 import httpx
 
+from delivery_extractor import DEFAULT_FIELD_LABELS, DELIVERY_FIELDS
+
 WHATSAPP_ACCESS_TOKEN = (os.environ.get("WHATSAPP_ACCESS_TOKEN") or "").strip() or None
 WHATSAPP_PHONE_NUMBER_ID = (os.environ.get("WHATSAPP_PHONE_NUMBER_ID") or "").strip() or None
 WHATSAPP_API_VERSION = (os.environ.get("WHATSAPP_API_VERSION") or "v21.0").strip()
@@ -82,6 +84,38 @@ async def download_whatsapp_media(media_id: str) -> tuple[bytes, str]:
         return media_response.content, mime_type.split(";")[0]
 
 
+def _format_delivery_field_value(fields: dict, key: str) -> Optional[str]:
+    value = fields.get(key)
+    if key == "quantity":
+        qty = fields.get("quantity")
+        if qty is None:
+            return None
+        unit = fields.get("quantity_unit") or ""
+        return f"{qty:,} {unit}".strip()
+    if key == "quantity_unit":
+        return None
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = value.strip()
+        return value or None
+    return str(value)
+
+
+def _delivery_receipt_lines(fields: dict, audit: Optional[dict] = None) -> list[str]:
+    labels = (audit or {}).get("field_labels") or DEFAULT_FIELD_LABELS
+    lines: list[str] = []
+    for key in DELIVERY_FIELDS:
+        if key == "quantity_unit":
+            continue
+        value = _format_delivery_field_value(fields, key)
+        if not value:
+            continue
+        label = labels.get(key) or DEFAULT_FIELD_LABELS.get(key, key.replace("_", " ").title())
+        lines.append(f"{label}: {value}")
+    return lines
+
+
 def format_delivery_confirmation(
     fields: dict,
     employee_name: Optional[str],
@@ -89,11 +123,7 @@ def format_delivery_confirmation(
     audit: Optional[dict] = None,
 ) -> str:
     logged_by = f"\nLogged by: {employee_name}" if employee_name else ""
-    client = fields.get("client_name") or "unknown client"
     doc_no = fields.get("document_number") or "—"
-    qty = fields.get("quantity")
-    unit = fields.get("quantity_unit") or ""
-    qty_text = f"{qty:,} {unit}".strip() if qty else "quantity unknown"
 
     blank_summary = None
     if audit:
@@ -101,20 +131,23 @@ def format_delivery_confirmation(
         if labels:
             blank_summary = ", ".join(labels)
 
+    receipt_lines = _delivery_receipt_lines(fields, audit)
+
     if status == "pending_review":
-        msg = (
-            "⚠️ Delivery note photo saved for review.\n"
-            "We could not read all fields clearly. An admin will check it."
-        )
+        msg = "⚠️ Delivery note saved for review.\n"
+        if receipt_lines:
+            msg += "\n" + "\n".join(receipt_lines)
+        else:
+            msg += "We could not read the form fields clearly."
         if blank_summary:
             msg += f"\n\nLeft blank on form: {blank_summary}"
         return msg + logged_by
 
-    msg = (
-        f"✅ Delivery note #{doc_no} saved\n"
-        f"Client: {client}\n"
-        f"Qty: {qty_text}"
-    )
+    header = f"✅ Delivery note #{doc_no} saved\n"
+    if receipt_lines:
+        msg = header + "\n".join(receipt_lines)
+    else:
+        msg = header + "No fields could be read from the photo."
     if blank_summary:
         msg += f"\n\n⚠️ Left blank on form: {blank_summary}"
     return msg + logged_by
