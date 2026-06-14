@@ -3,6 +3,7 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
+from datetime import date
 from typing import Any, Optional
 
 import psycopg2
@@ -50,7 +51,9 @@ from review import (
     reject_delivery_note,
     reject_transaction,
 )
+from reports import get_monthly_report
 from whatsapp_client import (
+    check_whatsapp_token,
     download_whatsapp_media,
     format_confirmation,
     format_delivery_confirmation,
@@ -83,7 +86,8 @@ PARSER_VERSION = "v3-delivery-photos"
 
 
 @app.get("/")
-def home():
+async def home():
+    wa = await check_whatsapp_token()
     return {
         "status": "working",
         "project": "whatsapp-accounting",
@@ -97,9 +101,12 @@ def home():
             "categories",
             "delivery_products",
             "review_queue",
+            "monthly_reports",
         ],
         "gemini_configured": bool(os.environ.get("GOOGLE_API_KEY")),
         "gemini_model": os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"),
+        "whatsapp_configured": wa.get("configured"),
+        "whatsapp_token_valid": wa.get("token_valid"),
     }
 
 
@@ -985,6 +992,32 @@ def review_dashboard(request: Request):
 @app.get("/review-count")
 def review_count_api():
     return get_review_counts()
+
+
+@app.get("/reports", response_class=HTMLResponse)
+def reports_dashboard(request: Request, year: Optional[int] = None, month: Optional[int] = None):
+    try:
+        report = get_monthly_report(year=year, month=month)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    current_year = date.today().year
+    year_options = list(range(current_year - 2, current_year + 1))
+    return templates.TemplateResponse(
+        request,
+        "reports.html",
+        {
+            "report": report,
+            "year_options": year_options,
+        },
+    )
+
+
+@app.get("/api/v1/reports/monthly")
+def monthly_report_api(year: Optional[int] = None, month: Optional[int] = None):
+    try:
+        return get_monthly_report(year=year, month=month)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/delivery-notes")

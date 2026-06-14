@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reports — WhatsApp Accounting</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f4f6f8;
+      color: #1a1a2e;
+      padding: 24px;
+      line-height: 1.5;
+    }
+    h1 { font-size: 1.5rem; margin-bottom: 4px; }
+    .subtitle { color: #666; margin-bottom: 24px; font-size: 0.9rem; }
+    .nav { margin-bottom: 20px; }
+    .nav a { margin-right: 12px; color: #2980b9; text-decoration: none; font-size: 0.9rem; }
+    .nav a.active { font-weight: 700; color: #1a5276; }
+    .toolbar {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 24px;
+      background: #fff;
+      padding: 16px;
+      border-radius: 10px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    select, button {
+      padding: 8px 14px;
+      border-radius: 6px;
+      border: 1px solid #ddd;
+      background: #fff;
+      font-size: 0.9rem;
+    }
+    button { cursor: pointer; background: #2980b9; color: #fff; border-color: #2980b9; }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .card {
+      background: #fff;
+      border-radius: 10px;
+      padding: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    .card .label { font-size: 0.8rem; color: #888; text-transform: uppercase; }
+    .card .value { font-size: 1.4rem; font-weight: 700; margin-top: 4px; }
+    .positive { color: #27ae60; }
+    .negative { color: #c0392b; }
+    .section-title { font-size: 1.1rem; margin: 8px 0 12px; font-weight: 600; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+      font-size: 0.85rem;
+      margin-bottom: 24px;
+    }
+    th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; }
+    th { background: #fafafa; font-weight: 600; color: #555; font-size: 0.75rem; text-transform: uppercase; }
+    .empty { color: #999; font-size: 0.9rem; margin-bottom: 20px; }
+    .hint { font-size: 0.85rem; color: #888; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div class="nav">
+    <a href="/dashboard">Cash transactions</a>
+    <a href="/reports" class="active">Reports</a>
+    <a href="/review">Review queue</a>
+    <a href="/parties">Parties</a>
+    <a href="/products">Products</a>
+    <a href="/categories">Categories</a>
+    <a href="/deliveries">Delivery notes</a>
+    <a href="/docs">API Docs</a>
+  </div>
+
+  <h1>Monthly reports</h1>
+  <p class="subtitle">Summary from WhatsApp cash messages and delivery notes — {{ report.period_label }}</p>
+
+  <form class="toolbar" method="get" action="/reports">
+    <label>
+      Month
+      <select name="month">
+        {% for m in range(1, 13) %}
+        <option value="{{ m }}" {% if report.month == m %}selected{% endif %}>{{ m }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      Year
+      <select name="year">
+        {% for y in year_options %}
+        <option value="{{ y }}" {% if report.year == y %}selected{% endif %}>{{ y }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit">View report</button>
+    <a href="/api/v1/reports/monthly?year={{ report.year }}&month={{ report.month }}" style="margin-left:auto;color:#2980b9;font-size:0.85rem;">JSON API</a>
+  </form>
+
+  {% if report.review_queue.total > 0 %}
+  <p style="margin-bottom:16px;color:#e67e22;font-weight:600;">
+    ⚠️ {{ report.review_queue.total }} item(s) still in <a href="/review">review queue</a> — not fully counted until confirmed.
+  </p>
+  {% endif %}
+
+  <div class="section-title">Cash summary</div>
+  <div class="cards">
+    <div class="card">
+      <div class="label">Receipts</div>
+      <div class="value positive">{{ "{:,}".format(report.cash.total_receipts) }} FCFA</div>
+    </div>
+    <div class="card">
+      <div class="label">Expenses</div>
+      <div class="value negative">{{ "{:,}".format(report.cash.total_expenses) }} FCFA</div>
+    </div>
+    <div class="card">
+      <div class="label">Payments</div>
+      <div class="value">{{ "{:,}".format(report.cash.total_payments) }} FCFA</div>
+    </div>
+    <div class="card">
+      <div class="label">Net cash</div>
+      <div class="value {% if report.cash.net_cash >= 0 %}positive{% else %}negative{% endif %}">
+        {{ "{:,}".format(report.cash.net_cash) }} FCFA
+      </div>
+    </div>
+    <div class="card">
+      <div class="label">Confirmed txs</div>
+      <div class="value">{{ report.cash.confirmed_transactions }}</div>
+    </div>
+  </div>
+
+  <div class="section-title">Expenses by category</div>
+  {% if report.categories.expenses %}
+  <table>
+    <thead><tr><th>Category</th><th>Amount</th><th>Count</th></tr></thead>
+    <tbody>
+      {% for row in report.categories.expenses %}
+      <tr>
+        <td>{{ row.name }}</td>
+        <td>{{ "{:,}".format(row.total_amount) }} FCFA</td>
+        <td>{{ row.transaction_count }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">No confirmed expenses this month.</p>
+  {% endif %}
+
+  <div class="section-title">Income by category</div>
+  {% if report.categories.income %}
+  <table>
+    <thead><tr><th>Category</th><th>Amount</th><th>Count</th></tr></thead>
+    <tbody>
+      {% for row in report.categories.income %}
+      <tr>
+        <td>{{ row.name }}</td>
+        <td>{{ "{:,}".format(row.total_amount) }} FCFA</td>
+        <td>{{ row.transaction_count }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">No confirmed income this month.</p>
+  {% endif %}
+
+  <div class="section-title">Deliveries this month</div>
+  <div class="cards">
+    <div class="card">
+      <div class="label">Delivery notes</div>
+      <div class="value">{{ report.deliveries.delivery_count }}</div>
+    </div>
+    <div class="card">
+      <div class="label">Confirmed</div>
+      <div class="value">{{ report.deliveries.confirmed_count }}</div>
+    </div>
+    <div class="card">
+      <div class="label">Quantity delivered</div>
+      <div class="value">{{ "{:,}".format(report.deliveries.total_quantity) }}</div>
+    </div>
+    <div class="card">
+      <div class="label">Goods value</div>
+      <div class="value">
+        {% if report.deliveries.total_goods_value %}{{ "{:,}".format(report.deliveries.total_goods_value) }} FCFA{% else %}—{% endif %}
+      </div>
+    </div>
+  </div>
+  <p class="hint">Goods value needs unit prices set on <a href="/products">Products</a>.</p>
+
+  {% if report.deliveries.by_client %}
+  <table>
+    <thead><tr><th>Client</th><th>Deliveries</th><th>Quantity</th><th>Goods value</th></tr></thead>
+    <tbody>
+      {% for row in report.deliveries.by_client %}
+      <tr>
+        <td>{{ row.client_name }}</td>
+        <td>{{ row.delivery_count }}</td>
+        <td>{{ "{:,}".format(row.total_quantity) }}</td>
+        <td>{% if row.total_goods_value %}{{ "{:,}".format(row.total_goods_value) }} FCFA{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <div class="section-title">Top balances owed (all time, confirmed data)</div>
+  {% if report.top_parties_owed %}
+  <table>
+    <thead><tr><th>Party</th><th>Goods delivered</th><th>Cash received</th><th>Still owed</th></tr></thead>
+    <tbody>
+      {% for row in report.top_parties_owed %}
+      <tr>
+        <td><a href="/parties/{{ row.id }}" style="color:#2980b9;text-decoration:none;">{{ row.name }}</a></td>
+        <td>{{ "{:,}".format(row.total_goods_value) }} FCFA</td>
+        <td>{{ "{:,}".format(row.total_received) }} FCFA</td>
+        <td style="font-weight:600;color:#c0392b;">{{ "{:,}".format(row.amount_owed) }} FCFA</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">No outstanding balances — set product prices to calculate goods value.</p>
+  {% endif %}
+</body>
+</html>
