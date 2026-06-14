@@ -1,7 +1,10 @@
+import logging
 import os
 from typing import Optional
 
 import httpx
+
+logger = logging.getLogger("uvicorn.error")
 
 from delivery_extractor import DEFAULT_FIELD_LABELS, DELIVERY_FIELDS
 
@@ -175,6 +178,12 @@ def format_delivery_confirmation(
             msg += "\n" + "\n".join(receipt_lines)
         else:
             msg += "We could not read the form fields clearly."
+        if audit and audit.get("error"):
+            err = str(audit["error"])
+            if "401" in err or "Unauthorized" in err:
+                msg += "\n\n⚠️ WhatsApp token expired — admin must refresh WHATSAPP_ACCESS_TOKEN on Render."
+            else:
+                msg += f"\n\nReason: {err[:200]}"
         if blank_summary:
             msg += f"\n\nLeft blank on form: {blank_summary}"
         return msg + logged_by
@@ -189,6 +198,24 @@ def format_delivery_confirmation(
     if blank_summary:
         msg += f"\n\n⚠️ Left blank on form: {blank_summary}"
     return msg + logged_by
+
+
+async def check_whatsapp_token() -> dict:
+    if not WHATSAPP_ACCESS_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
+        return {"configured": False, "token_valid": False}
+    url = f"https://graph.facebook.com/{WHATSAPP_API_VERSION}/{WHATSAPP_PHONE_NUMBER_ID}"
+    headers = {"Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}"}
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(url, headers=headers)
+        return {
+            "configured": True,
+            "token_valid": response.status_code == 200,
+            "status_code": response.status_code,
+        }
+    except Exception as exc:
+        logger.exception("WhatsApp token check failed")
+        return {"configured": True, "token_valid": False, "error": str(exc)}
 
 
 async def send_whatsapp_text(to_phone: str, body: str) -> bool:
@@ -212,4 +239,11 @@ async def send_whatsapp_text(to_phone: str, body: str) -> bool:
 
     async with httpx.AsyncClient(timeout=15.0) as client:
         response = await client.post(url, json=payload, headers=headers)
+        if response.status_code != 200:
+            logger.error(
+                "WhatsApp send failed to %s: HTTP %s %s",
+                to_phone,
+                response.status_code,
+                response.text[:300],
+            )
         return response.status_code == 200
