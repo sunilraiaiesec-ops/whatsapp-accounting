@@ -109,6 +109,7 @@
     <a href="/categories">Categories</a>
     <a href="/deliveries">Delivery notes</a>
     <a href="/docs">API Docs</a>
+    <a href="/logout">Log out</a>
   </div>
 
   <h1>Review Queue</h1>
@@ -241,7 +242,7 @@
         : `/delivery-notes/${id}/${action}`;
 
       try {
-        const response = await fetch(path, { method: "PATCH" });
+        const response = await fetch(path, { method: "PATCH", credentials: "same-origin" });
         if (!response.ok) {
           const data = await response.json().catch(() => ({}));
           alert(data.detail || "Action failed");

@@ -103,6 +103,7 @@
     <a href="/products">Products</a>
     <a href="/categories">Categories</a>
     <a href="/docs">API Docs</a>
+    <a href="/logout">Log out</a>
   </div>
 
   <h1>Delivery Notes</h1>
@@ -241,7 +242,7 @@
   <script>
     async function reviewAction(kind, id, action) {
       const path = `/delivery-notes/${id}/${action}`;
-      const response = await fetch(path, { method: "PATCH" });
+      const response = await fetch(path, { method: "PATCH", credentials: "same-origin" });
       if (response.ok) location.reload();
       else alert("Action failed — item may already be reviewed");
     }

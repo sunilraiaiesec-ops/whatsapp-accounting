@@ -8,9 +8,18 @@ from typing import Any, Optional
 
 import psycopg2
 import psycopg2.extras
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
+
+from auth import (
+    SESSION_SECRET,
+    auth_enabled,
+    is_authenticated,
+    require_dashboard_auth,
+    verify_password,
+)
 
 from db import (
     DEFAULT_BUSINESS_ID,
@@ -81,6 +90,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="WhatsApp Accounting", lifespan=lifespan)
 
+app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, same_site="lax")
+
+
+@app.middleware("http")
+async def dashboard_auth_middleware(request: Request, call_next):
+    return await require_dashboard_auth(request, call_next)
+
 
 PARSER_VERSION = "v3-delivery-photos"
 
@@ -102,12 +118,49 @@ async def home():
             "delivery_products",
             "review_queue",
             "monthly_reports",
+            "dashboard_login",
         ],
         "gemini_configured": bool(os.environ.get("GOOGLE_API_KEY")),
         "gemini_model": os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"),
         "whatsapp_configured": wa.get("configured"),
         "whatsapp_token_valid": wa.get("token_valid"),
+        "dashboard_auth_enabled": auth_enabled(),
     }
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request, next: str = "/dashboard"):
+    if is_authenticated(request):
+        return RedirectResponse(next if next.startswith("/") else "/dashboard", status_code=302)
+    return templates.TemplateResponse(
+        request,
+        "login.html",
+        {"next_path": next, "error": None},
+    )
+
+
+@app.post("/login", response_class=HTMLResponse)
+async def login_submit(
+    request: Request,
+    password: str = Form(...),
+    next: str = Form("/dashboard"),
+):
+    safe_next = next if next.startswith("/") and not next.startswith("//") else "/dashboard"
+    if verify_password(password):
+        request.session["authenticated"] = True
+        return RedirectResponse(safe_next, status_code=302)
+    return templates.TemplateResponse(
+        request,
+        "login.html",
+        {"next_path": safe_next, "error": "Wrong password. Try again."},
+        status_code=401,
+    )
+
+
+@app.get("/logout")
+def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse("/login", status_code=302)
 
 
 @app.post("/message")

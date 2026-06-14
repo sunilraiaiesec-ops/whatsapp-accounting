@@ -144,6 +144,7 @@
     <a class="btn" href="/categories">Categories</a>
     <a class="btn" href="/deliveries">Delivery notes</a>
     <a class="btn" href="/docs">API Docs</a>
+    <a class="btn" href="/logout">Log out</a>
   </div>
 
   {% if category_summary.expenses %}
@@ -217,7 +218,7 @@
       const path = kind === "transaction"
         ? `/transactions/${id}/${action}`
         : `/delivery-notes/${id}/${action}`;
-      const response = await fetch(path, { method: "PATCH" });
+      const response = await fetch(path, { method: "PATCH", credentials: "same-origin" });
       if (response.ok) location.reload();
       else alert("Action failed — item may already be reviewed");
     }
