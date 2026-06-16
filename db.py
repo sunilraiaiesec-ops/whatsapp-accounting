@@ -193,6 +193,23 @@ def create_tables():
         "ALTER TABLE delivery_notes ADD COLUMN IF NOT EXISTS unit_price_fcfa INTEGER;",
         "ALTER TABLE delivery_notes ADD COLUMN IF NOT EXISTS line_total_fcfa INTEGER;",
         "ALTER TABLE delivery_notes ADD COLUMN IF NOT EXISTS document_number_normalized TEXT;",
+        "ALTER TABLE whatsapp_sessions ADD COLUMN IF NOT EXISTS flow_data JSONB DEFAULT '{}';",
+        """
+        CREATE TABLE IF NOT EXISTS accounting_submissions (
+            id SERIAL PRIMARY KEY,
+            business_id INTEGER REFERENCES businesses(id),
+            employee_id INTEGER REFERENCES employees(id),
+            sender TEXT NOT NULL,
+            submission_type TEXT NOT NULL,
+            receipt_id TEXT UNIQUE,
+            amount INTEGER,
+            payload JSONB NOT NULL,
+            whatsapp_message_id TEXT,
+            proof_media_id TEXT,
+            status TEXT DEFAULT 'confirmed',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """,
     ]
     for statement in migrations:
         cur.execute(statement)
@@ -275,6 +292,9 @@ def ensure_whatsapp_sessions_table() -> None:
         CREATE UNIQUE INDEX IF NOT EXISTS whatsapp_sessions_business_phone_unique
         ON whatsapp_sessions (business_id, phone);
         """
+    )
+    cur.execute(
+        "ALTER TABLE whatsapp_sessions ADD COLUMN IF NOT EXISTS flow_data JSONB DEFAULT '{}';"
     )
     conn.commit()
     cur.close()

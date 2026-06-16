@@ -1,0 +1,719 @@
+"""WhatsApp accounting state machine router (PIN → master menu → multi-step flows)."""
+
+from __future__ import annotations
+
+import logging
+import re
+from dataclasses import dataclass, field
+from typing import Any, Optional
+
+from whatsapp_access import (
+    STATE_AWAITING_PIN,
+    STATE_MAIN_MENU,
+    TYPE_BANK,
+    TYPE_CASH_RECEIVED,
+    TYPE_EXPENSE,
+    TYPE_MERCHANDISE,
+    TYPE_SUPPLIER,
+    advance_step,
+    ensure_session_row,
+    is_cancel_command,
+    is_greeting,
+    looks_like_pin_attempt,
+    reset_session,
+    set_main_menu,
+    set_session_after_pin,
+    staff_pin_enabled,
+    start_flow,
+    update_flow_data,
+    verify_staff_pin,
+)
+from whatsapp_client import format_ask_pin_reply, format_wrong_pin_reply, send_whatsapp_text
+from whatsapp_prompts import (
+    BK_AMOUNT,
+    BK_PROOF_DEPOSIT,
+    BK_PROOF_WITHDRAW,
+    BK_TYPE,
+    CR_AMOUNT,
+    CR_CLIENT,
+    CR_JUSTIFICATION,
+    CR_LOCATION,
+    CR_PROOF,
+    ERR_AMOUNT,
+    ERR_CHOICE,
+    ERR_PHOTO_OR_ZERO,
+    ERR_PHOTO_REQUIRED,
+    ERR_TEXT_REQUIRED,
+    ERR_UNEXPECTED_PHOTO,
+    EX_AMOUNT,
+    EX_CATEGORY,
+    EX_JUSTIFICATION,
+    EX_PROOF,
+    SP_AMOUNT,
+    SP_PROOF,
+    SP_TYPE,
+    TR_DOCUMENT,
+    TR_PROOF,
+    TR_SHORTAGE,
+    TR_STATUS,
+    TR_TRUCK,
+    format_master_menu,
+    format_saved,
+)
+from whatsapp_submissions import save_submission
+
+logger = logging.getLogger("uvicorn.error")
+
+# Step state keys
+STEP_CR_AMOUNT = "cr.amount"
+STEP_CR_CLIENT = "cr.client"
+STEP_CR_LOCATION = "cr.location"
+STEP_CR_PROOF = "cr.proof"
+STEP_CR_JUSTIFICATION = "cr.justification"
+
+STEP_EX_AMOUNT = "ex.amount"
+STEP_EX_CATEGORY = "ex.category"
+STEP_EX_PROOF = "ex.proof"
+STEP_EX_JUSTIFICATION = "ex.justification"
+
+STEP_TR_TRUCK = "tr.truck"
+STEP_TR_DOCUMENT = "tr.document"
+STEP_TR_STATUS = "tr.status"
+STEP_TR_SHORTAGE = "tr.shortage"
+STEP_TR_PROOF = "tr.proof"
+
+STEP_BK_TYPE = "bk.type"
+STEP_BK_AMOUNT = "bk.amount"
+STEP_BK_PROOF = "bk.proof"
+
+STEP_SP_TYPE = "sp.type"
+STEP_SP_AMOUNT = "sp.amount"
+STEP_SP_PROOF = "sp.proof"
+
+LOCATION_LABELS = {
+    "1": "My Possession",
+    "2": "Warehouse Safe",
+    "3": "Handed to Govind",
+}
+
+EXPENSE_CATEGORIES = {
+    "1": "Fuel",
+    "2": "Warehouse/Logistics",
+    "3": "Labor",
+    "4": "Food/Refreshments",
+    "5": "Customs/Admin",
+    "6": "Other",
+}
+
+BANK_TYPES = {
+    "1": "Cash to Bank Deposit",
+    "2": "Bank to Cash Withdrawal",
+}
+
+SUPPLIER_TYPES = {
+    "1": "International Food Import Supplier",
+    "2": "Local Port / Customs Fees",
+    "3": "Other",
+}
+
+MENU_CHOICES = {
+    "1": (TYPE_CASH_RECEIVED, STEP_CR_AMOUNT, CR_AMOUNT),
+    "2": (TYPE_EXPENSE, STEP_EX_AMOUNT, EX_AMOUNT),
+    "3": (TYPE_MERCHANDISE, STEP_TR_TRUCK, TR_TRUCK),
+    "4": (TYPE_BANK, STEP_BK_TYPE, BK_TYPE),
+    "5": (TYPE_SUPPLIER, STEP_SP_TYPE, SP_TYPE),
+}
+
+
+@dataclass
+class FlowResult:
+    handled: bool = True
+    status: dict[str, Any] = field(default_factory=dict)
+
+
+def _parse_amount(text: str) -> Optional[int]:
+    digits = re.sub(r"[^\d]", "", (text or "").strip())
+    if not digits:
+        return None
+    try:
+        return int(digits)
+    except ValueError:
+        return None
+
+
+def _parse_choice(text: str, valid: dict[str, str]) -> Optional[str]:
+    key = (text or "").strip()
+    if key in valid:
+        return key
+    return None
+
+
+def _employee_name(employee: dict) -> str:
+    return employee.get("name") or "there"
+
+
+async def _reply(phone: str, body: str) -> None:
+    await send_whatsapp_text(phone, body)
+
+
+async def _show_main_menu(phone: str, employee: dict) -> FlowResult:
+    set_main_menu(phone)
+    await _reply(phone, format_master_menu(_employee_name(employee)))
+    return FlowResult(status={"status": "main_menu", "sender": phone})
+
+
+async def handle_whatsapp_flow(
+    sender: str,
+    employee: dict,
+    *,
+    message_type: str,
+    message: dict,
+    text_body: Optional[str],
+    is_media: bool,
+    media_id: Optional[str],
+    mime_type: Optional[str],
+    whatsapp_message_id: Optional[str],
+) -> FlowResult:
+    if not staff_pin_enabled():
+        return FlowResult(handled=False, status={"status": "pin_disabled"})
+
+    try:
+        session = ensure_session_row(sender)
+        state = session.get("state") or STATE_AWAITING_PIN
+        name = _employee_name(employee)
+
+        if state == STATE_AWAITING_PIN:
+            return await _handle_pin(
+                sender, employee, text_body=text_body, is_media=is_media
+            )
+
+        if is_cancel_command(text_body or "") and state == STATE_MAIN_MENU:
+            return await _show_main_menu(sender, employee)
+
+        if is_cancel_command(text_body or ""):
+            return await _show_main_menu(sender, employee)
+
+        if state == STATE_MAIN_MENU:
+            return await _handle_main_menu(
+                sender, employee, text_body=text_body, is_media=is_media
+            )
+
+        return await _handle_flow_step(
+            sender,
+            employee,
+            session=session,
+            message_type=message_type,
+            text_body=text_body,
+            is_media=is_media,
+            media_id=media_id,
+            whatsapp_message_id=whatsapp_message_id,
+        )
+    except Exception:
+        logger.exception("WhatsApp flow failed for sender %s", sender)
+        try:
+            await _reply(sender, format_ask_pin_reply(_employee_name(employee)))
+        except Exception:
+            logger.exception("Failed to send flow recovery message to %s", sender)
+        return FlowResult(status={"status": "flow_error", "sender": sender})
+
+
+async def _handle_pin(
+    sender: str,
+    employee: dict,
+    *,
+    text_body: Optional[str],
+    is_media: bool,
+) -> FlowResult:
+    name = _employee_name(employee)
+    if is_media:
+        await _reply(sender, format_ask_pin_reply(name))
+        return FlowResult(status={"status": "awaiting_pin", "sender": sender})
+
+    text = (text_body or "").strip()
+    if is_greeting(text) or not text:
+        await _reply(sender, format_ask_pin_reply(name))
+        return FlowResult(status={"status": "awaiting_pin", "sender": sender})
+
+    if looks_like_pin_attempt(text):
+        if verify_staff_pin(text):
+            set_session_after_pin(sender)
+            return await _show_main_menu(sender, employee)
+        await _reply(sender, format_wrong_pin_reply())
+        return FlowResult(status={"status": "wrong_pin", "sender": sender})
+
+    await _reply(sender, format_ask_pin_reply(name))
+    return FlowResult(status={"status": "awaiting_pin", "sender": sender})
+
+
+async def _handle_main_menu(
+    sender: str,
+    employee: dict,
+    *,
+    text_body: Optional[str],
+    is_media: bool,
+) -> FlowResult:
+    if is_media:
+        await _reply(sender, ERR_UNEXPECTED_PHOTO.format(prompt=format_master_menu(_employee_name(employee))))
+        return FlowResult(status={"status": "main_menu", "sender": sender})
+
+    choice = (text_body or "").strip()
+    if choice not in MENU_CHOICES:
+        hint = "Reply 1–5 to choose, or 0 to start over."
+        await _reply(sender, ERR_CHOICE.format(hint=hint) + "\n\n" + format_master_menu(_employee_name(employee)))
+        return FlowResult(status={"status": "invalid_menu_choice", "sender": sender})
+
+    flow_type, first_step, prompt = MENU_CHOICES[choice]
+    start_flow(sender, flow_type, first_step)
+    await _reply(sender, prompt)
+    return FlowResult(status={"status": "flow_started", "flow": flow_type, "sender": sender})
+
+
+async def _handle_flow_step(
+    sender: str,
+    employee: dict,
+    *,
+    session: dict,
+    message_type: str,
+    text_body: Optional[str],
+    is_media: bool,
+    media_id: Optional[str],
+    whatsapp_message_id: Optional[str],
+) -> FlowResult:
+    state = session.get("state") or STATE_MAIN_MENU
+    flow_type = session.get("selected_action")
+    flow_data = session.get("flow_data") or {}
+    text = (text_body or "").strip()
+
+    handlers = {
+        STEP_CR_AMOUNT: _step_cr_amount,
+        STEP_CR_CLIENT: _step_cr_client,
+        STEP_CR_LOCATION: _step_cr_location,
+        STEP_CR_PROOF: _step_cr_proof,
+        STEP_CR_JUSTIFICATION: _step_cr_justification,
+        STEP_EX_AMOUNT: _step_ex_amount,
+        STEP_EX_CATEGORY: _step_ex_category,
+        STEP_EX_PROOF: _step_ex_proof,
+        STEP_EX_JUSTIFICATION: _step_ex_justification,
+        STEP_TR_TRUCK: _step_tr_truck,
+        STEP_TR_DOCUMENT: _step_tr_document,
+        STEP_TR_STATUS: _step_tr_status,
+        STEP_TR_SHORTAGE: _step_tr_shortage,
+        STEP_TR_PROOF: _step_tr_proof,
+        STEP_BK_TYPE: _step_bk_type,
+        STEP_BK_AMOUNT: _step_bk_amount,
+        STEP_BK_PROOF: _step_bk_proof,
+        STEP_SP_TYPE: _step_sp_type,
+        STEP_SP_AMOUNT: _step_sp_amount,
+        STEP_SP_PROOF: _step_sp_proof,
+    }
+
+    handler = handlers.get(state)
+    if not handler:
+        return await _show_main_menu(sender, employee)
+
+    return await handler(
+        sender,
+        employee,
+        flow_type=flow_type,
+        flow_data=flow_data,
+        text=text,
+        is_media=is_media,
+        media_id=media_id,
+        whatsapp_message_id=whatsapp_message_id,
+    )
+
+
+async def _finish_submission(
+    sender: str,
+    employee: dict,
+    *,
+    submission_type: str,
+    amount: Optional[int],
+    payload: dict[str, Any],
+    summary: str,
+    whatsapp_message_id: Optional[str],
+    proof_media_id: Optional[str],
+) -> FlowResult:
+    _, receipt_id = save_submission(
+        employee_id=employee["id"],
+        sender=sender,
+        submission_type=submission_type,
+        amount=amount,
+        payload=payload,
+        whatsapp_message_id=whatsapp_message_id,
+        proof_media_id=proof_media_id,
+    )
+    set_main_menu(sender)
+    await _reply(sender, format_saved(receipt_id, summary, _employee_name(employee)))
+    return FlowResult(
+        status={
+            "status": "saved",
+            "submission_type": submission_type,
+            "receipt_id": receipt_id,
+            "sender": sender,
+        }
+    )
+
+
+# --- Choice 1: Cash Received ---
+
+async def _step_cr_amount(sender, employee, **kwargs) -> FlowResult:
+    text, is_media = kwargs["text"], kwargs["is_media"]
+    if is_media:
+        await _reply(sender, ERR_UNEXPECTED_PHOTO.format(prompt=CR_AMOUNT))
+        return FlowResult(status={"status": "validation_error", "step": STEP_CR_AMOUNT})
+    amount = _parse_amount(text)
+    if amount is None:
+        await _reply(sender, ERR_AMOUNT)
+        return FlowResult(status={"status": "validation_error", "step": STEP_CR_AMOUNT})
+    update_flow_data(sender, amount=amount)
+    advance_step(sender, STEP_CR_CLIENT)
+    await _reply(sender, CR_CLIENT)
+    return FlowResult(status={"status": "flow_step", "step": STEP_CR_CLIENT})
+
+
+async def _step_cr_client(sender, employee, **kwargs) -> FlowResult:
+    text, is_media = kwargs["text"], kwargs["is_media"]
+    if is_media or not text:
+        await _reply(sender, ERR_TEXT_REQUIRED if not is_media else ERR_UNEXPECTED_PHOTO.format(prompt=CR_CLIENT))
+        return FlowResult(status={"status": "validation_error", "step": STEP_CR_CLIENT})
+    update_flow_data(sender, client=text)
+    advance_step(sender, STEP_CR_LOCATION)
+    await _reply(sender, CR_LOCATION)
+    return FlowResult(status={"status": "flow_step", "step": STEP_CR_LOCATION})
+
+
+async def _step_cr_location(sender, employee, **kwargs) -> FlowResult:
+    text, is_media = kwargs["text"], kwargs["is_media"]
+    if is_media:
+        await _reply(sender, ERR_UNEXPECTED_PHOTO.format(prompt=CR_LOCATION))
+        return FlowResult(status={"status": "validation_error", "step": STEP_CR_LOCATION})
+    choice = _parse_choice(text, LOCATION_LABELS)
+    if not choice:
+        await _reply(sender, ERR_CHOICE.format(hint="Reply 1, 2, or 3.") + "\n\n" + CR_LOCATION)
+        return FlowResult(status={"status": "validation_error", "step": STEP_CR_LOCATION})
+    update_flow_data(sender, location=LOCATION_LABELS[choice], location_code=choice)
+    advance_step(sender, STEP_CR_PROOF)
+    await _reply(sender, CR_PROOF)
+    return FlowResult(status={"status": "flow_step", "step": STEP_CR_PROOF})
+
+
+async def _step_cr_proof(sender, employee, **kwargs) -> FlowResult:
+    text, is_media, media_id = kwargs["text"], kwargs["is_media"], kwargs["media_id"]
+    if is_media and media_id:
+        update_flow_data(sender, proof_media_id=media_id, proof_skipped=False)
+        return await _save_cash_received(sender, employee, kwargs)
+    if text == "0":
+        advance_step(sender, STEP_CR_JUSTIFICATION)
+        await _reply(sender, CR_JUSTIFICATION)
+        return FlowResult(status={"status": "flow_step", "step": STEP_CR_JUSTIFICATION})
+    await _reply(sender, ERR_PHOTO_OR_ZERO)
+    return FlowResult(status={"status": "validation_error", "step": STEP_CR_PROOF})
+
+
+async def _step_cr_justification(sender, employee, **kwargs) -> FlowResult:
+    text, is_media = kwargs["text"], kwargs["is_media"]
+    if is_media or not text:
+        await _reply(sender, ERR_TEXT_REQUIRED if not is_media else ERR_UNEXPECTED_PHOTO.format(prompt=CR_JUSTIFICATION))
+        return FlowResult(status={"status": "validation_error", "step": STEP_CR_JUSTIFICATION})
+    update_flow_data(sender, missing_paperwork_reason=text, proof_skipped=True)
+    return await _save_cash_received(sender, employee, kwargs)
+
+
+async def _save_cash_received(sender, employee, kwargs) -> FlowResult:
+    session = ensure_session_row(sender)
+    data = session.get("flow_data") or {}
+    summary = (
+        f"💰 Cash Received: {data.get('amount', 0):,} FCFA\n"
+        f"Client: {data.get('client', '—')}\n"
+        f"Location: {data.get('location', '—')}"
+    )
+    if data.get("proof_skipped"):
+        summary += f"\nNote: {data.get('missing_paperwork_reason', '—')}"
+    return await _finish_submission(
+        sender,
+        employee,
+        submission_type=TYPE_CASH_RECEIVED,
+        amount=data.get("amount"),
+        payload=data,
+        summary=summary,
+        whatsapp_message_id=kwargs.get("whatsapp_message_id"),
+        proof_media_id=data.get("proof_media_id"),
+    )
+
+
+# --- Choice 2: Expense ---
+
+async def _step_ex_amount(sender, employee, **kwargs) -> FlowResult:
+    text, is_media = kwargs["text"], kwargs["is_media"]
+    if is_media:
+        await _reply(sender, ERR_UNEXPECTED_PHOTO.format(prompt=EX_AMOUNT))
+        return FlowResult(status={"status": "validation_error", "step": STEP_EX_AMOUNT})
+    amount = _parse_amount(text)
+    if amount is None:
+        await _reply(sender, ERR_AMOUNT)
+        return FlowResult(status={"status": "validation_error", "step": STEP_EX_AMOUNT})
+    update_flow_data(sender, amount=amount)
+    advance_step(sender, STEP_EX_CATEGORY)
+    await _reply(sender, EX_CATEGORY)
+    return FlowResult(status={"status": "flow_step", "step": STEP_EX_CATEGORY})
+
+
+async def _step_ex_category(sender, employee, **kwargs) -> FlowResult:
+    text, is_media = kwargs["text"], kwargs["is_media"]
+    if is_media:
+        await _reply(sender, ERR_UNEXPECTED_PHOTO.format(prompt=EX_CATEGORY))
+        return FlowResult(status={"status": "validation_error", "step": STEP_EX_CATEGORY})
+    choice = _parse_choice(text, EXPENSE_CATEGORIES)
+    if not choice:
+        await _reply(sender, ERR_CHOICE.format(hint="Reply 1–6.") + "\n\n" + EX_CATEGORY)
+        return FlowResult(status={"status": "validation_error", "step": STEP_EX_CATEGORY})
+    update_flow_data(sender, category=EXPENSE_CATEGORIES[choice], category_code=choice)
+    advance_step(sender, STEP_EX_PROOF)
+    await _reply(sender, EX_PROOF)
+    return FlowResult(status={"status": "flow_step", "step": STEP_EX_PROOF})
+
+
+async def _step_ex_proof(sender, employee, **kwargs) -> FlowResult:
+    text, is_media, media_id = kwargs["text"], kwargs["is_media"], kwargs["media_id"]
+    if is_media and media_id:
+        update_flow_data(sender, proof_media_id=media_id, proof_skipped=False)
+        return await _save_expense(sender, employee, kwargs)
+    if text == "0":
+        advance_step(sender, STEP_EX_JUSTIFICATION)
+        await _reply(sender, EX_JUSTIFICATION)
+        return FlowResult(status={"status": "flow_step", "step": STEP_EX_JUSTIFICATION})
+    await _reply(sender, ERR_PHOTO_OR_ZERO)
+    return FlowResult(status={"status": "validation_error", "step": STEP_EX_PROOF})
+
+
+async def _step_ex_justification(sender, employee, **kwargs) -> FlowResult:
+    text, is_media = kwargs["text"], kwargs["is_media"]
+    if is_media or not text:
+        await _reply(sender, ERR_TEXT_REQUIRED if not is_media else ERR_UNEXPECTED_PHOTO.format(prompt=EX_JUSTIFICATION))
+        return FlowResult(status={"status": "validation_error", "step": STEP_EX_JUSTIFICATION})
+    update_flow_data(sender, missing_paperwork_reason=text, proof_skipped=True)
+    return await _save_expense(sender, employee, kwargs)
+
+
+async def _save_expense(sender, employee, kwargs) -> FlowResult:
+    session = ensure_session_row(sender)
+    data = session.get("flow_data") or {}
+    summary = (
+        f"🛑 Expense: {data.get('amount', 0):,} FCFA\n"
+        f"Category: {data.get('category', '—')}"
+    )
+    if data.get("proof_skipped"):
+        summary += f"\nNote: {data.get('missing_paperwork_reason', '—')}"
+    return await _finish_submission(
+        sender,
+        employee,
+        submission_type=TYPE_EXPENSE,
+        amount=data.get("amount"),
+        payload=data,
+        summary=summary,
+        whatsapp_message_id=kwargs.get("whatsapp_message_id"),
+        proof_media_id=data.get("proof_media_id"),
+    )
+
+
+# --- Choice 3: Truck / Delivery ---
+
+async def _step_tr_truck(sender, employee, **kwargs) -> FlowResult:
+    text, is_media = kwargs["text"], kwargs["is_media"]
+    if is_media or not text:
+        await _reply(sender, ERR_TEXT_REQUIRED if not is_media else ERR_UNEXPECTED_PHOTO.format(prompt=TR_TRUCK))
+        return FlowResult(status={"status": "validation_error", "step": STEP_TR_TRUCK})
+    update_flow_data(sender, truck_id=text)
+    advance_step(sender, STEP_TR_DOCUMENT)
+    await _reply(sender, TR_DOCUMENT)
+    return FlowResult(status={"status": "flow_step", "step": STEP_TR_DOCUMENT})
+
+
+async def _step_tr_document(sender, employee, **kwargs) -> FlowResult:
+    text, is_media = kwargs["text"], kwargs["is_media"]
+    if is_media or not text:
+        await _reply(sender, ERR_TEXT_REQUIRED if not is_media else ERR_UNEXPECTED_PHOTO.format(prompt=TR_DOCUMENT))
+        return FlowResult(status={"status": "validation_error", "step": STEP_TR_DOCUMENT})
+    update_flow_data(sender, document_id=text)
+    advance_step(sender, STEP_TR_STATUS)
+    await _reply(sender, TR_STATUS)
+    return FlowResult(status={"status": "flow_step", "step": STEP_TR_STATUS})
+
+
+async def _step_tr_status(sender, employee, **kwargs) -> FlowResult:
+    text, is_media = kwargs["text"], kwargs["is_media"]
+    if is_media:
+        await _reply(sender, ERR_UNEXPECTED_PHOTO.format(prompt=TR_STATUS))
+        return FlowResult(status={"status": "validation_error", "step": STEP_TR_STATUS})
+    if text == "1":
+        update_flow_data(sender, loading_status="Fully Loaded", partial=False)
+        advance_step(sender, STEP_TR_PROOF)
+        await _reply(sender, TR_PROOF)
+        return FlowResult(status={"status": "flow_step", "step": STEP_TR_PROOF})
+    if text == "2":
+        update_flow_data(sender, loading_status="Partial Loading / Shortage", partial=True)
+        advance_step(sender, STEP_TR_SHORTAGE)
+        await _reply(sender, TR_SHORTAGE)
+        return FlowResult(status={"status": "flow_step", "step": STEP_TR_SHORTAGE})
+    await _reply(sender, ERR_CHOICE.format(hint="Reply 1 or 2.") + "\n\n" + TR_STATUS)
+    return FlowResult(status={"status": "validation_error", "step": STEP_TR_STATUS})
+
+
+async def _step_tr_shortage(sender, employee, **kwargs) -> FlowResult:
+    text, is_media = kwargs["text"], kwargs["is_media"]
+    if is_media or not text:
+        await _reply(sender, ERR_TEXT_REQUIRED if not is_media else ERR_UNEXPECTED_PHOTO.format(prompt=TR_SHORTAGE))
+        return FlowResult(status={"status": "validation_error", "step": STEP_TR_SHORTAGE})
+    update_flow_data(sender, shortage_details=text)
+    advance_step(sender, STEP_TR_PROOF)
+    await _reply(sender, TR_PROOF)
+    return FlowResult(status={"status": "flow_step", "step": STEP_TR_PROOF})
+
+
+async def _step_tr_proof(sender, employee, **kwargs) -> FlowResult:
+    is_media, media_id = kwargs["is_media"], kwargs["media_id"]
+    if not is_media or not media_id:
+        await _reply(sender, ERR_PHOTO_REQUIRED + "\n\n" + TR_PROOF)
+        return FlowResult(status={"status": "validation_error", "step": STEP_TR_PROOF})
+    update_flow_data(sender, proof_media_id=media_id)
+    session = ensure_session_row(sender)
+    data = session.get("flow_data") or {}
+    summary = (
+        f"🚚 Truck/Delivery: {data.get('truck_id', '—')}\n"
+        f"DO/Invoice: {data.get('document_id', '—')}\n"
+        f"Status: {data.get('loading_status', '—')}"
+    )
+    if data.get("shortage_details"):
+        summary += f"\nShortage: {data['shortage_details']}"
+    return await _finish_submission(
+        sender,
+        employee,
+        submission_type=TYPE_MERCHANDISE,
+        amount=None,
+        payload=data,
+        summary=summary,
+        whatsapp_message_id=kwargs.get("whatsapp_message_id"),
+        proof_media_id=media_id,
+    )
+
+
+# --- Choice 4: Bank ---
+
+async def _step_bk_type(sender, employee, **kwargs) -> FlowResult:
+    text, is_media = kwargs["text"], kwargs["is_media"]
+    if is_media:
+        await _reply(sender, ERR_UNEXPECTED_PHOTO.format(prompt=BK_TYPE))
+        return FlowResult(status={"status": "validation_error", "step": STEP_BK_TYPE})
+    choice = _parse_choice(text, BANK_TYPES)
+    if not choice:
+        await _reply(sender, ERR_CHOICE.format(hint="Reply 1 or 2.") + "\n\n" + BK_TYPE)
+        return FlowResult(status={"status": "validation_error", "step": STEP_BK_TYPE})
+    update_flow_data(sender, bank_action=BANK_TYPES[choice], bank_action_code=choice)
+    advance_step(sender, STEP_BK_AMOUNT)
+    await _reply(sender, BK_AMOUNT)
+    return FlowResult(status={"status": "flow_step", "step": STEP_BK_AMOUNT})
+
+
+async def _step_bk_amount(sender, employee, **kwargs) -> FlowResult:
+    text, is_media = kwargs["text"], kwargs["is_media"]
+    if is_media:
+        await _reply(sender, ERR_UNEXPECTED_PHOTO.format(prompt=BK_AMOUNT))
+        return FlowResult(status={"status": "validation_error", "step": STEP_BK_AMOUNT})
+    amount = _parse_amount(text)
+    if amount is None:
+        await _reply(sender, ERR_AMOUNT)
+        return FlowResult(status={"status": "validation_error", "step": STEP_BK_AMOUNT})
+    update_flow_data(sender, amount=amount)
+    advance_step(sender, STEP_BK_PROOF)
+    session = ensure_session_row(sender)
+    proof_prompt = (
+        BK_PROOF_DEPOSIT
+        if (session.get("flow_data") or {}).get("bank_action_code") == "1"
+        else BK_PROOF_WITHDRAW
+    )
+    update_flow_data(sender, proof_prompt=proof_prompt)
+    await _reply(sender, proof_prompt)
+    return FlowResult(status={"status": "flow_step", "step": STEP_BK_PROOF})
+
+
+async def _step_bk_proof(sender, employee, **kwargs) -> FlowResult:
+    is_media, media_id = kwargs["is_media"], kwargs["media_id"]
+    session = ensure_session_row(sender)
+    data = session.get("flow_data") or {}
+    if not is_media or not media_id:
+        prompt = data.get("proof_prompt") or BK_PROOF_DEPOSIT
+        await _reply(sender, ERR_PHOTO_REQUIRED + "\n\n" + prompt)
+        return FlowResult(status={"status": "validation_error", "step": STEP_BK_PROOF})
+    update_flow_data(sender, proof_media_id=media_id)
+    data = ensure_session_row(sender).get("flow_data") or {}
+    summary = (
+        f"🏦 Bank: {data.get('bank_action', '—')}\n"
+        f"Amount: {data.get('amount', 0):,} FCFA"
+    )
+    return await _finish_submission(
+        sender,
+        employee,
+        submission_type=TYPE_BANK,
+        amount=data.get("amount"),
+        payload=data,
+        summary=summary,
+        whatsapp_message_id=kwargs.get("whatsapp_message_id"),
+        proof_media_id=media_id,
+    )
+
+
+# --- Choice 5: Supplier ---
+
+async def _step_sp_type(sender, employee, **kwargs) -> FlowResult:
+    text, is_media = kwargs["text"], kwargs["is_media"]
+    if is_media:
+        await _reply(sender, ERR_UNEXPECTED_PHOTO.format(prompt=SP_TYPE))
+        return FlowResult(status={"status": "validation_error", "step": STEP_SP_TYPE})
+    choice = _parse_choice(text, SUPPLIER_TYPES)
+    if not choice:
+        await _reply(sender, ERR_CHOICE.format(hint="Reply 1, 2, or 3.") + "\n\n" + SP_TYPE)
+        return FlowResult(status={"status": "validation_error", "step": STEP_SP_TYPE})
+    update_flow_data(sender, payment_type=SUPPLIER_TYPES[choice], payment_type_code=choice)
+    advance_step(sender, STEP_SP_AMOUNT)
+    await _reply(sender, SP_AMOUNT)
+    return FlowResult(status={"status": "flow_step", "step": STEP_SP_AMOUNT})
+
+
+async def _step_sp_amount(sender, employee, **kwargs) -> FlowResult:
+    text, is_media = kwargs["text"], kwargs["is_media"]
+    if is_media:
+        await _reply(sender, ERR_UNEXPECTED_PHOTO.format(prompt=SP_AMOUNT))
+        return FlowResult(status={"status": "validation_error", "step": STEP_SP_AMOUNT})
+    amount = _parse_amount(text)
+    if amount is None:
+        await _reply(sender, ERR_AMOUNT)
+        return FlowResult(status={"status": "validation_error", "step": STEP_SP_AMOUNT})
+    update_flow_data(sender, amount=amount)
+    advance_step(sender, STEP_SP_PROOF)
+    await _reply(sender, SP_PROOF)
+    return FlowResult(status={"status": "flow_step", "step": STEP_SP_PROOF})
+
+
+async def _step_sp_proof(sender, employee, **kwargs) -> FlowResult:
+    is_media, media_id = kwargs["is_media"], kwargs["media_id"]
+    if not is_media or not media_id:
+        await _reply(sender, ERR_PHOTO_REQUIRED + "\n\n" + SP_PROOF)
+        return FlowResult(status={"status": "validation_error", "step": STEP_SP_PROOF})
+    update_flow_data(sender, proof_media_id=media_id)
+    session = ensure_session_row(sender)
+    data = session.get("flow_data") or {}
+    summary = (
+        f"🚢 Supplier payment: {data.get('payment_type', '—')}\n"
+        f"Amount: {data.get('amount', 0):,} FCFA"
+    )
+    return await _finish_submission(
+        sender,
+        employee,
+        submission_type=TYPE_SUPPLIER,
+        amount=data.get("amount"),
+        payload=data,
+        summary=summary,
+        whatsapp_message_id=kwargs.get("whatsapp_message_id"),
+        proof_media_id=media_id,
+    )

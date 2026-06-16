@@ -24,6 +24,7 @@ from auth import (
     verify_password,
 )
 from whatsapp_access import staff_pin_enabled, staff_pin_length
+from whatsapp_flow import handle_whatsapp_flow
 
 from db import (
     DEFAULT_BUSINESS_ID,
@@ -31,7 +32,6 @@ from db import (
     ensure_default_business,
     ensure_whatsapp_sessions_table,
     get_db_connection,
-    can_submit_delivery_note,
     get_employee_by_phone,
     message_exists,
     normalize_phone,
@@ -39,6 +39,7 @@ from db import (
     try_claim_whatsapp_message,
     whatsapp_sessions_table_ready,
 )
+from whatsapp_submissions import ensure_accounting_submissions_table
 from categories import get_category_summary, list_categories
 from products import (
     get_weekly_deliveries_by_client,
@@ -71,7 +72,6 @@ from reports import get_monthly_report
 from whatsapp_client import (
     check_whatsapp_token,
     download_whatsapp_media,
-    format_ask_pin_reply,
     format_confirmation,
     format_delivery_confirmation,
     format_delivery_received_ack,
@@ -81,7 +81,7 @@ from whatsapp_client import (
     format_unsupported_message_reply,
     send_whatsapp_text,
 )
-from whatsapp_gate import AccessDecision, block_unless_cash_mode, handle_whatsapp_access
+from whatsapp_gate import AccessDecision
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -93,6 +93,7 @@ templates = Jinja2Templates(directory="templates")
 async def lifespan(app: FastAPI):
     create_tables()
     ensure_whatsapp_sessions_table()
+    ensure_accounting_submissions_table()
     backfill_task = asyncio.create_task(asyncio.to_thread(run_startup_backfills))
     yield
     backfill_task.cancel()
@@ -154,6 +155,7 @@ async def home():
             "dashboard_login",
             "api_v1",
             "whatsapp_staff_pin",
+            "accounting_flow_v1",
         ],
         "gemini_configured": gemini.get("configured"),
         "gemini_api_ok": gemini.get("api_ok"),
@@ -288,13 +290,31 @@ async def whatsapp_webhook(request: Request):
             )
             return {"status": "rejected_unregistered_sender"}
 
-        media = _extract_delivery_media(payload["message"])
         message = payload["message"]
         message_type = payload["message_type"]
         text_body = None
         if message_type == "text":
             text_body = message.get("text", {}).get("body")
 
+        media = _extract_delivery_media(message)
+        media_id = media[0] if media else None
+        mime_type = media[1] if media else None
+
+        if staff_pin_enabled():
+            result = await handle_whatsapp_flow(
+                payload["sender"],
+                employee,
+                message_type=message_type,
+                message=message,
+                text_body=text_body,
+                is_media=bool(media),
+                media_id=media_id,
+                mime_type=mime_type,
+                whatsapp_message_id=whatsapp_message_id,
+            )
+            return result.status or {"status": "handled"}
+
+        # Legacy free-text / Gemini delivery path when PIN gate is disabled
         if media:
             if not try_claim_whatsapp_message(
                 whatsapp_message_id,
@@ -303,29 +323,9 @@ async def whatsapp_webhook(request: Request):
                 {"status": "processing", "type": message_type},
             ):
                 return {"status": "duplicate"}
-
-            access = await handle_whatsapp_access(
-                payload["sender"],
-                employee,
-                message_type=message_type,
-                message=message,
-                text_body=text_body,
-                is_media=True,
-            )
-            if not access.proceed:
-                return access.status or {"status": "access_denied"}
-
-            if not can_submit_delivery_note(employee):
-                asyncio.create_task(
-                    send_whatsapp_text(
-                        payload["sender"], format_delivery_unauthorized_reply()
-                    )
-                )
-                return {"status": "rejected_delivery_photo", "sender": payload["sender"]}
-
             await send_whatsapp_text(payload["sender"], format_delivery_received_ack())
             asyncio.create_task(
-                _process_whatsapp_payload(payload, media, access=access)
+                _process_whatsapp_payload(payload, media, access=None)
             )
             return {"status": "accepted"}
 
@@ -398,22 +398,7 @@ async def _process_whatsapp_payload(
         text_body = message.get("text", {}).get("body")
 
     if access is None:
-        access = await handle_whatsapp_access(
-            sender,
-            employee,
-            message_type=message_type,
-            message=message,
-            text_body=text_body,
-            is_media=bool(media),
-        )
-        logger.info(
-            "WhatsApp access decision for %s: proceed=%s status=%s",
-            sender,
-            access.proceed,
-            (access.status or {}).get("status"),
-        )
-    if not access.proceed:
-        return access.status or {"status": "access_denied", "sender": sender}
+        access = AccessDecision(proceed=True)
 
     if message_type == "text" and not media:
         body = message.get("text", {}).get("body")
@@ -424,39 +409,24 @@ async def _process_whatsapp_payload(
             )
             return {"status": "ignored", "reason": "empty_text_body"}
         try:
-            blocked = await block_unless_cash_mode(sender, employee)
-            if blocked:
-                return blocked
             return await _handle_text_message(
                 sender, body, whatsapp_message_id, employee
             )
         except Exception:
             logger.exception("WhatsApp text handling failed: %s", whatsapp_message_id)
-            if staff_pin_enabled():
-                await send_whatsapp_text(
-                    sender,
-                    format_ask_pin_reply(employee.get("name") or "there"),
-                )
-            else:
-                await send_whatsapp_text(
-                    sender,
-                    "⚠️ Something went wrong saving your message. Please try again in a minute.",
-                )
+            await send_whatsapp_text(
+                sender,
+                "⚠️ Something went wrong saving your message. Please try again in a minute.",
+            )
             return {"status": "error", "phase": "text"}
 
     try:
         if media:
-            if not can_submit_delivery_note(employee):
-                await send_whatsapp_text(sender, format_delivery_unauthorized_reply())
-                return {"status": "rejected_delivery_photo", "sender": sender}
             media_id, mime_type, caption = media
             return await _handle_image_message(
                 sender, media_id, mime_type, caption, whatsapp_message_id, employee,
                 message_type=message_type,
             )
-
-        if message_type == "interactive":
-            return access.status or {"status": "interactive_handled", "sender": sender}
 
         await send_whatsapp_text(
             sender,

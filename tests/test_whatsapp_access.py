@@ -4,16 +4,14 @@ os.environ["WHATSAPP_STAFF_PIN"] = "123456"
 os.environ["BUSINESS_NAME"] = "RR Foods SARL"
 
 from whatsapp_access import (
-    ACTION_CASH,
-    ACTION_DELIVERY,
     get_company_name,
+    is_cancel_command,
     is_greeting,
     looks_like_pin_attempt,
-    parse_interactive_action,
-    parse_text_action,
     staff_pin_enabled,
     verify_staff_pin,
 )
+from whatsapp_prompts import format_master_menu
 
 
 def test_staff_pin_enabled():
@@ -40,6 +38,12 @@ def test_is_greeting():
     assert is_greeting("Paid Ahmed 50000") is False
 
 
+def test_is_cancel_command():
+    assert is_cancel_command("0") is True
+    assert is_cancel_command("menu") is True
+    assert is_cancel_command("50000") is False
+
+
 def test_welcome_pin_message():
     from whatsapp_client import format_welcome_pin_reply
 
@@ -50,31 +54,17 @@ def test_welcome_pin_message():
 
 def test_ask_pin_reply_uses_company_name():
     from whatsapp_client import format_ask_pin_reply
+
     message = format_ask_pin_reply("Ameet Kumar")
     assert "RR Foods SARL" in message
     assert get_company_name() == "RR Foods SARL"
 
 
-def test_parse_text_action():
-    assert parse_text_action("1") == ACTION_CASH
-    assert parse_text_action("2") == ACTION_DELIVERY
-    assert parse_text_action("menu") == "cancel"
-    assert parse_text_action("Paid Ahmed 50000") is None
-
-
-def test_parse_interactive_action():
-    message = {
-        "interactive": {
-            "type": "button_reply",
-            "button_reply": {"id": "action_cash", "title": "Cash update"},
-        }
-    }
-    assert parse_interactive_action(message) == ACTION_CASH
-
-    delivery_message = {
-        "interactive": {
-            "type": "button_reply",
-            "button_reply": {"id": "action_delivery", "title": "Delivery photo"},
-        }
-    }
-    assert parse_interactive_action(delivery_message) == ACTION_DELIVERY
+def test_master_menu_lists_all_choices():
+    menu = format_master_menu("Kumar")
+    assert "1 — 💰 Cash Received" in menu
+    assert "2 — 🛑 Cash Expense Made" in menu
+    assert "3 — 🚚 Truck Loading" in menu
+    assert "4 — 🏦 Bank Deposit" in menu
+    assert "5 — 🚢 Supplier" in menu
+    assert "0 — ❌ Cancel" in menu
