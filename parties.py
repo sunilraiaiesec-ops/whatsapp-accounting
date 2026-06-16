@@ -37,6 +37,20 @@ def merge_party_type(existing: Optional[str], new_type: str) -> str:
     return "both"
 
 
+def _row_id(row) -> int:
+    try:
+        return int(row["id"])
+    except (TypeError, KeyError, IndexError):
+        return int(row[0])
+
+
+def _row_id_party_type(row) -> tuple[int, str]:
+    try:
+        return int(row["id"]), row["party_type"]
+    except (TypeError, KeyError, IndexError):
+        return int(row[0]), row[1]
+
+
 def find_or_create_party(
     cur,
     name: str,
@@ -58,7 +72,7 @@ def find_or_create_party(
     )
     row = cur.fetchone()
     if row:
-        party_id, existing_type = row[0], row[1]
+        party_id, existing_type = _row_id_party_type(row)
         merged = merge_party_type(existing_type, party_type)
         if merged != existing_type:
             cur.execute(
@@ -75,7 +89,8 @@ def find_or_create_party(
         """,
         (business_id, cleaned, normalized, party_type),
     )
-    return cur.fetchone()[0]
+    inserted = cur.fetchone()
+    return _row_id(inserted) if inserted else None
 
 
 def resolve_party_for_transaction(cur, party_name: Optional[str], transaction_type: str) -> Optional[int]:
@@ -398,7 +413,7 @@ def create_party_record(
     if not cleaned:
         return None
     conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur = conn.cursor()
     try:
         party_id = find_or_create_party(cur, cleaned, business_id=business_id, party_type=party_type)
         conn.commit()
@@ -409,7 +424,12 @@ def create_party_record(
             (party_id,),
         )
         row = cur.fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        return {"id": row[0], "name": row[1], "party_type": row[2]}
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         cur.close()
         conn.close()

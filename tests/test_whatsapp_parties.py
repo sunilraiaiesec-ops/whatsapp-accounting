@@ -1,4 +1,4 @@
-from parties import can_manage_parties, normalize_party_name
+from parties import _row_id, _row_id_party_type, can_manage_parties, normalize_party_name
 from whatsapp_parties import (
     ADD_NEW_CODE,
     BROWSE_ALL_CODE,
@@ -230,3 +230,14 @@ def test_get_party_page_empty():
     assert parties == []
     assert page == 0
     assert total_pages == 1
+
+
+def test_find_or_create_party_row_parsers():
+    import psycopg2.extras
+
+    tuple_row = (7, "customer")
+    dict_row = psycopg2.extras.RealDictRow({"id": 8, "party_type": "supplier"})
+    assert _row_id_party_type(tuple_row) == (7, "customer")
+    assert _row_id_party_type(dict_row) == (8, "supplier")
+    assert _row_id((42,)) == 42
+    assert _row_id({"id": 99}) == 99
