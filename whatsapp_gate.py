@@ -225,3 +225,31 @@ async def _handle_whatsapp_access_inner(
 async def send_pin_expired_notice(sender: str, employee_name: str) -> None:
     if staff_pin_enabled() and get_session(sender):
         await send_whatsapp_text(sender, format_pin_expired_reply(employee_name))
+
+
+async def block_unless_cash_mode(
+    sender: str,
+    employee: dict,
+) -> Optional[dict[str, Any]]:
+    """Last-line guard: never save text as a transaction unless cash mode is active."""
+    if not staff_pin_enabled():
+        return None
+
+    session = ensure_session_row(sender)
+    state = session.get("state") or STATE_AWAITING_PIN
+    if state == STATE_CASH:
+        return None
+
+    name = employee.get("name") or "there"
+    if state == STATE_AWAITING_PIN:
+        await send_whatsapp_text(sender, format_ask_pin_reply(name))
+        return {"status": "awaiting_pin", "sender": sender}
+    if state == STATE_AWAITING_ACTION:
+        await send_whatsapp_action_menu(sender, name)
+        return {"status": "awaiting_action", "sender": sender}
+    if state == STATE_DELIVERY:
+        await send_whatsapp_text(sender, format_need_delivery_photo_reply())
+        return {"status": "awaiting_delivery_photo", "sender": sender}
+
+    await send_whatsapp_text(sender, format_ask_pin_reply(name))
+    return {"status": "awaiting_pin", "sender": sender}

@@ -23,11 +23,12 @@ from auth import (
     require_dashboard_auth,
     verify_password,
 )
-from whatsapp_access import staff_pin_enabled
+from whatsapp_access import staff_pin_enabled, staff_pin_length
 
 from db import (
     DEFAULT_BUSINESS_ID,
     create_tables,
+    ensure_default_business,
     ensure_whatsapp_sessions_table,
     get_db_connection,
     can_submit_delivery_note,
@@ -79,7 +80,7 @@ from whatsapp_client import (
     format_unsupported_message_reply,
     send_whatsapp_text,
 )
-from whatsapp_gate import AccessDecision, handle_whatsapp_access
+from whatsapp_gate import AccessDecision, block_unless_cash_mode, handle_whatsapp_access
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -158,6 +159,7 @@ async def home():
         "whatsapp_token_valid": wa.get("token_valid"),
         "dashboard_auth_enabled": auth_enabled(),
         "whatsapp_staff_pin_enabled": staff_pin_enabled(),
+        "whatsapp_staff_pin_length": staff_pin_length(),
         "whatsapp_sessions_table": whatsapp_sessions_table_ready(),
         "deploy_commit": DEPLOY_COMMIT,
     }
@@ -400,6 +402,12 @@ async def _process_whatsapp_payload(
             text_body=text_body,
             is_media=bool(media),
         )
+        logger.info(
+            "WhatsApp access decision for %s: proceed=%s status=%s",
+            sender,
+            access.proceed,
+            (access.status or {}).get("status"),
+        )
     if not access.proceed:
         return access.status or {"status": "access_denied", "sender": sender}
 
@@ -422,6 +430,9 @@ async def _process_whatsapp_payload(
                     format_unsupported_message_reply("empty text"),
                 )
                 return {"status": "ignored", "reason": "empty_text_body"}
+            blocked = await block_unless_cash_mode(sender, employee)
+            if blocked:
+                return blocked
             return await _handle_text_message(
                 sender, body, whatsapp_message_id, employee
             )
@@ -448,6 +459,7 @@ async def _handle_text_message(sender, message_text, whatsapp_message_id, employ
     status = transaction_status(parsed)
     raw_data = {"from_user": sender, "text": message_text}
 
+    ensure_default_business()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -483,7 +495,16 @@ async def _handle_text_message(sender, message_text, whatsapp_message_id, employ
         conn.rollback()
         if exc.pgcode == psycopg2.errorcodes.UNIQUE_VIOLATION:
             return {"status": "duplicate", "whatsapp_message_id": whatsapp_message_id}
-        raise
+        logger.exception(
+            "WhatsApp insert integrity error pgcode=%s message_id=%s",
+            exc.pgcode,
+            whatsapp_message_id,
+        )
+        await send_whatsapp_text(
+            sender,
+            "⚠️ Could not save your message (database constraint). Please contact the owner.",
+        )
+        return {"status": "error", "phase": "integrity", "pgcode": exc.pgcode}
     finally:
         cur.close()
         conn.close()

@@ -7,10 +7,13 @@ import psycopg2.extras
 
 from db import DEFAULT_BUSINESS_ID, get_db_connection
 
-STAFF_PIN = (os.environ.get("WHATSAPP_STAFF_PIN") or "").strip()
 SESSION_HOURS = int(os.environ.get("WHATSAPP_SESSION_HOURS") or "8")
 COMPANY_NAME = (os.environ.get("BUSINESS_NAME") or "RR Foods SARL").strip()
 PIN_LENGTH = 6
+
+
+def get_staff_pin() -> str:
+    return (os.environ.get("WHATSAPP_STAFF_PIN") or "").strip()
 
 STATE_AWAITING_PIN = "awaiting_pin"
 STATE_AWAITING_ACTION = "awaiting_action"
@@ -23,23 +26,29 @@ ACTION_CANCEL = "cancel"
 
 
 def staff_pin_enabled() -> bool:
-    return bool(STAFF_PIN)
+    return bool(get_staff_pin())
+
+
+def staff_pin_length() -> int:
+    return len(get_staff_pin())
 
 
 def verify_staff_pin(text: str) -> bool:
-    if not STAFF_PIN:
+    staff_pin = get_staff_pin()
+    if not staff_pin:
         return False
     cleaned = text.strip()
-    if not cleaned.isdigit() or len(cleaned) != len(STAFF_PIN):
+    if not cleaned.isdigit() or len(cleaned) != len(staff_pin):
         return False
-    return secrets.compare_digest(cleaned, STAFF_PIN)
+    return secrets.compare_digest(cleaned, staff_pin)
 
 
 def looks_like_pin_attempt(text: str) -> bool:
-    if not STAFF_PIN:
+    staff_pin = get_staff_pin()
+    if not staff_pin:
         return False
     cleaned = text.strip()
-    return cleaned.isdigit() and len(cleaned) == len(STAFF_PIN)
+    return cleaned.isdigit() and len(cleaned) == len(staff_pin)
 
 
 def get_company_name() -> str:
