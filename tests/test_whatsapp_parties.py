@@ -14,6 +14,7 @@ from whatsapp_parties import (
     parse_party_picker_input,
     search_parties,
 )
+from whatsapp_prompts import active_prompts, set_prompt_lang
 
 
 def test_can_manage_parties_owner():
@@ -33,9 +34,20 @@ def test_can_manage_parties_denied():
 
 
 def test_format_party_search_prompt():
-    msg = format_party_search_prompt(title="Who is the client?", admin_can_add=False)
+    set_prompt_lang("en")
+    msg = format_party_search_prompt(
+        title="Who is the client?", admin_can_add=False, prompts=active_prompts()
+    )
     assert "Type part of the name" in msg
     assert BROWSE_ALL_CODE in msg
+
+
+def test_format_party_search_prompt_french():
+    set_prompt_lang("fr")
+    msg = format_party_search_prompt(
+        title="Quel client?", admin_can_add=False, prompts=active_prompts()
+    )
+    assert "Tapez une partie du nom" in msg
 
 
 def test_format_party_picker_empty_non_admin():
@@ -45,6 +57,7 @@ def test_format_party_picker_empty_non_admin():
         page=0,
         total_pages=1,
         admin_can_add=False,
+        prompts=active_prompts(),
     )
     assert "No names in the list yet" in msg
     assert "Govind, Vikash" in msg
@@ -57,6 +70,7 @@ def test_format_party_search_results():
         query="abesso",
         parties=[{"id": 1, "name": "ABESSO ISSA KOUSSERI", "party_type": "customer"}],
         admin_can_add=True,
+        prompts=active_prompts(),
     )
     assert 'Matches for "abesso"' in msg
     assert "ABESSO ISSA KOUSSERI" in msg

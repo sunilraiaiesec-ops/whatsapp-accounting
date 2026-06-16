@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import difflib
 import re
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from parties import (
     create_party_record,
     list_parties_by_types,
     normalize_party_name,
 )
+
+if TYPE_CHECKING:
+    from whatsapp_i18n import PromptBundle
 
 PARTIES_PER_PAGE = 12
 SEARCH_RESULT_LIMIT = 8
@@ -97,19 +100,16 @@ def search_parties(
     return [party for _, party in scored[:limit]]
 
 
-def format_party_search_prompt(*, title: str, admin_can_add: bool) -> str:
-    lines = [
-        title,
-        "",
-        "Type part of the name to search (e.g. *Hayatou*, *Abesso*, *Douala*).",
-        "Spelling can be approximate — we show the closest matches.",
-        "",
-        f"{BROWSE_ALL_CODE} — Browse full A–Z list",
-    ]
+def format_party_search_prompt(
+    *,
+    title: str,
+    admin_can_add: bool,
+    prompts: "PromptBundle",
+) -> str:
+    lines = [title, "", prompts.party_search_hint, "", f"{BROWSE_ALL_CODE} — {prompts.party_browse_label}"]
     if admin_can_add:
-        lines.append(f"{ADD_NEW_CODE} — ➕ Add new name (admin)")
-    lines.append("")
-    lines.append("Reply with the name to search, or a number after matches appear.")
+        lines.append(f"{ADD_NEW_CODE} — {prompts.party_add_new}")
+    lines.extend(["", prompts.party_search_footer])
     return "\n".join(lines)
 
 
@@ -119,38 +119,27 @@ def format_party_search_results(
     query: str,
     parties: list[dict[str, Any]],
     admin_can_add: bool,
+    prompts: "PromptBundle",
 ) -> str:
-    lines = [
-        title,
-        "",
-        f'Matches for "{query}":',
-        "",
-    ]
+    lines = [title, "", prompts.party_matches_for.format(query=query), ""]
     for offset, party in enumerate(parties):
         lines.append(f"{offset + 1}. {party['name']}")
-    lines.extend(
-        [
-            "",
-            "Type more letters to refine, or pick a number above.",
-            f"{BROWSE_ALL_CODE} — Browse full A–Z list",
-        ]
-    )
+    lines.extend(["", prompts.party_refine, f"{BROWSE_ALL_CODE} — {prompts.party_browse_label}"])
     if admin_can_add:
-        lines.append(f"{ADD_NEW_CODE} — ➕ Add new name (admin)")
+        lines.append(f"{ADD_NEW_CODE} — {prompts.party_add_new}")
     return "\n".join(lines)
 
 
-def format_party_no_matches(*, query: str, admin_can_add: bool) -> str:
+def format_party_no_matches(*, query: str, admin_can_add: bool, prompts: "PromptBundle") -> str:
     lines = [
-        f'No close match for "{query}".',
+        prompts.party_no_match.format(query=query),
         "",
-        "Try a shorter name, different spelling, or one word at a time.",
-        f"Example: *Abesso* instead of *Ahmed Abesso*.",
+        prompts.party_no_match_hint,
         "",
-        f"{BROWSE_ALL_CODE} — Browse full A–Z list",
+        f"{BROWSE_ALL_CODE} — {prompts.party_browse_label}",
     ]
     if admin_can_add:
-        lines.append(f"{ADD_NEW_CODE} — ➕ Add new name (admin)")
+        lines.append(f"{ADD_NEW_CODE} — {prompts.party_add_new}")
     return "\n".join(lines)
 
 
@@ -161,14 +150,15 @@ def format_party_picker_message(
     page: int,
     total_pages: int,
     admin_can_add: bool,
+    prompts: "PromptBundle",
 ) -> str:
-    lines = [title, "", "Full list (A–Z):", ""]
+    lines = [title, "", prompts.party_browse_title, ""]
     if not parties and page == 0:
-        lines.append("No names in the list yet.")
+        lines.append(prompts.party_empty_list)
         if admin_can_add:
             lines.append(f"Reply {ADD_NEW_CODE} to add the first one.")
         else:
-            lines.append("Ask Govind, Vikash, or an owner to add clients/suppliers.")
+            lines.append(prompts.party_empty_non_admin)
         return "\n".join(lines)
 
     for offset, party in enumerate(parties):
@@ -182,11 +172,10 @@ def format_party_picker_message(
         nav.append(f"{NEXT_PAGE_CODE} — Next page")
     if nav:
         lines.extend(nav)
-    lines.append("Type a name anytime to search instead.")
+    lines.append(prompts.party_browse_footer)
     if admin_can_add:
-        lines.append(f"{ADD_NEW_CODE} — ➕ Add new (admin)")
-    lines.append("")
-    lines.append("Reply with the number.")
+        lines.append(f"{ADD_NEW_CODE} — {prompts.party_add_new}")
+    lines.extend(["", prompts.party_reply_number])
     return "\n".join(lines)
 
 

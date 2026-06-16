@@ -1,112 +1,87 @@
-"""User-facing WhatsApp copy for the accounting state machine."""
+"""User-facing WhatsApp copy — resolves English/French from session language."""
 
-MASTER_MENU = """Thanks {name}. What do you want to do?
+from __future__ import annotations
 
-1 — 💰 Cash Received (Sales Collection)
-2 — 🛑 Cash Expense Made (Outflow)
-3 — 🚚 Truck Loading & Delivery Note
-4 — 🏦 Bank Deposit / Withdrawal
-5 — 🚢 Supplier & Port Payment Confirmation
-0 — ❌ Cancel / Start Over
+from contextvars import ContextVar
 
-Reply with the number (1–5), or 0 to start over."""
+from whatsapp_i18n import get_prompts
 
-MASTER_MENU_ADMIN = """Thanks {name}. What do you want to do?
+_current_lang: ContextVar[str] = ContextVar("whatsapp_lang", default="en")
 
-1 — 💰 Cash Received (Sales Collection)
-2 — 🛑 Cash Expense Made (Outflow)
-3 — 🚚 Truck Loading & Delivery Note
-4 — 🏦 Bank Deposit / Withdrawal
-5 — 🚢 Supplier & Port Payment Confirmation
-6 — ➕ Add Client / Supplier (Admin)
-0 — ❌ Cancel / Start Over
+_ATTR_ALIASES = {
+    "CR_AMOUNT": "cr_amount",
+    "CR_LOCATION": "cr_location",
+    "CR_PROOF": "cr_proof",
+    "CR_JUSTIFICATION": "cr_justification",
+    "EX_AMOUNT": "ex_amount",
+    "EX_CATEGORY": "ex_category",
+    "EX_PROOF": "ex_proof",
+    "EX_JUSTIFICATION": "ex_justification",
+    "TR_TRUCK": "tr_truck",
+    "TR_DOCUMENT": "tr_document",
+    "TR_STATUS": "tr_status",
+    "TR_SHORTAGE": "tr_shortage",
+    "TR_PROOF": "tr_proof",
+    "BK_TYPE": "bk_type",
+    "BK_AMOUNT": "bk_amount",
+    "BK_PROOF_DEPOSIT": "bk_proof_deposit",
+    "BK_PROOF_WITHDRAW": "bk_proof_withdraw",
+    "SP_TYPE": "sp_type",
+    "SP_AMOUNT": "sp_amount",
+    "SP_PROOF": "sp_proof",
+    "AP_TYPE": "ap_type",
+    "AP_NAME": "ap_name",
+    "AP_SAVED": "ap_saved",
+    "PICKER_CLIENT": "picker_client",
+    "PICKER_EXPENSE_PARTY": "picker_expense_party",
+    "PICKER_TR_CLIENT": "picker_tr_client",
+    "PICKER_SUPPLIER": "picker_supplier",
+    "ERR_AMOUNT": "err_amount",
+    "ERR_CHOICE": "err_choice",
+    "ERR_TEXT_REQUIRED": "err_text_required",
+    "ERR_PHOTO_REQUIRED": "err_photo_required",
+    "ERR_PHOTO_OR_ZERO": "err_photo_or_zero",
+    "ERR_UNEXPECTED_PHOTO": "err_unexpected_photo",
+    "ERR_PARTY_PICKER": "err_party_picker",
+    "ERR_ADD_PARTY_DENIED": "err_add_party_denied",
+}
 
-Reply with the number (1–6), or 0 to start over."""
+_DICT_ALIASES = {
+    "LOCATION_LABELS": "location_labels",
+    "EXPENSE_CATEGORIES": "expense_categories",
+    "BANK_TYPES": "bank_types",
+    "SUPPLIER_TYPES": "supplier_types",
+    "ADD_PARTY_TYPE_LABELS": "add_party_type_labels",
+    "LOADING_STATUS_LABELS": "loading_status_labels",
+}
 
-# Choice 1 — Cash Received
-CR_AMOUNT = "Please enter the total amount of physical cash collected (Numbers only)."
-PICKER_CLIENT = "Who is the client (buyer)?"
-CR_LOCATION = (
-    "Where is this cash held?\n"
-    "Reply 1 (My Possession), 2 (Warehouse Safe), 3 (Handed to Govind)."
-)
-CR_PROOF = (
-    "Please upload a photo of the Delivery Note, Invoice, or Receipt.\n"
-    "Or type 0 if missing."
-)
-CR_JUSTIFICATION = "Please type a brief reason why paperwork is missing."
 
-# Choice 2 — Expense
-EX_AMOUNT = "Enter total cash paid out (Numbers only)."
-EX_CATEGORY = (
-    "Select category:\n"
-    "1 (Fuel), 2 (Warehouse/Logistics), 3 (Labor),\n"
-    "4 (Food/Refreshments), 5 (Customs/Admin), 6 (Other)."
-)
-PICKER_EXPENSE_PARTY = "Who is the supplier or facility for this expense?"
-EX_PROOF = "Please upload a sharp photo of the physical receipt, or type 0 if missing."
-EX_JUSTIFICATION = "Please type a brief reason why paperwork is missing."
+def set_prompt_lang(lang: str) -> None:
+    _current_lang.set("fr" if lang == "fr" else "en")
 
-# Choice 3 — Truck / Delivery
-TR_TRUCK = "Enter the Truck License Plate Number or Driver Name."
-PICKER_TR_CLIENT = "Who is the client for this delivery?"
-TR_DOCUMENT = "Enter the associated Delivery Order (DO) or Invoice Number."
-TR_STATUS = "Select loading status: 1 (Fully Loaded), 2 (Partial Loading / Shortage)."
-TR_SHORTAGE = "Type what items or quantities were short-loaded."
-TR_PROOF = "Please upload a photo of the signed Delivery Note (Bon de Livraison)."
 
-# Choice 4 — Bank
-BK_TYPE = "Select action: 1 (Cash to Bank Deposit), 2 (Bank to Cash Withdrawal)."
-BK_AMOUNT = "Enter the total transaction amount (Numbers only)."
-BK_PROOF_DEPOSIT = "Upload a photo of the stamped bank deposit slip (bordereau)."
-BK_PROOF_WITHDRAW = "Upload check stub photo or ATM receipt."
-
-# Choice 5 — Supplier
-SP_TYPE = (
-    "Select payment type:\n"
-    "1 (International Food Import Supplier),\n"
-    "2 (Local Port / Customs Fees), 3 (Other)."
-)
-PICKER_SUPPLIER = "Who is the supplier?"
-SP_AMOUNT = "Enter total amount paid out from the bank account (Numbers only)."
-SP_PROOF = (
-    "Upload a photo/screenshot of the bank transfer confirmation or remittance advice."
-)
-
-# Admin — add party
-AP_TYPE = (
-    "Add new name — select type:\n"
-    "1 — Client (buyer)\n"
-    "2 — Supplier\n"
-    "3 — Facility (expense location)"
-)
-AP_NAME = "Type the exact name to save (spelling will be used in all reports):"
-AP_SAVED = "✅ Added *{name}* as {type_label}.\nIt is now available for everyone to select."
-
-# Validation errors
-ERR_AMOUNT = "⚠️ Please enter numbers only (e.g. 50000). Try again."
-ERR_CHOICE = "⚠️ Invalid choice. {hint}"
-ERR_TEXT_REQUIRED = "⚠️ Please type a short answer. Try again."
-ERR_PHOTO_REQUIRED = "⚠️ Please send a photo (camera icon), not text."
-ERR_PHOTO_OR_ZERO = "⚠️ Send a photo, or type 0 if paperwork is missing."
-ERR_UNEXPECTED_PHOTO = "⚠️ A photo is not expected right now.\n\n{prompt}"
-ERR_PARTY_PICKER = "⚠️ Reply with a number from the list{extra}."
-ERR_ADD_PARTY_DENIED = (
-    "⛔ Only Govind, Vikash, or owners can add new clients/suppliers.\n"
-    "Please pick from the list or ask them to add the name."
-)
+def active_prompts():
+    return get_prompts(_current_lang.get())
 
 
 def format_master_menu(name: str, *, admin: bool = False) -> str:
-    if admin:
-        return MASTER_MENU_ADMIN.format(name=name)
-    return MASTER_MENU.format(name=name)
+    return active_prompts().format_master_menu(name, admin=admin)
 
 
 def format_saved(receipt_id: str, summary: str, employee_name: str) -> str:
-    return (
-        f"✅ Saved — Receipt #{receipt_id}\n"
-        f"{summary}\n"
-        f"Logged by: {employee_name}\n\n"
-        "Reply 0 or send any message to return to the main menu."
-    )
+    return active_prompts().format_saved(receipt_id, summary, employee_name)
+
+
+def format_ask_pin(employee_name: str, company_name: str) -> str:
+    return active_prompts().format_ask_pin(employee_name, company_name)
+
+
+def format_wrong_pin() -> str:
+    return active_prompts().wrong_pin
+
+
+def __getattr__(name: str):
+    alias = _ATTR_ALIASES.get(name) or _DICT_ALIASES.get(name)
+    if alias:
+        return getattr(active_prompts(), alias)
+    raise AttributeError(name)

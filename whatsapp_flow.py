@@ -24,6 +24,7 @@ from whatsapp_access import (
     TYPE_SUPPLIER,
     advance_step,
     ensure_session_row,
+    get_company_name,
     is_cancel_command,
     is_greeting,
     looks_like_pin_attempt,
@@ -35,7 +36,8 @@ from whatsapp_access import (
     update_flow_data,
     verify_staff_pin,
 )
-from whatsapp_client import format_ask_pin_reply, format_wrong_pin_reply, send_whatsapp_text
+from whatsapp_i18n import detect_language_from_greeting, get_session_lang
+from whatsapp_client import send_whatsapp_text
 from whatsapp_parties import (
     ADD_NEW_CODE,
     BROWSE_ALL_CODE,
@@ -88,6 +90,10 @@ from whatsapp_prompts import (
     TR_TRUCK,
     format_master_menu,
     format_saved,
+    format_ask_pin,
+    format_wrong_pin,
+    set_prompt_lang,
+    active_prompts,
 )
 from whatsapp_submissions import save_submission
 
@@ -125,46 +131,6 @@ STEP_SP_PROOF = "sp.proof"
 STEP_AP_TYPE = "ap.type"
 STEP_AP_NAME = "ap.name"
 
-ADD_PARTY_TYPE_LABELS = {
-    "1": ("customer", "Client (buyer)"),
-    "2": ("supplier", "Supplier"),
-    "3": ("facility", "Facility (expense location)"),
-}
-
-LOCATION_LABELS = {
-    "1": "My Possession",
-    "2": "Warehouse Safe",
-    "3": "Handed to Govind",
-}
-
-EXPENSE_CATEGORIES = {
-    "1": "Fuel",
-    "2": "Warehouse/Logistics",
-    "3": "Labor",
-    "4": "Food/Refreshments",
-    "5": "Customs/Admin",
-    "6": "Other",
-}
-
-BANK_TYPES = {
-    "1": "Cash to Bank Deposit",
-    "2": "Bank to Cash Withdrawal",
-}
-
-SUPPLIER_TYPES = {
-    "1": "International Food Import Supplier",
-    "2": "Local Port / Customs Fees",
-    "3": "Other",
-}
-
-MENU_CHOICES = {
-    "1": (TYPE_CASH_RECEIVED, STEP_CR_AMOUNT, CR_AMOUNT),
-    "2": (TYPE_EXPENSE, STEP_EX_AMOUNT, EX_AMOUNT),
-    "3": (TYPE_MERCHANDISE, STEP_TR_TRUCK, TR_TRUCK),
-    "4": (TYPE_BANK, STEP_BK_TYPE, BK_TYPE),
-    "5": (TYPE_SUPPLIER, STEP_SP_TYPE, SP_TYPE),
-}
-
 
 @dataclass
 class FlowResult:
@@ -197,6 +163,24 @@ def _is_admin(employee: dict) -> bool:
     return can_manage_parties(employee)
 
 
+def _activate_lang(sender: str, text: str | None = None) -> None:
+    if text and is_greeting(text):
+        update_flow_data(sender, lang=detect_language_from_greeting(text))
+    session = ensure_session_row(sender)
+    set_prompt_lang(get_session_lang(session))
+
+
+def _menu_choices() -> dict[str, tuple[str, str, str]]:
+    p = active_prompts()
+    return {
+        "1": (TYPE_CASH_RECEIVED, STEP_CR_AMOUNT, p.cr_amount),
+        "2": (TYPE_EXPENSE, STEP_EX_AMOUNT, p.ex_amount),
+        "3": (TYPE_MERCHANDISE, STEP_TR_TRUCK, p.tr_truck),
+        "4": (TYPE_BANK, STEP_BK_TYPE, p.bk_type),
+        "5": (TYPE_SUPPLIER, STEP_SP_TYPE, p.sp_type),
+    }
+
+
 async def _start_party_picker(
     sender: str,
     employee: dict,
@@ -214,7 +198,9 @@ async def _start_party_picker(
     )
     await _reply(
         sender,
-        format_party_search_prompt(title=title, admin_can_add=admin),
+        format_party_search_prompt(
+            title=title, admin_can_add=admin, prompts=active_prompts()
+        ),
     )
 
 
@@ -240,6 +226,7 @@ async def _send_party_browse(
         page=page,
         total_pages=total_pages,
         admin_can_add=admin,
+        prompts=active_prompts(),
     )
     await _reply(sender, message)
 
@@ -270,6 +257,7 @@ async def _send_party_search_results(
             query=query,
             parties=slim_results,
             admin_can_add=admin,
+            prompts=active_prompts(),
         ),
     )
 
@@ -311,7 +299,9 @@ async def _handle_party_picker(
         if not results:
             await _reply(
                 sender,
-                format_party_no_matches(query=query, admin_can_add=admin),
+                format_party_no_matches(
+                    query=query, admin_can_add=admin, prompts=active_prompts()
+                ),
             )
             update_flow_data(
                 sender,
@@ -400,6 +390,7 @@ async def _reply(phone: str, body: str) -> None:
 
 async def _show_main_menu(phone: str, employee: dict) -> FlowResult:
     set_main_menu(phone)
+    _activate_lang(phone)
     await _reply(
         phone,
         format_master_menu(_employee_name(employee), admin=_is_admin(employee)),
@@ -424,6 +415,7 @@ async def handle_whatsapp_flow(
 
     try:
         session = ensure_session_row(sender)
+        _activate_lang(sender)
         state = session.get("state") or STATE_AWAITING_PIN
         name = _employee_name(employee)
 
@@ -456,7 +448,8 @@ async def handle_whatsapp_flow(
     except Exception:
         logger.exception("WhatsApp flow failed for sender %s", sender)
         try:
-            await _reply(sender, format_ask_pin_reply(_employee_name(employee)))
+            _activate_lang(sender)
+            await _reply(sender, format_ask_pin(_employee_name(employee), get_company_name()))
         except Exception:
             logger.exception("Failed to send flow recovery message to %s", sender)
         return FlowResult(status={"status": "flow_error", "sender": sender})
@@ -470,23 +463,26 @@ async def _handle_pin(
     is_media: bool,
 ) -> FlowResult:
     name = _employee_name(employee)
+    _activate_lang(sender)
     if is_media:
-        await _reply(sender, format_ask_pin_reply(name))
+        await _reply(sender, format_ask_pin(name, get_company_name()))
         return FlowResult(status={"status": "awaiting_pin", "sender": sender})
 
     text = (text_body or "").strip()
     if is_greeting(text) or not text:
-        await _reply(sender, format_ask_pin_reply(name))
+        _activate_lang(sender, text)
+        await _reply(sender, format_ask_pin(name, get_company_name()))
         return FlowResult(status={"status": "awaiting_pin", "sender": sender})
 
     if looks_like_pin_attempt(text):
         if verify_staff_pin(text):
             set_session_after_pin(sender)
+            _activate_lang(sender)
             return await _show_main_menu(sender, employee)
-        await _reply(sender, format_wrong_pin_reply())
+        await _reply(sender, format_wrong_pin())
         return FlowResult(status={"status": "wrong_pin", "sender": sender})
 
-    await _reply(sender, format_ask_pin_reply(name))
+    await _reply(sender, format_ask_pin(name, get_company_name()))
     return FlowResult(status={"status": "awaiting_pin", "sender": sender})
 
 
@@ -497,6 +493,7 @@ async def _handle_main_menu(
     text_body: Optional[str],
     is_media: bool,
 ) -> FlowResult:
+    _activate_lang(sender)
     if is_media:
         await _reply(
             sender,
@@ -511,10 +508,10 @@ async def _handle_main_menu(
 
     if choice == "6":
         if not admin:
-            hint = "Reply 1–5 to choose, or 0 to start over."
+            p = active_prompts()
             await _reply(
                 sender,
-                ERR_CHOICE.format(hint=hint)
+                ERR_CHOICE.format(hint=p.menu_hint)
                 + "\n\n"
                 + format_master_menu(_employee_name(employee), admin=False),
             )
@@ -523,8 +520,10 @@ async def _handle_main_menu(
         await _reply(sender, AP_TYPE)
         return FlowResult(status={"status": "flow_started", "flow": TYPE_ADD_PARTY, "sender": sender})
 
-    if choice not in MENU_CHOICES:
-        hint = "Reply 1–6 to choose, or 0 to start over." if admin else "Reply 1–5 to choose, or 0 to start over."
+    menu = _menu_choices()
+    if choice not in menu:
+        p = active_prompts()
+        hint = p.menu_hint_admin if admin else p.menu_hint
         await _reply(
             sender,
             ERR_CHOICE.format(hint=hint)
@@ -533,7 +532,7 @@ async def _handle_main_menu(
         )
         return FlowResult(status={"status": "invalid_menu_choice", "sender": sender})
 
-    flow_type, first_step, prompt = MENU_CHOICES[choice]
+    flow_type, first_step, prompt = menu[choice]
     start_flow(sender, flow_type, first_step)
     await _reply(sender, prompt)
     return FlowResult(status={"status": "flow_started", "flow": flow_type, "sender": sender})
@@ -554,6 +553,7 @@ async def _handle_flow_step(
     flow_type = session.get("selected_action")
     flow_data = session.get("flow_data") or {}
     text = (text_body or "").strip()
+    _activate_lang(sender)
 
     handlers = {
         STEP_CR_AMOUNT: _step_cr_amount,
@@ -673,11 +673,12 @@ async def _step_cr_location(sender, employee, **kwargs) -> FlowResult:
     if is_media:
         await _reply(sender, ERR_UNEXPECTED_PHOTO.format(prompt=CR_LOCATION))
         return FlowResult(status={"status": "validation_error", "step": STEP_CR_LOCATION})
-    choice = _parse_choice(text, LOCATION_LABELS)
+    choice = _parse_choice(text, active_prompts().location_labels)
     if not choice:
         await _reply(sender, ERR_CHOICE.format(hint="Reply 1, 2, or 3.") + "\n\n" + CR_LOCATION)
         return FlowResult(status={"status": "validation_error", "step": STEP_CR_LOCATION})
-    update_flow_data(sender, location=LOCATION_LABELS[choice], location_code=choice)
+    labels = active_prompts().location_labels
+    update_flow_data(sender, location=labels[choice], location_code=choice)
     advance_step(sender, STEP_CR_PROOF)
     await _reply(sender, CR_PROOF)
     return FlowResult(status={"status": "flow_step", "step": STEP_CR_PROOF})
@@ -707,14 +708,9 @@ async def _step_cr_justification(sender, employee, **kwargs) -> FlowResult:
 
 async def _save_cash_received(sender, employee, kwargs) -> FlowResult:
     session = ensure_session_row(sender)
+    _activate_lang(sender)
     data = session.get("flow_data") or {}
-    summary = (
-        f"💰 Cash Received: {data.get('amount', 0):,} FCFA\n"
-        f"Client: {data.get('client', '—')}\n"
-        f"Location: {data.get('location', '—')}"
-    )
-    if data.get("proof_skipped"):
-        summary += f"\nNote: {data.get('missing_paperwork_reason', '—')}"
+    summary = active_prompts().summary_cash_received(data)
     return await _finish_submission(
         sender,
         employee,
@@ -749,11 +745,12 @@ async def _step_ex_category(sender, employee, **kwargs) -> FlowResult:
     if is_media:
         await _reply(sender, ERR_UNEXPECTED_PHOTO.format(prompt=EX_CATEGORY))
         return FlowResult(status={"status": "validation_error", "step": STEP_EX_CATEGORY})
-    choice = _parse_choice(text, EXPENSE_CATEGORIES)
+    choice = _parse_choice(text, active_prompts().expense_categories)
     if not choice:
         await _reply(sender, ERR_CHOICE.format(hint="Reply 1–6.") + "\n\n" + EX_CATEGORY)
         return FlowResult(status={"status": "validation_error", "step": STEP_EX_CATEGORY})
-    update_flow_data(sender, category=EXPENSE_CATEGORIES[choice], category_code=choice)
+    categories = active_prompts().expense_categories
+    update_flow_data(sender, category=categories[choice], category_code=choice)
     advance_step(sender, STEP_EX_PARTY)
     await _start_party_picker(
         sender, employee, title=PICKER_EXPENSE_PARTY, party_types=EXPENSE_PARTY_TYPES
@@ -803,14 +800,9 @@ async def _step_ex_justification(sender, employee, **kwargs) -> FlowResult:
 
 async def _save_expense(sender, employee, kwargs) -> FlowResult:
     session = ensure_session_row(sender)
+    _activate_lang(sender)
     data = session.get("flow_data") or {}
-    summary = (
-        f"🛑 Expense: {data.get('amount', 0):,} FCFA\n"
-        f"Category: {data.get('category', '—')}\n"
-        f"Supplier/Facility: {data.get('expense_party', '—')}"
-    )
-    if data.get("proof_skipped"):
-        summary += f"\nNote: {data.get('missing_paperwork_reason', '—')}"
+    summary = active_prompts().summary_expense(data)
     return await _finish_submission(
         sender,
         employee,
@@ -873,12 +865,14 @@ async def _step_tr_status(sender, employee, **kwargs) -> FlowResult:
         await _reply(sender, ERR_UNEXPECTED_PHOTO.format(prompt=TR_STATUS))
         return FlowResult(status={"status": "validation_error", "step": STEP_TR_STATUS})
     if text == "1":
-        update_flow_data(sender, loading_status="Fully Loaded", partial=False)
+        labels = active_prompts().loading_status_labels
+        update_flow_data(sender, loading_status=labels["1"], loading_status_code="1", partial=False)
         advance_step(sender, STEP_TR_PROOF)
         await _reply(sender, TR_PROOF)
         return FlowResult(status={"status": "flow_step", "step": STEP_TR_PROOF})
     if text == "2":
-        update_flow_data(sender, loading_status="Partial Loading / Shortage", partial=True)
+        labels = active_prompts().loading_status_labels
+        update_flow_data(sender, loading_status=labels["2"], loading_status_code="2", partial=True)
         advance_step(sender, STEP_TR_SHORTAGE)
         await _reply(sender, TR_SHORTAGE)
         return FlowResult(status={"status": "flow_step", "step": STEP_TR_SHORTAGE})
@@ -904,15 +898,9 @@ async def _step_tr_proof(sender, employee, **kwargs) -> FlowResult:
         return FlowResult(status={"status": "validation_error", "step": STEP_TR_PROOF})
     update_flow_data(sender, proof_media_id=media_id)
     session = ensure_session_row(sender)
+    _activate_lang(sender)
     data = session.get("flow_data") or {}
-    summary = (
-        f"🚚 Truck/Delivery: {data.get('truck_id', '—')}\n"
-        f"Client: {data.get('client', '—')}\n"
-        f"DO/Invoice: {data.get('document_id', '—')}\n"
-        f"Status: {data.get('loading_status', '—')}"
-    )
-    if data.get("shortage_details"):
-        summary += f"\nShortage: {data['shortage_details']}"
+    summary = active_prompts().summary_truck(data)
     return await _finish_submission(
         sender,
         employee,
@@ -932,11 +920,12 @@ async def _step_bk_type(sender, employee, **kwargs) -> FlowResult:
     if is_media:
         await _reply(sender, ERR_UNEXPECTED_PHOTO.format(prompt=BK_TYPE))
         return FlowResult(status={"status": "validation_error", "step": STEP_BK_TYPE})
-    choice = _parse_choice(text, BANK_TYPES)
+    choice = _parse_choice(text, active_prompts().bank_types)
     if not choice:
         await _reply(sender, ERR_CHOICE.format(hint="Reply 1 or 2.") + "\n\n" + BK_TYPE)
         return FlowResult(status={"status": "validation_error", "step": STEP_BK_TYPE})
-    update_flow_data(sender, bank_action=BANK_TYPES[choice], bank_action_code=choice)
+    bank_types = active_prompts().bank_types
+    update_flow_data(sender, bank_action=bank_types[choice], bank_action_code=choice)
     advance_step(sender, STEP_BK_AMOUNT)
     await _reply(sender, BK_AMOUNT)
     return FlowResult(status={"status": "flow_step", "step": STEP_BK_AMOUNT})
@@ -973,11 +962,10 @@ async def _step_bk_proof(sender, employee, **kwargs) -> FlowResult:
         await _reply(sender, ERR_PHOTO_REQUIRED + "\n\n" + prompt)
         return FlowResult(status={"status": "validation_error", "step": STEP_BK_PROOF})
     update_flow_data(sender, proof_media_id=media_id)
-    data = ensure_session_row(sender).get("flow_data") or {}
-    summary = (
-        f"🏦 Bank: {data.get('bank_action', '—')}\n"
-        f"Amount: {data.get('amount', 0):,} FCFA"
-    )
+    session = ensure_session_row(sender)
+    _activate_lang(sender)
+    data = session.get("flow_data") or {}
+    summary = active_prompts().summary_bank(data)
     return await _finish_submission(
         sender,
         employee,
@@ -997,11 +985,12 @@ async def _step_sp_type(sender, employee, **kwargs) -> FlowResult:
     if is_media:
         await _reply(sender, ERR_UNEXPECTED_PHOTO.format(prompt=SP_TYPE))
         return FlowResult(status={"status": "validation_error", "step": STEP_SP_TYPE})
-    choice = _parse_choice(text, SUPPLIER_TYPES)
+    choice = _parse_choice(text, active_prompts().supplier_types)
     if not choice:
         await _reply(sender, ERR_CHOICE.format(hint="Reply 1, 2, or 3.") + "\n\n" + SP_TYPE)
         return FlowResult(status={"status": "validation_error", "step": STEP_SP_TYPE})
-    update_flow_data(sender, payment_type=SUPPLIER_TYPES[choice], payment_type_code=choice)
+    supplier_types = active_prompts().supplier_types
+    update_flow_data(sender, payment_type=supplier_types[choice], payment_type_code=choice)
     advance_step(sender, STEP_SP_SUPPLIER)
     await _start_party_picker(
         sender, employee, title=PICKER_SUPPLIER, party_types=SUPPLIER_PARTY_TYPES
@@ -1049,12 +1038,9 @@ async def _step_sp_proof(sender, employee, **kwargs) -> FlowResult:
         return FlowResult(status={"status": "validation_error", "step": STEP_SP_PROOF})
     update_flow_data(sender, proof_media_id=media_id)
     session = ensure_session_row(sender)
+    _activate_lang(sender)
     data = session.get("flow_data") or {}
-    summary = (
-        f"🚢 Supplier payment: {data.get('payment_type', '—')}\n"
-        f"Supplier: {data.get('supplier', '—')}\n"
-        f"Amount: {data.get('amount', 0):,} FCFA"
-    )
+    summary = active_prompts().summary_supplier(data)
     return await _finish_submission(
         sender,
         employee,
@@ -1105,11 +1091,12 @@ async def _step_ap_type(sender, employee, **kwargs) -> FlowResult:
     if is_media:
         await _reply(sender, ERR_UNEXPECTED_PHOTO.format(prompt=AP_TYPE))
         return FlowResult(status={"status": "validation_error", "step": STEP_AP_TYPE})
-    choice = _parse_choice(text, {k: v[1] for k, v in ADD_PARTY_TYPE_LABELS.items()})
+    add_party_types = active_prompts().add_party_type_labels
+    choice = _parse_choice(text, {k: v[1] for k, v in add_party_types.items()})
     if not choice:
         await _reply(sender, ERR_CHOICE.format(hint="Reply 1, 2, or 3.") + "\n\n" + AP_TYPE)
         return FlowResult(status={"status": "validation_error", "step": STEP_AP_TYPE})
-    party_type, type_label = ADD_PARTY_TYPE_LABELS[choice]
+    party_type, type_label = add_party_types[choice]
     update_flow_data(sender, new_party_type=party_type, new_party_type_label=type_label)
     advance_step(sender, STEP_AP_NAME)
     await _reply(sender, AP_NAME)

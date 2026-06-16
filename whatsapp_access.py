@@ -201,6 +201,19 @@ def _upsert_session(
     conn.close()
 
 
+def _preserve_lang_flow(
+    phone: str,
+    flow_data: Optional[dict[str, Any]] = None,
+    business_id: int = DEFAULT_BUSINESS_ID,
+) -> dict[str, Any]:
+    session = get_session(phone, business_id=business_id) or {}
+    existing_lang = (session.get("flow_data") or {}).get("lang")
+    merged = dict(flow_data or {})
+    if existing_lang:
+        merged["lang"] = existing_lang
+    return merged
+
+
 def reset_session(phone: str, business_id: int = DEFAULT_BUSINESS_ID) -> None:
     _upsert_session(
         phone,
@@ -218,7 +231,7 @@ def set_main_menu(phone: str, business_id: int = DEFAULT_BUSINESS_ID) -> None:
         state=STATE_MAIN_MENU,
         selected_action=None,
         pin_verified_at=datetime.now(timezone.utc),
-        flow_data={},
+        flow_data=_preserve_lang_flow(phone, business_id=business_id),
         business_id=business_id,
     )
 
@@ -238,7 +251,7 @@ def start_flow(
         state=first_step,
         selected_action=flow_type,
         pin_verified_at=datetime.now(timezone.utc),
-        flow_data={},
+        flow_data=_preserve_lang_flow(phone, business_id=business_id),
         business_id=business_id,
     )
 
