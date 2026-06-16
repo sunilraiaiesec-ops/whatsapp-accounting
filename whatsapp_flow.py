@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -36,7 +37,12 @@ from whatsapp_access import (
     update_flow_data,
     verify_staff_pin,
 )
-from whatsapp_i18n import PromptBundle, detect_language_from_greeting, get_session_lang
+from whatsapp_i18n import (
+    PromptBundle,
+    detect_language_from_greeting,
+    get_prompts,
+    get_session_lang,
+)
 from whatsapp_client import send_whatsapp_text
 from whatsapp_parties import (
     ADD_NEW_CODE,
@@ -63,6 +69,8 @@ from whatsapp_prompts import (
 from whatsapp_submissions import save_submission
 
 logger = logging.getLogger("uvicorn.error")
+
+_flow_session: ContextVar[dict[str, Any] | None] = ContextVar("wa_flow_session", default=None)
 
 # Step state keys
 STEP_CR_AMOUNT = "cr.amount"
@@ -138,10 +146,15 @@ def _activate_lang(sender: str, text: str | None = None) -> None:
     if text and is_greeting(text):
         update_flow_data(sender, lang=detect_language_from_greeting(text))
     session = ensure_session_row(sender)
-    set_prompt_lang(get_session_lang(session))
+    _flow_session.set(session)
+    lang = get_session_lang(session)
+    set_prompt_lang(lang)
 
 
 def _p() -> PromptBundle:
+    session = _flow_session.get()
+    if session:
+        return get_prompts(get_session_lang(session))
     return active_prompts()
 
 
