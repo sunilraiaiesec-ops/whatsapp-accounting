@@ -27,7 +27,7 @@ def staff_pin_enabled() -> bool:
 
 
 def verify_staff_pin(text: str) -> bool:
-    if not STAFF_PIN:
+    if not STAFF_PIN or len(STAFF_PIN) != PIN_LENGTH:
         return False
     cleaned = text.strip()
     if not cleaned.isdigit() or len(cleaned) != PIN_LENGTH:
@@ -104,6 +104,10 @@ def get_session(phone: str, business_id: int = DEFAULT_BUSINESS_ID) -> Optional[
 
 
 def reset_session(phone: str, business_id: int = DEFAULT_BUSINESS_ID) -> None:
+    from db import ensure_default_business, ensure_whatsapp_sessions_table
+
+    ensure_whatsapp_sessions_table()
+    ensure_default_business()
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(

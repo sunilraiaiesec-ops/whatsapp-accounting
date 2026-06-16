@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import logging
 from typing import Any, Optional
 
 from whatsapp_access import (
@@ -33,6 +34,9 @@ from whatsapp_client import (
 )
 
 
+logger = logging.getLogger("uvicorn.error")
+
+
 @dataclass
 class AccessDecision:
     proceed: bool
@@ -52,6 +56,33 @@ async def handle_whatsapp_access(
     if not staff_pin_enabled():
         return AccessDecision(proceed=True, action=None)
 
+    try:
+        return await _handle_whatsapp_access_inner(
+            sender,
+            employee,
+            message_type=message_type,
+            message=message,
+            text_body=text_body,
+            is_media=is_media,
+        )
+    except Exception:
+        logger.exception("WhatsApp access gate failed for sender %s", sender)
+        await send_whatsapp_text(sender, format_ask_pin_reply(employee["name"]))
+        return AccessDecision(
+            proceed=False,
+            status={"status": "access_gate_error", "sender": sender},
+        )
+
+
+async def _handle_whatsapp_access_inner(
+    sender: str,
+    employee: dict,
+    *,
+    message_type: str,
+    message: dict,
+    text_body: Optional[str],
+    is_media: bool,
+) -> AccessDecision:
     session = ensure_session_row(sender)
     state = session.get("state") or STATE_AWAITING_PIN
 
@@ -182,7 +213,10 @@ async def handle_whatsapp_access(
             status={"status": "awaiting_action", "sender": sender},
         )
 
-    return AccessDecision(proceed=True, action=session.get("selected_action"))
+    return AccessDecision(
+        proceed=False,
+        status={"status": "access_blocked", "sender": sender},
+    )
 
 
 async def send_pin_expired_notice(sender: str, employee_name: str) -> None:

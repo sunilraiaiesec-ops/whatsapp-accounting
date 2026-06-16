@@ -167,6 +167,18 @@ def create_tables():
     """)
 
     migrations = [
+        """
+        CREATE TABLE IF NOT EXISTS whatsapp_sessions (
+            id SERIAL PRIMARY KEY,
+            business_id INTEGER REFERENCES businesses(id),
+            phone TEXT NOT NULL,
+            state TEXT NOT NULL DEFAULT 'awaiting_pin',
+            selected_action TEXT,
+            pin_verified_at TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (business_id, phone)
+        );
+        """,
         "ALTER TABLE messages ADD COLUMN IF NOT EXISTS business_id INTEGER REFERENCES businesses(id);",
         "ALTER TABLE messages ADD COLUMN IF NOT EXISTS whatsapp_message_id TEXT;",
         "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS business_id INTEGER REFERENCES businesses(id);",
@@ -222,6 +234,43 @@ def create_tables():
     from categories import seed_categories
 
     seed_categories()
+
+
+def ensure_whatsapp_sessions_table() -> None:
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS whatsapp_sessions (
+            id SERIAL PRIMARY KEY,
+            business_id INTEGER REFERENCES businesses(id),
+            phone TEXT NOT NULL,
+            state TEXT NOT NULL DEFAULT 'awaiting_pin',
+            selected_action TEXT,
+            pin_verified_at TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (business_id, phone)
+        );
+        """
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def ensure_default_business() -> None:
+    conn = get_db_connection()
+    cur = conn.cursor()
+    business_name = (os.environ.get("BUSINESS_NAME") or "RR Foods SARL").strip()
+    cur.execute("SELECT id FROM businesses WHERE id = %s;", (DEFAULT_BUSINESS_ID,))
+    if not cur.fetchone():
+        cur.execute(
+            "INSERT INTO businesses (id, name) VALUES (%s, %s);",
+            (DEFAULT_BUSINESS_ID, business_name),
+        )
+    conn.commit()
+    cur.close()
+    conn.close()
 
 
 def run_startup_backfills() -> None:
