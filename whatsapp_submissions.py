@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from typing import Any, Optional
 
 import psycopg2.extras
@@ -32,6 +33,12 @@ def ensure_accounting_submissions_table() -> None:
         );
         """
     )
+    cur.execute(
+        """
+        ALTER TABLE accounting_submissions
+        ALTER COLUMN receipt_id DROP NOT NULL;
+        """
+    )
     conn.commit()
     cur.close()
     conn.close()
@@ -39,6 +46,10 @@ def ensure_accounting_submissions_table() -> None:
 
 def _format_receipt_id(submission_id: int) -> str:
     return f"RR-{submission_id:06d}"
+
+
+def _json_safe(data: dict[str, Any]) -> dict[str, Any]:
+    return json.loads(json.dumps(data, default=str))
 
 
 def save_submission(
@@ -53,15 +64,17 @@ def save_submission(
     business_id: int = DEFAULT_BUSINESS_ID,
 ) -> tuple[int, str]:
     ensure_accounting_submissions_table()
+    safe_payload = _json_safe(payload)
     conn = get_db_connection()
     cur = conn.cursor()
     try:
+        placeholder_receipt = f"RR-{uuid.uuid4().hex[:12].upper()}"
         cur.execute(
             """
             INSERT INTO accounting_submissions
             (business_id, employee_id, sender, submission_type, receipt_id,
              amount, payload, whatsapp_message_id, proof_media_id)
-            VALUES (%s, %s, %s, %s, NULL, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id;
             """,
             (
@@ -69,8 +82,9 @@ def save_submission(
                 employee_id,
                 sender,
                 submission_type,
+                placeholder_receipt,
                 amount,
-                psycopg2.extras.Json(payload),
+                psycopg2.extras.Json(safe_payload),
                 whatsapp_message_id,
                 proof_media_id,
             ),
@@ -93,7 +107,14 @@ def save_submission(
                 "whatsapp",
                 sender,
                 f"[{submission_type}] Receipt {receipt_id}",
-                json.dumps({"submission_type": submission_type, "receipt_id": receipt_id, **payload}),
+                json.dumps(
+                    {
+                        "submission_type": submission_type,
+                        "receipt_id": receipt_id,
+                        **_json_safe(safe_payload),
+                    },
+                    default=str,
+                ),
                 whatsapp_message_id,
             ),
         )

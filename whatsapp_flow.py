@@ -29,6 +29,7 @@ from whatsapp_access import (
     is_cancel_command,
     is_greeting,
     looks_like_pin_attempt,
+    refresh_session_activity,
     reset_session,
     set_main_menu,
     set_session_after_pin,
@@ -417,6 +418,7 @@ async def handle_whatsapp_flow(
         return FlowResult(handled=False, status={"status": "pin_disabled"})
 
     try:
+        refresh_session_activity(sender)
         session = ensure_session_row(sender)
         _activate_lang(sender)
         state = session.get("state") or STATE_AWAITING_PIN
@@ -456,7 +458,7 @@ async def handle_whatsapp_flow(
         logger.exception("WhatsApp flow failed for sender %s", sender)
         try:
             _activate_lang(sender)
-            await _reply(sender, format_ask_pin(_employee_name(employee), get_company_name()))
+            await _reply(sender, _p().save_failed)
         except Exception:
             logger.exception("Failed to send flow recovery message to %s", sender)
         return FlowResult(status={"status": "flow_error", "sender": sender})
@@ -711,24 +713,27 @@ async def _step_cr_justification(sender, employee, **kwargs) -> FlowResult:
     if is_media or not text:
         await _reply(sender, _p().err_text_required if not is_media else _p().err_unexpected_photo.format(prompt=_p().cr_justification))
         return FlowResult(status={"status": "validation_error", "step": STEP_CR_JUSTIFICATION})
-    update_flow_data(sender, missing_paperwork_reason=text, proof_skipped=True)
-    return await _save_cash_received(sender, employee, kwargs)
+    data = update_flow_data(sender, missing_paperwork_reason=text, proof_skipped=True)
+    return await _save_cash_received(sender, employee, kwargs, flow_data=data)
 
 
-async def _save_cash_received(sender, employee, kwargs) -> FlowResult:
-    session = ensure_session_row(sender)
+async def _save_cash_received(
+    sender, employee, kwargs, *, flow_data: dict[str, Any] | None = None
+) -> FlowResult:
     _activate_lang(sender)
-    data = session.get("flow_data") or {}
-    summary = active_prompts().summary_cash_received(data)
+    if flow_data is None:
+        session = ensure_session_row(sender)
+        flow_data = session.get("flow_data") or {}
+    summary = _p().summary_cash_received(flow_data)
     return await _finish_submission(
         sender,
         employee,
         submission_type=TYPE_CASH_RECEIVED,
-        amount=data.get("amount"),
-        payload=data,
+        amount=flow_data.get("amount"),
+        payload=flow_data,
         summary=summary,
         whatsapp_message_id=kwargs.get("whatsapp_message_id"),
-        proof_media_id=data.get("proof_media_id"),
+        proof_media_id=flow_data.get("proof_media_id"),
     )
 
 
@@ -804,24 +809,27 @@ async def _step_ex_justification(sender, employee, **kwargs) -> FlowResult:
     if is_media or not text:
         await _reply(sender, _p().err_text_required if not is_media else _p().err_unexpected_photo.format(prompt=_p().ex_justification))
         return FlowResult(status={"status": "validation_error", "step": STEP_EX_JUSTIFICATION})
-    update_flow_data(sender, missing_paperwork_reason=text, proof_skipped=True)
-    return await _save_expense(sender, employee, kwargs)
+    data = update_flow_data(sender, missing_paperwork_reason=text, proof_skipped=True)
+    return await _save_expense(sender, employee, kwargs, flow_data=data)
 
 
-async def _save_expense(sender, employee, kwargs) -> FlowResult:
-    session = ensure_session_row(sender)
+async def _save_expense(
+    sender, employee, kwargs, *, flow_data: dict[str, Any] | None = None
+) -> FlowResult:
     _activate_lang(sender)
-    data = session.get("flow_data") or {}
-    summary = active_prompts().summary_expense(data)
+    if flow_data is None:
+        session = ensure_session_row(sender)
+        flow_data = session.get("flow_data") or {}
+    summary = _p().summary_expense(flow_data)
     return await _finish_submission(
         sender,
         employee,
         submission_type=TYPE_EXPENSE,
-        amount=data.get("amount"),
-        payload=data,
+        amount=flow_data.get("amount"),
+        payload=flow_data,
         summary=summary,
         whatsapp_message_id=kwargs.get("whatsapp_message_id"),
-        proof_media_id=data.get("proof_media_id"),
+        proof_media_id=flow_data.get("proof_media_id"),
     )
 
 

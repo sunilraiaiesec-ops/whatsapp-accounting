@@ -217,6 +217,24 @@ def _preserve_lang_flow(
     return merged
 
 
+def refresh_session_activity(phone: str, business_id: int = DEFAULT_BUSINESS_ID) -> None:
+    """Extend PIN session on each message so mid-flow steps are not cut off."""
+    _ensure_tables()
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE whatsapp_sessions
+        SET pin_verified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+        WHERE business_id = %s AND phone = %s AND pin_verified_at IS NOT NULL;
+        """,
+        (business_id, phone),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
 def reset_session(phone: str, business_id: int = DEFAULT_BUSINESS_ID) -> None:
     _upsert_session(
         phone,

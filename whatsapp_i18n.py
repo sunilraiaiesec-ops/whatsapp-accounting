@@ -111,6 +111,7 @@ class PromptBundle:
     saved_header: str
     saved_footer: str
     saved_logged_by: str
+    save_failed: str
 
     def format_master_menu(self, name: str, *, admin: bool = False) -> str:
         template = self.master_menu_admin if admin else self.master_menu
@@ -251,13 +252,13 @@ Send *Bonjour* (French) or *Hello*/*Hi* (English) anytime to restart from the PI
         "2": "Partial Loading / Shortage",
     },
     summary_cash_received=lambda d: (
-        f"💰 Cash Received: {d.get('amount', 0):,} FCFA\n"
+        f"💰 Cash Received: {(d.get('amount') or 0):,} FCFA\n"
         f"Client: {d.get('client', '—')}\n"
         f"Location: {d.get('location', '—')}"
         + (f"\nNote: {d.get('missing_paperwork_reason', '—')}" if d.get("proof_skipped") else "")
     ),
     summary_expense=lambda d: (
-        f"🛑 Expense: {d.get('amount', 0):,} FCFA\n"
+        f"🛑 Expense: {(d.get('amount') or 0):,} FCFA\n"
         f"Category: {d.get('category', '—')}\n"
         f"Supplier/Facility: {d.get('expense_party', '—')}"
         + (f"\nNote: {d.get('missing_paperwork_reason', '—')}" if d.get("proof_skipped") else "")
@@ -271,12 +272,12 @@ Send *Bonjour* (French) or *Hello*/*Hi* (English) anytime to restart from the PI
     ),
     summary_bank=lambda d: (
         f"🏦 Bank: {d.get('bank_action', '—')}\n"
-        f"Amount: {d.get('amount', 0):,} FCFA"
+        f"Amount: {(d.get('amount') or 0):,} FCFA"
     ),
     summary_supplier=lambda d: (
         f"🚢 Supplier payment: {d.get('payment_type', '—')}\n"
         f"Supplier: {d.get('supplier', '—')}\n"
-        f"Amount: {d.get('amount', 0):,} FCFA"
+        f"Amount: {(d.get('amount') or 0):,} FCFA"
     ),
     party_search_hint=(
         "Type part of the name to search (e.g. *Hayatou*, *Abesso*, *Douala*).\n"
@@ -301,6 +302,9 @@ Send *Bonjour* (French) or *Hello*/*Hi* (English) anytime to restart from the PI
     saved_header="✅ Transaction added to the system — Receipt #{receipt_id}",
     saved_footer="Reply 0 to return to the main menu.",
     saved_logged_by="Logged by: {name}",
+    save_failed=(
+        "⚠️ We could not save that entry. Please try again or send *Bonjour* to restart."
+    ),
 )
 
 PROMPTS_FR = PromptBundle(
@@ -426,13 +430,13 @@ Envoyez *Bonjour* (français) ou *Hello*/*Hi* (anglais) pour tout recommencer de
         "2": "Chargement partiel / manquant",
     },
     summary_cash_received=lambda d: (
-        f"💰 Encaissement : {d.get('amount', 0):,} FCFA\n"
+        f"💰 Encaissement : {(d.get('amount') or 0):,} FCFA\n"
         f"Client : {d.get('client', '—')}\n"
         f"Lieu : {d.get('location', '—')}"
         + (f"\nNote : {d.get('missing_paperwork_reason', '—')}" if d.get("proof_skipped") else "")
     ),
     summary_expense=lambda d: (
-        f"🛑 Dépense : {d.get('amount', 0):,} FCFA\n"
+        f"🛑 Dépense : {(d.get('amount') or 0):,} FCFA\n"
         f"Catégorie : {d.get('category', '—')}\n"
         f"Fournisseur/Lieu : {d.get('expense_party', '—')}"
         + (f"\nNote : {d.get('missing_paperwork_reason', '—')}" if d.get("proof_skipped") else "")
@@ -446,12 +450,12 @@ Envoyez *Bonjour* (français) ou *Hello*/*Hi* (anglais) pour tout recommencer de
     ),
     summary_bank=lambda d: (
         f"🏦 Banque : {d.get('bank_action', '—')}\n"
-        f"Montant : {d.get('amount', 0):,} FCFA"
+        f"Montant : {(d.get('amount') or 0):,} FCFA"
     ),
     summary_supplier=lambda d: (
         f"🚢 Paiement fournisseur : {d.get('payment_type', '—')}\n"
         f"Fournisseur : {d.get('supplier', '—')}\n"
-        f"Montant : {d.get('amount', 0):,} FCFA"
+        f"Montant : {(d.get('amount') or 0):,} FCFA"
     ),
     party_search_hint=(
         "Tapez une partie du nom (ex. *Hayatou*, *Abesso*, *Douala*).\n"
@@ -476,6 +480,9 @@ Envoyez *Bonjour* (français) ou *Hello*/*Hi* (anglais) pour tout recommencer de
     saved_header="✅ Transaction enregistrée dans le système — Reçu #{receipt_id}",
     saved_footer="Répondez 0 pour revenir au menu principal.",
     saved_logged_by="Enregistré par : {name}",
+    save_failed=(
+        "⚠️ Impossible d'enregistrer cette opération. Réessayez ou envoyez *Bonjour* pour recommencer."
+    ),
 )
 
 
