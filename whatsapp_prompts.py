@@ -25,7 +25,7 @@ Reply with the number (1–6), or 0 to start over."""
 
 # Choice 1 — Cash Received
 CR_AMOUNT = "Please enter the total amount of physical cash collected (Numbers only)."
-PICKER_CLIENT = "Select the client (buyer):"
+PICKER_CLIENT = "Who is the client (buyer)?"
 CR_LOCATION = (
     "Where is this cash held?\n"
     "Reply 1 (My Possession), 2 (Warehouse Safe), 3 (Handed to Govind)."
@@ -43,13 +43,13 @@ EX_CATEGORY = (
     "1 (Fuel), 2 (Warehouse/Logistics), 3 (Labor),\n"
     "4 (Food/Refreshments), 5 (Customs/Admin), 6 (Other)."
 )
-PICKER_EXPENSE_PARTY = "Select the supplier or facility for this expense:"
+PICKER_EXPENSE_PARTY = "Who is the supplier or facility for this expense?"
 EX_PROOF = "Please upload a sharp photo of the physical receipt, or type 0 if missing."
 EX_JUSTIFICATION = "Please type a brief reason why paperwork is missing."
 
 # Choice 3 — Truck / Delivery
 TR_TRUCK = "Enter the Truck License Plate Number or Driver Name."
-PICKER_TR_CLIENT = "Select the client for this delivery:"
+PICKER_TR_CLIENT = "Who is the client for this delivery?"
 TR_DOCUMENT = "Enter the associated Delivery Order (DO) or Invoice Number."
 TR_STATUS = "Select loading status: 1 (Fully Loaded), 2 (Partial Loading / Shortage)."
 TR_SHORTAGE = "Type what items or quantities were short-loaded."
@@ -67,7 +67,7 @@ SP_TYPE = (
     "1 (International Food Import Supplier),\n"
     "2 (Local Port / Customs Fees), 3 (Other)."
 )
-PICKER_SUPPLIER = "Select the supplier:"
+PICKER_SUPPLIER = "Who is the supplier?"
 SP_AMOUNT = "Enter total amount paid out from the bank account (Numbers only)."
 SP_PROOF = (
     "Upload a photo/screenshot of the bank transfer confirmation or remittance advice."

@@ -37,10 +37,18 @@ from whatsapp_access import (
 )
 from whatsapp_client import format_ask_pin_reply, format_wrong_pin_reply, send_whatsapp_text
 from whatsapp_parties import (
+    ADD_NEW_CODE,
+    BROWSE_ALL_CODE,
+    PICKER_MODE_BROWSE,
+    PICKER_MODE_SEARCH,
+    create_party,
+    format_party_no_matches,
     format_party_picker_message,
+    format_party_search_prompt,
+    format_party_search_results,
     get_party_page,
     parse_party_picker_input,
-    create_party,
+    search_parties,
 )
 from whatsapp_prompts import (
     AP_NAME,
@@ -189,7 +197,28 @@ def _is_admin(employee: dict) -> bool:
     return can_manage_parties(employee)
 
 
-async def _send_party_picker(
+async def _start_party_picker(
+    sender: str,
+    employee: dict,
+    *,
+    title: str,
+    party_types: tuple[str, ...],
+) -> None:
+    admin = _is_admin(employee)
+    update_flow_data(
+        sender,
+        party_picker_mode=PICKER_MODE_SEARCH,
+        party_picker_page=0,
+        party_search_results=[],
+        party_search_query="",
+    )
+    await _reply(
+        sender,
+        format_party_search_prompt(title=title, admin_can_add=admin),
+    )
+
+
+async def _send_party_browse(
     sender: str,
     employee: dict,
     *,
@@ -199,7 +228,12 @@ async def _send_party_picker(
 ) -> None:
     admin = _is_admin(employee)
     parties, page, total_pages = get_party_page(party_types, page)
-    update_flow_data(sender, party_picker_page=page)
+    update_flow_data(
+        sender,
+        party_picker_mode=PICKER_MODE_BROWSE,
+        party_picker_page=page,
+        party_search_results=[],
+    )
     message = format_party_picker_message(
         title=title,
         parties=parties,
@@ -208,6 +242,36 @@ async def _send_party_picker(
         admin_can_add=admin,
     )
     await _reply(sender, message)
+
+
+async def _send_party_search_results(
+    sender: str,
+    employee: dict,
+    *,
+    title: str,
+    query: str,
+    results: list,
+) -> None:
+    admin = _is_admin(employee)
+    slim_results = [
+        {"id": row["id"], "name": row["name"], "party_type": row.get("party_type")}
+        for row in results
+    ]
+    update_flow_data(
+        sender,
+        party_picker_mode=PICKER_MODE_SEARCH,
+        party_search_results=slim_results,
+        party_search_query=query,
+    )
+    await _reply(
+        sender,
+        format_party_search_results(
+            title=title,
+            query=query,
+            parties=slim_results,
+            admin_can_add=admin,
+        ),
+    )
 
 
 async def _handle_party_picker(
@@ -227,18 +291,48 @@ async def _handle_party_picker(
 
     session = ensure_session_row(sender)
     flow_data = session.get("flow_data") or {}
+    mode = flow_data.get("party_picker_mode") or PICKER_MODE_SEARCH
     page = int(flow_data.get("party_picker_page") or 0)
+    search_results = flow_data.get("party_search_results") or []
     admin = _is_admin(employee)
 
     action, value = parse_party_picker_input(
         text,
         party_types=party_types,
+        mode=mode,
         page=page,
+        search_results=search_results,
         admin_can_add=admin,
     )
 
+    if action == "search":
+        query = str(value)
+        results = search_parties(query, party_types)
+        if not results:
+            await _reply(
+                sender,
+                format_party_no_matches(query=query, admin_can_add=admin),
+            )
+            update_flow_data(
+                sender,
+                party_picker_mode=PICKER_MODE_SEARCH,
+                party_search_results=[],
+                party_search_query=query,
+            )
+            return FlowResult(status={"status": "flow_step", "step": step})
+        await _send_party_search_results(
+            sender, employee, title=title, query=query, results=results
+        )
+        return FlowResult(status={"status": "flow_step", "step": step})
+
+    if action == "browse":
+        await _send_party_browse(
+            sender, employee, title=title, party_types=party_types, page=int(value or 0)
+        )
+        return FlowResult(status={"status": "flow_step", "step": step})
+
     if action == "page":
-        await _send_party_picker(
+        await _send_party_browse(
             sender, employee, title=title, party_types=party_types, page=value
         )
         return FlowResult(status={"status": "flow_step", "step": step})
@@ -246,9 +340,23 @@ async def _handle_party_picker(
     if action == "add_new":
         if not admin:
             await _reply(sender, ERR_ADD_PARTY_DENIED)
-            await _send_party_picker(
-                sender, employee, title=title, party_types=party_types, page=page
-            )
+            if mode == PICKER_MODE_BROWSE:
+                await _send_party_browse(
+                    sender, employee, title=title, party_types=party_types, page=page
+                )
+            elif search_results:
+                query = flow_data.get("party_search_query") or ""
+                await _send_party_search_results(
+                    sender,
+                    employee,
+                    title=title,
+                    query=query,
+                    results=search_results,
+                )
+            else:
+                await _start_party_picker(
+                    sender, employee, title=title, party_types=party_types
+                )
             return FlowResult(status={"status": "validation_error", "step": step})
         update_flow_data(
             sender,
@@ -264,11 +372,25 @@ async def _handle_party_picker(
     if action == "select":
         return await on_selected(sender, employee, value, **kwargs)
 
-    extra = ", 99 to add new, or 98/97 to change page" if admin else ", or 98/97 to change page"
+    extra = f", {BROWSE_ALL_CODE} to browse all"
+    if admin:
+        extra += f", or {ADD_NEW_CODE} to add new"
+    if mode == PICKER_MODE_BROWSE:
+        extra += ", or 98/97 to change page"
     await _reply(sender, ERR_PARTY_PICKER.format(extra=extra))
-    await _send_party_picker(
-        sender, employee, title=title, party_types=party_types, page=page
-    )
+    if mode == PICKER_MODE_BROWSE:
+        await _send_party_browse(
+            sender, employee, title=title, party_types=party_types, page=page
+        )
+    elif search_results:
+        query = flow_data.get("party_search_query") or ""
+        await _send_party_search_results(
+            sender, employee, title=title, query=query, results=search_results
+        )
+    else:
+        await _start_party_picker(
+            sender, employee, title=title, party_types=party_types
+        )
     return FlowResult(status={"status": "validation_error", "step": step})
 
 
@@ -522,7 +644,7 @@ async def _step_cr_amount(sender, employee, **kwargs) -> FlowResult:
         return FlowResult(status={"status": "validation_error", "step": STEP_CR_AMOUNT})
     update_flow_data(sender, amount=amount)
     advance_step(sender, STEP_CR_CLIENT)
-    await _send_party_picker(
+    await _start_party_picker(
         sender, employee, title=PICKER_CLIENT, party_types=CUSTOMER_PARTY_TYPES
     )
     return FlowResult(status={"status": "flow_step", "step": STEP_CR_CLIENT})
@@ -633,7 +755,7 @@ async def _step_ex_category(sender, employee, **kwargs) -> FlowResult:
         return FlowResult(status={"status": "validation_error", "step": STEP_EX_CATEGORY})
     update_flow_data(sender, category=EXPENSE_CATEGORIES[choice], category_code=choice)
     advance_step(sender, STEP_EX_PARTY)
-    await _send_party_picker(
+    await _start_party_picker(
         sender, employee, title=PICKER_EXPENSE_PARTY, party_types=EXPENSE_PARTY_TYPES
     )
     return FlowResult(status={"status": "flow_step", "step": STEP_EX_PARTY})
@@ -710,7 +832,7 @@ async def _step_tr_truck(sender, employee, **kwargs) -> FlowResult:
         return FlowResult(status={"status": "validation_error", "step": STEP_TR_TRUCK})
     update_flow_data(sender, truck_id=text)
     advance_step(sender, STEP_TR_CLIENT)
-    await _send_party_picker(
+    await _start_party_picker(
         sender, employee, title=PICKER_TR_CLIENT, party_types=CUSTOMER_PARTY_TYPES
     )
     return FlowResult(status={"status": "flow_step", "step": STEP_TR_CLIENT})
@@ -881,7 +1003,7 @@ async def _step_sp_type(sender, employee, **kwargs) -> FlowResult:
         return FlowResult(status={"status": "validation_error", "step": STEP_SP_TYPE})
     update_flow_data(sender, payment_type=SUPPLIER_TYPES[choice], payment_type_code=choice)
     advance_step(sender, STEP_SP_SUPPLIER)
-    await _send_party_picker(
+    await _start_party_picker(
         sender, employee, title=PICKER_SUPPLIER, party_types=SUPPLIER_PARTY_TYPES
     )
     return FlowResult(status={"status": "flow_step", "step": STEP_SP_SUPPLIER})
@@ -967,8 +1089,8 @@ async def _return_after_add_party(sender: str, employee: dict) -> FlowResult:
             add_return_party_types=None,
             party_picker_page=0,
         )
-        await _send_party_picker(
-            sender, employee, title=picker_title, party_types=party_types, page=0
+        await _start_party_picker(
+            sender, employee, title=picker_title, party_types=party_types
         )
         return FlowResult(status={"status": "flow_step", "step": return_step})
 
