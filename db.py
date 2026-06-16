@@ -241,6 +241,23 @@ def ensure_whatsapp_sessions_table() -> None:
     cur = conn.cursor()
     cur.execute(
         """
+        CREATE TABLE IF NOT EXISTS businesses (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    ensure_default_business()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS whatsapp_sessions (
             id SERIAL PRIMARY KEY,
             business_id INTEGER REFERENCES businesses(id),
@@ -253,9 +270,37 @@ def ensure_whatsapp_sessions_table() -> None:
         );
         """
     )
+    cur.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS whatsapp_sessions_business_phone_unique
+        ON whatsapp_sessions (business_id, phone);
+        """
+    )
     conn.commit()
     cur.close()
     conn.close()
+
+
+def whatsapp_sessions_table_ready() -> bool:
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_schema = 'public'
+                  AND table_name = 'whatsapp_sessions'
+            );
+            """
+        )
+        return bool(cur.fetchone()[0])
+    except Exception:
+        logger.exception("Failed to check whatsapp_sessions table")
+        return False
+    finally:
+        cur.close()
+        conn.close()
 
 
 def ensure_default_business() -> None:

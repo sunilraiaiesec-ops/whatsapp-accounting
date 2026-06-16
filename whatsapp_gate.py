@@ -12,7 +12,6 @@ from whatsapp_access import (
     STATE_DELIVERY,
     ensure_session_row,
     get_session,
-    is_greeting,
     is_menu_command,
     looks_like_pin_attempt,
     parse_interactive_action,
@@ -67,7 +66,11 @@ async def handle_whatsapp_access(
         )
     except Exception:
         logger.exception("WhatsApp access gate failed for sender %s", sender)
-        await send_whatsapp_text(sender, format_ask_pin_reply(employee["name"]))
+        employee_name = employee.get("name") or "there"
+        try:
+            await send_whatsapp_text(sender, format_ask_pin_reply(employee_name))
+        except Exception:
+            logger.exception("Failed to send access gate recovery message to %s", sender)
         return AccessDecision(
             proceed=False,
             status={"status": "access_gate_error", "sender": sender},

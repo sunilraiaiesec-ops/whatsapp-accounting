@@ -302,16 +302,21 @@ async def send_whatsapp_text(to_phone: str, body: str) -> bool:
         "Content-Type": "application/json",
     }
 
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        response = await client.post(url, json=payload, headers=headers)
-        if response.status_code != 200:
-            logger.error(
-                "WhatsApp send failed to %s: HTTP %s %s",
-                to_phone,
-                response.status_code,
-                response.text[:300],
-            )
-        return response.status_code == 200
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(url, json=payload, headers=headers)
+    except Exception:
+        logger.exception("WhatsApp send request failed to %s", to_phone)
+        return False
+
+    if response.status_code != 200:
+        logger.error(
+            "WhatsApp send failed to %s: HTTP %s %s",
+            to_phone,
+            response.status_code,
+            response.text[:300],
+        )
+    return response.status_code == 200
 
 
 async def send_whatsapp_action_menu(to_phone: str, employee_name: str) -> bool:
@@ -348,14 +353,19 @@ async def send_whatsapp_action_menu(to_phone: str, employee_name: str) -> bool:
         "Content-Type": "application/json",
     }
 
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        response = await client.post(url, json=payload, headers=headers)
-        if response.status_code != 200:
-            logger.error(
-                "WhatsApp menu send failed to %s: HTTP %s %s",
-                to_phone,
-                response.status_code,
-                response.text[:300],
-            )
-            return await send_whatsapp_text(to_phone, format_action_menu_prompt(employee_name))
-        return True
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(url, json=payload, headers=headers)
+    except Exception:
+        logger.exception("WhatsApp menu send request failed to %s", to_phone)
+        return await send_whatsapp_text(to_phone, format_action_menu_prompt(employee_name))
+
+    if response.status_code != 200:
+        logger.error(
+            "WhatsApp menu send failed to %s: HTTP %s %s",
+            to_phone,
+            response.status_code,
+            response.text[:300],
+        )
+        return await send_whatsapp_text(to_phone, format_action_menu_prompt(employee_name))
+    return True

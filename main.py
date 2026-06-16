@@ -36,6 +36,7 @@ from db import (
     normalize_phone,
     run_startup_backfills,
     try_claim_whatsapp_message,
+    whatsapp_sessions_table_ready,
 )
 from categories import get_category_summary, list_categories
 from products import (
@@ -123,6 +124,11 @@ if _cors_origins:
 app.include_router(api_v1_router)
 
 PARSER_VERSION = "v3-delivery-photos"
+DEPLOY_COMMIT = (
+    os.environ.get("RENDER_GIT_COMMIT")
+    or os.environ.get("GIT_COMMIT")
+    or "local"
+)[:12]
 
 
 @app.get("/")
@@ -152,6 +158,8 @@ async def home():
         "whatsapp_token_valid": wa.get("token_valid"),
         "dashboard_auth_enabled": auth_enabled(),
         "whatsapp_staff_pin_enabled": staff_pin_enabled(),
+        "whatsapp_sessions_table": whatsapp_sessions_table_ready(),
+        "deploy_commit": DEPLOY_COMMIT,
     }
 
 
@@ -257,64 +265,68 @@ def verify_whatsapp_webhook(request: Request):
 
 @app.post("/webhook/whatsapp")
 async def whatsapp_webhook(request: Request):
-    data = await request.json()
-    payload = _parse_incoming_whatsapp_message(data)
-    if not payload:
-        return {"status": "ignored"}
+    try:
+        data = await request.json()
+        payload = _parse_incoming_whatsapp_message(data)
+        if not payload:
+            return {"status": "ignored"}
 
-    whatsapp_message_id = payload["whatsapp_message_id"]
-    if message_exists(whatsapp_message_id):
-        return {"status": "duplicate"}
-
-    employee = get_employee_by_phone(payload["sender"])
-    if not employee:
-        asyncio.create_task(
-            send_whatsapp_text(payload["sender"], format_unauthorized_reply())
-        )
-        return {"status": "rejected_unregistered_sender"}
-
-    media = _extract_delivery_media(payload["message"])
-    message = payload["message"]
-    message_type = payload["message_type"]
-    text_body = None
-    if message_type == "text":
-        text_body = message.get("text", {}).get("body")
-
-    if media:
-        if not try_claim_whatsapp_message(
-            whatsapp_message_id,
-            payload["sender"],
-            "[delivery note photo - processing]",
-            {"status": "processing", "type": message_type},
-        ):
+        whatsapp_message_id = payload["whatsapp_message_id"]
+        if message_exists(whatsapp_message_id):
             return {"status": "duplicate"}
 
-        access = await handle_whatsapp_access(
-            payload["sender"],
-            employee,
-            message_type=message_type,
-            message=message,
-            text_body=text_body,
-            is_media=True,
-        )
-        if not access.proceed:
-            return access.status or {"status": "access_denied"}
-
-        if not can_submit_delivery_note(employee):
+        employee = get_employee_by_phone(payload["sender"])
+        if not employee:
             asyncio.create_task(
-                send_whatsapp_text(
-                    payload["sender"], format_delivery_unauthorized_reply()
-                )
+                send_whatsapp_text(payload["sender"], format_unauthorized_reply())
             )
-            return {"status": "rejected_delivery_photo", "sender": payload["sender"]}
+            return {"status": "rejected_unregistered_sender"}
 
-        await send_whatsapp_text(payload["sender"], format_delivery_received_ack())
-        asyncio.create_task(
-            _process_whatsapp_payload(payload, media, access=access)
-        )
-        return {"status": "accepted"}
+        media = _extract_delivery_media(payload["message"])
+        message = payload["message"]
+        message_type = payload["message_type"]
+        text_body = None
+        if message_type == "text":
+            text_body = message.get("text", {}).get("body")
 
-    return await _process_whatsapp_payload(payload, None)
+        if media:
+            if not try_claim_whatsapp_message(
+                whatsapp_message_id,
+                payload["sender"],
+                "[delivery note photo - processing]",
+                {"status": "processing", "type": message_type},
+            ):
+                return {"status": "duplicate"}
+
+            access = await handle_whatsapp_access(
+                payload["sender"],
+                employee,
+                message_type=message_type,
+                message=message,
+                text_body=text_body,
+                is_media=True,
+            )
+            if not access.proceed:
+                return access.status or {"status": "access_denied"}
+
+            if not can_submit_delivery_note(employee):
+                asyncio.create_task(
+                    send_whatsapp_text(
+                        payload["sender"], format_delivery_unauthorized_reply()
+                    )
+                )
+                return {"status": "rejected_delivery_photo", "sender": payload["sender"]}
+
+            await send_whatsapp_text(payload["sender"], format_delivery_received_ack())
+            asyncio.create_task(
+                _process_whatsapp_payload(payload, media, access=access)
+            )
+            return {"status": "accepted"}
+
+        return await _process_whatsapp_payload(payload, None)
+    except Exception:
+        logger.exception("WhatsApp webhook failed")
+        return {"status": "error"}
 
 
 def _parse_incoming_whatsapp_message(data: dict) -> Optional[dict[str, Any]]:
@@ -363,26 +375,35 @@ async def _process_whatsapp_payload(
             return {"status": "duplicate"}
 
         employee = get_employee_by_phone(sender)
-        if not employee:
-            await send_whatsapp_text(sender, format_unauthorized_reply())
-            return {"status": "rejected_unregistered_sender", "sender": sender}
+    except Exception:
+        logger.exception("WhatsApp preflight failed: %s", whatsapp_message_id)
+        await send_whatsapp_text(
+            sender,
+            "⚠️ Database error. Please try again in a minute.",
+        )
+        return {"status": "error", "phase": "preflight"}
 
-        text_body = None
-        if message_type == "text":
-            text_body = message.get("text", {}).get("body")
+    if not employee:
+        await send_whatsapp_text(sender, format_unauthorized_reply())
+        return {"status": "rejected_unregistered_sender", "sender": sender}
 
-        if access is None:
-            access = await handle_whatsapp_access(
-                sender,
-                employee,
-                message_type=message_type,
-                message=message,
-                text_body=text_body,
-                is_media=bool(media),
-            )
-        if not access.proceed:
-            return access.status or {"status": "access_denied", "sender": sender}
+    text_body = None
+    if message_type == "text":
+        text_body = message.get("text", {}).get("body")
 
+    if access is None:
+        access = await handle_whatsapp_access(
+            sender,
+            employee,
+            message_type=message_type,
+            message=message,
+            text_body=text_body,
+            is_media=bool(media),
+        )
+    if not access.proceed:
+        return access.status or {"status": "access_denied", "sender": sender}
+
+    try:
         if media:
             if not can_submit_delivery_note(employee):
                 await send_whatsapp_text(sender, format_delivery_unauthorized_reply())
@@ -415,12 +436,11 @@ async def _process_whatsapp_payload(
         return {"status": "ignored", "reason": f"unsupported_type_{message_type}"}
     except Exception:
         logger.exception("WhatsApp message processing failed: %s", whatsapp_message_id)
-        if employee := get_employee_by_phone(sender):
-            await send_whatsapp_text(
-                sender,
-                "⚠️ Something went wrong saving your message. Please try again in a minute.",
-            )
-        return {"status": "error"}
+        await send_whatsapp_text(
+            sender,
+            "⚠️ Something went wrong saving your message. Please try again in a minute.",
+        )
+        return {"status": "error", "phase": "processing"}
 
 
 async def _handle_text_message(sender, message_text, whatsapp_message_id, employee):
