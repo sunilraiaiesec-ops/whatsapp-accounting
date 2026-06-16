@@ -9,9 +9,12 @@ from typing import Any, Optional
 import psycopg2
 import psycopg2.extras
 from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
+
+from api_v1 import router as api_v1_router
 
 from auth import (
     SESSION_SECRET,
@@ -99,6 +102,21 @@ async def dashboard_auth_middleware(request: Request, call_next):
 # SessionMiddleware must wrap auth so request.session exists in require_dashboard_auth.
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, same_site="lax")
 
+_cors_origins = [
+    origin.strip()
+    for origin in (os.environ.get("CORS_ORIGINS") or "").split(",")
+    if origin.strip()
+]
+if _cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+app.include_router(api_v1_router)
 
 PARSER_VERSION = "v3-delivery-photos"
 
@@ -121,6 +139,7 @@ async def home():
             "review_queue",
             "monthly_reports",
             "dashboard_login",
+            "api_v1",
         ],
         "gemini_configured": bool(os.environ.get("GOOGLE_API_KEY")),
         "gemini_model": os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"),
@@ -1065,14 +1084,6 @@ def reports_dashboard(request: Request, year: Optional[int] = None, month: Optio
             "year_options": year_options,
         },
     )
-
-
-@app.get("/api/v1/reports/monthly")
-def monthly_report_api(year: Optional[int] = None, month: Optional[int] = None):
-    try:
-        return get_monthly_report(year=year, month=month)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/delivery-notes")
