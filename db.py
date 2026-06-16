@@ -153,6 +153,19 @@ def create_tables():
         );
     """)
 
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS whatsapp_sessions (
+            id SERIAL PRIMARY KEY,
+            business_id INTEGER REFERENCES businesses(id),
+            phone TEXT NOT NULL,
+            state TEXT NOT NULL DEFAULT 'awaiting_pin',
+            selected_action TEXT,
+            pin_verified_at TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (business_id, phone)
+        );
+    """)
+
     migrations = [
         "ALTER TABLE messages ADD COLUMN IF NOT EXISTS business_id INTEGER REFERENCES businesses(id);",
         "ALTER TABLE messages ADD COLUMN IF NOT EXISTS whatsapp_message_id TEXT;",

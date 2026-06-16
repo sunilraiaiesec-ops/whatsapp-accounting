@@ -23,6 +23,7 @@ from auth import (
     require_dashboard_auth,
     verify_password,
 )
+from whatsapp_access import staff_pin_enabled
 
 from db import (
     DEFAULT_BUSINESS_ID,
@@ -76,6 +77,7 @@ from whatsapp_client import (
     format_unsupported_message_reply,
     send_whatsapp_text,
 )
+from whatsapp_gate import AccessDecision, handle_whatsapp_access
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -140,12 +142,14 @@ async def home():
             "monthly_reports",
             "dashboard_login",
             "api_v1",
+            "whatsapp_staff_pin",
         ],
         "gemini_configured": bool(os.environ.get("GOOGLE_API_KEY")),
         "gemini_model": os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"),
         "whatsapp_configured": wa.get("configured"),
         "whatsapp_token_valid": wa.get("token_valid"),
         "dashboard_auth_enabled": auth_enabled(),
+        "whatsapp_staff_pin_enabled": staff_pin_enabled(),
     }
 
 
@@ -260,27 +264,52 @@ async def whatsapp_webhook(request: Request):
     if message_exists(whatsapp_message_id):
         return {"status": "duplicate"}
 
+    employee = get_employee_by_phone(payload["sender"])
+    if not employee:
+        asyncio.create_task(
+            send_whatsapp_text(payload["sender"], format_unauthorized_reply())
+        )
+        return {"status": "rejected_unregistered_sender"}
+
     media = _extract_delivery_media(payload["message"])
+    message = payload["message"]
+    message_type = payload["message_type"]
+    text_body = None
+    if message_type == "text":
+        text_body = message.get("text", {}).get("body")
+
     if media:
         if not try_claim_whatsapp_message(
             whatsapp_message_id,
             payload["sender"],
             "[delivery note photo - processing]",
-            {"status": "processing", "type": payload["message_type"]},
+            {"status": "processing", "type": message_type},
         ):
             return {"status": "duplicate"}
 
-        employee = get_employee_by_phone(payload["sender"])
-        if not employee:
-            asyncio.create_task(_process_whatsapp_payload(payload, media))
-            return {"status": "accepted"}
+        access = await handle_whatsapp_access(
+            payload["sender"],
+            employee,
+            message_type=message_type,
+            message=message,
+            text_body=text_body,
+            is_media=True,
+        )
+        if not access.proceed:
+            return access.status or {"status": "access_denied"}
 
         if not can_submit_delivery_note(employee):
-            asyncio.create_task(_process_whatsapp_payload(payload, media))
-            return {"status": "accepted"}
+            asyncio.create_task(
+                send_whatsapp_text(
+                    payload["sender"], format_delivery_unauthorized_reply()
+                )
+            )
+            return {"status": "rejected_delivery_photo", "sender": payload["sender"]}
 
         await send_whatsapp_text(payload["sender"], format_delivery_received_ack())
-        asyncio.create_task(_process_whatsapp_payload(payload, media))
+        asyncio.create_task(
+            _process_whatsapp_payload(payload, media, access=access)
+        )
         return {"status": "accepted"}
 
     return await _process_whatsapp_payload(payload, None)
@@ -320,6 +349,7 @@ def _extract_delivery_media(message: dict) -> Optional[tuple[str, str, Optional[
 async def _process_whatsapp_payload(
     payload: dict[str, Any],
     media: Optional[tuple[str, str, Optional[str]]],
+    access: Optional[AccessDecision] = None,
 ):
     sender = payload["sender"]
     whatsapp_message_id = payload["whatsapp_message_id"]
@@ -335,10 +365,21 @@ async def _process_whatsapp_payload(
             await send_whatsapp_text(sender, format_unauthorized_reply())
             return {"status": "rejected_unregistered_sender", "sender": sender}
 
+        text_body = None
         if message_type == "text":
-            return await _handle_text_message(
-                sender, message["text"]["body"], whatsapp_message_id, employee
+            text_body = message.get("text", {}).get("body")
+
+        if access is None:
+            access = await handle_whatsapp_access(
+                sender,
+                employee,
+                message_type=message_type,
+                message=message,
+                text_body=text_body,
+                is_media=bool(media),
             )
+        if not access.proceed:
+            return access.status or {"status": "access_denied", "sender": sender}
 
         if media:
             if not can_submit_delivery_note(employee):
@@ -349,6 +390,14 @@ async def _process_whatsapp_payload(
                 sender, media_id, mime_type, caption, whatsapp_message_id, employee,
                 message_type=message_type,
             )
+
+        if message_type == "text":
+            return await _handle_text_message(
+                sender, message["text"]["body"], whatsapp_message_id, employee
+            )
+
+        if message_type == "interactive":
+            return access.status or {"status": "interactive_handled", "sender": sender}
 
         await send_whatsapp_text(
             sender,

@@ -62,8 +62,68 @@ def format_confirmation(
 
 def format_unauthorized_reply() -> str:
     return (
-        "⛔ This phone number is not registered to log business transactions.\n"
-        "Please contact your business admin to be added to the team."
+        "⛔ This phone number is not registered.\n"
+        "Only approved team members can use this WhatsApp accounting line.\n"
+        "Contact the business owner to be added."
+    )
+
+
+def format_ask_pin_reply(employee_name: str) -> str:
+    return (
+        f"Hi {employee_name} 👋\n\n"
+        "Enter your *team PIN* to continue.\n"
+        "Only the owner shares this PIN with staff."
+    )
+
+
+def format_wrong_pin_reply() -> str:
+    return (
+        "⛔ Wrong PIN.\n"
+        "Ask the owner for the correct team PIN and try again."
+    )
+
+
+def format_pin_expired_reply(employee_name: str) -> str:
+    return (
+        f"Hi {employee_name}, your session expired.\n"
+        "Enter your team PIN again to continue."
+    )
+
+
+def format_action_menu_prompt(employee_name: str) -> str:
+    return (
+        f"Thanks {employee_name}. What do you want to do?\n\n"
+        "Tap a button below, or reply:\n"
+        "1 — Cash update (paid/received)\n"
+        "2 — Delivery note photo\n"
+        "0 — Cancel / choose again"
+    )
+
+
+def format_action_selected_reply(action: str) -> str:
+    if action == "cash":
+        return (
+            "✅ *Cash update* selected.\n\n"
+            "Send your message, for example:\n"
+            "Paid Ahmed 50000 FCFA transport\n"
+            "Received from Jean 120000 FCFA\n\n"
+            "Reply MENU to choose something else."
+        )
+    return (
+        "✅ *Delivery note* selected.\n\n"
+        "Send a clear photo of the delivery form (camera icon).\n\n"
+        "Reply MENU to choose something else."
+    )
+
+
+def format_need_pin_first_reply() -> str:
+    return "Enter your team PIN first before choosing an action."
+
+
+def format_need_delivery_photo_reply() -> str:
+    return (
+        "You chose *Delivery note*.\n"
+        "Send a photo of the delivery form (camera icon, not as a file)."
     )
 
 
@@ -247,3 +307,50 @@ async def send_whatsapp_text(to_phone: str, body: str) -> bool:
                 response.text[:300],
             )
         return response.status_code == 200
+
+
+async def send_whatsapp_action_menu(to_phone: str, employee_name: str) -> bool:
+    if not WHATSAPP_ACCESS_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
+        return False
+
+    url = (
+        f"https://graph.facebook.com/{WHATSAPP_API_VERSION}/"
+        f"{WHATSAPP_PHONE_NUMBER_ID}/messages"
+    )
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to_phone,
+        "type": "interactive",
+        "interactive": {
+            "type": "button",
+            "body": {"text": format_action_menu_prompt(employee_name)},
+            "action": {
+                "buttons": [
+                    {
+                        "type": "reply",
+                        "reply": {"id": "action_cash", "title": "Cash update"},
+                    },
+                    {
+                        "type": "reply",
+                        "reply": {"id": "action_delivery", "title": "Delivery photo"},
+                    },
+                ]
+            },
+        },
+    }
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
+        "Content-Type": "application/json",
+    }
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.post(url, json=payload, headers=headers)
+        if response.status_code != 200:
+            logger.error(
+                "WhatsApp menu send failed to %s: HTTP %s %s",
+                to_phone,
+                response.status_code,
+                response.text[:300],
+            )
+            return await send_whatsapp_text(to_phone, format_action_menu_prompt(employee_name))
+        return True
