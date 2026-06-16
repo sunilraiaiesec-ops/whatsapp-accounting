@@ -7,7 +7,12 @@ from typing import Any, Optional, Tuple
 import httpx
 
 GOOGLE_API_KEY = (os.environ.get("GOOGLE_API_KEY") or "").strip() or None
-GEMINI_MODEL = (os.environ.get("GEMINI_MODEL") or "gemini-3.5-flash").strip()
+GEMINI_MODEL = (os.environ.get("GEMINI_MODEL") or "gemini-2.5-flash").strip()
+GEMINI_FALLBACK_MODELS = [
+    GEMINI_MODEL,
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+]
 
 DELIVERY_FIELDS = [
     "document_number",
@@ -171,6 +176,53 @@ def delivery_status(fields: dict) -> str:
     return "pending_review"
 
 
+async def check_gemini_api() -> dict:
+    if not GOOGLE_API_KEY:
+        return {"configured": False, "api_ok": False, "model": GEMINI_MODEL}
+    url = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{GEMINI_MODEL}:generateContent"
+    )
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": GOOGLE_API_KEY,
+    }
+    payload = {
+        "contents": [{"parts": [{"text": "Reply with OK"}]}],
+        "generationConfig": {"maxOutputTokens": 8},
+    }
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(url, json=payload, headers=headers)
+        return {
+            "configured": True,
+            "api_ok": response.status_code == 200,
+            "model": GEMINI_MODEL,
+            "status_code": response.status_code,
+            "error": None if response.status_code == 200 else response.text[:200],
+        }
+    except Exception as exc:
+        return {
+            "configured": True,
+            "api_ok": False,
+            "model": GEMINI_MODEL,
+            "error": str(exc),
+        }
+
+
+async def _call_gemini(payload: dict, model: str) -> httpx.Response:
+    url = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{model}:generateContent"
+    )
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": GOOGLE_API_KEY or "",
+    }
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        return await client.post(url, json=payload, headers=headers)
+
+
 async def extract_delivery_note(
     image_bytes: bytes,
     mime_type: str,
@@ -204,27 +256,30 @@ async def extract_delivery_note(
         "generationConfig": {"temperature": 0.1, "responseMimeType": "application/json"},
     }
 
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{GEMINI_MODEL}:generateContent"
-    )
-    headers = {
-        "Content-Type": "application/json",
-        "x-goog-api-key": GOOGLE_API_KEY,
-    }
+    models_to_try = []
+    for model in GEMINI_FALLBACK_MODELS:
+        if model and model not in models_to_try:
+            models_to_try.append(model)
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        response = await client.post(url, json=payload, headers=headers)
-        if response.status_code != 200:
-            error_body = response.text
-            empty = {field: None for field in DELIVERY_FIELDS}
-            return empty, {
-                "error": f"Gemini API error {response.status_code}",
-                "details": error_body[:500],
-                "model": GEMINI_MODEL,
-                "caption": caption,
-            }
-        data = response.json()
+    last_error: dict[str, Any] = {}
+    data: dict[str, Any] = {}
+    model_used = GEMINI_MODEL
+
+    for model in models_to_try:
+        model_used = model
+        response = await _call_gemini(payload, model)
+        if response.status_code == 200:
+            data = response.json()
+            break
+        last_error = {
+            "error": f"Gemini API error {response.status_code}",
+            "details": response.text[:500],
+            "model": model,
+            "caption": caption,
+        }
+    else:
+        empty = {field: None for field in DELIVERY_FIELDS}
+        return empty, last_error
 
     try:
         text = data["candidates"][0]["content"]["parts"][0]["text"]
@@ -234,7 +289,7 @@ async def extract_delivery_note(
         return fields, {
             "raw_response": raw,
             "caption": caption,
-            "model": GEMINI_MODEL,
+            "model": model_used,
             **audit,
         }
     except (KeyError, IndexError, json.JSONDecodeError) as exc:
@@ -242,6 +297,6 @@ async def extract_delivery_note(
         return empty, {
             "error": f"Failed to parse Gemini response: {exc}",
             "response": data,
-            "model": GEMINI_MODEL,
+            "model": model_used,
             "caption": caption,
         }

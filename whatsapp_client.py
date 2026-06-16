@@ -247,6 +247,11 @@ def format_delivery_confirmation(
             err = str(audit["error"])
             if "401" in err or "Unauthorized" in err:
                 msg += "\n\n⚠️ WhatsApp token expired — admin must refresh WHATSAPP_ACCESS_TOKEN on Render."
+            elif "GOOGLE_API_KEY" in err:
+                msg += "\n\n⚠️ Gemini API key missing — add GOOGLE_API_KEY on Render."
+            elif "Gemini API error" in err:
+                msg += f"\n\n⚠️ Gemini could not read the photo ({err})."
+                msg += "\nAdmin: check GOOGLE_API_KEY and GEMINI_MODEL on Render."
             else:
                 msg += f"\n\nReason: {err[:200]}"
         if blank_summary:

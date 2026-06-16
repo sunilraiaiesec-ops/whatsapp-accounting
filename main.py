@@ -46,7 +46,7 @@ from products import (
     prepare_delivery_product_fields,
     update_product_price,
 )
-from delivery_extractor import delivery_status, extract_delivery_note
+from delivery_extractor import delivery_status, extract_delivery_note, check_gemini_api
 from deliveries import find_existing_delivery_by_document, normalize_document_number
 from models import EmployeeInput, EmployeeUpdate, MessageInput, ProductUpdate
 from parties import (
@@ -136,6 +136,7 @@ DEPLOY_COMMIT = (
 @app.get("/")
 async def home():
     wa = await check_whatsapp_token()
+    gemini = await check_gemini_api()
     return {
         "status": "working",
         "project": "whatsapp-accounting",
@@ -154,8 +155,10 @@ async def home():
             "api_v1",
             "whatsapp_staff_pin",
         ],
-        "gemini_configured": bool(os.environ.get("GOOGLE_API_KEY")),
-        "gemini_model": os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"),
+        "gemini_configured": gemini.get("configured"),
+        "gemini_api_ok": gemini.get("api_ok"),
+        "gemini_model": gemini.get("model"),
+        "gemini_error": gemini.get("error"),
         "whatsapp_configured": wa.get("configured"),
         "whatsapp_token_valid": wa.get("token_valid"),
         "dashboard_auth_enabled": auth_enabled(),
