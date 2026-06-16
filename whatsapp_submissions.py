@@ -39,6 +39,24 @@ def ensure_accounting_submissions_table() -> None:
         ALTER COLUMN receipt_id DROP NOT NULL;
         """
     )
+    cur.execute(
+        """
+        ALTER TABLE accounting_submissions
+        ADD COLUMN IF NOT EXISTS proof_media_id TEXT;
+        """
+    )
+    cur.execute(
+        """
+        ALTER TABLE accounting_submissions
+        ADD COLUMN IF NOT EXISTS whatsapp_message_id TEXT;
+        """
+    )
+    cur.execute(
+        """
+        ALTER TABLE accounting_submissions
+        ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'confirmed';
+        """
+    )
     conn.commit()
     cur.close()
     conn.close()
@@ -65,6 +83,11 @@ def save_submission(
 ) -> tuple[int, str]:
     ensure_accounting_submissions_table()
     safe_payload = _json_safe(payload)
+    if amount is not None:
+        try:
+            amount = int(amount)
+        except (TypeError, ValueError):
+            amount = None
     conn = get_db_connection()
     cur = conn.cursor()
     try:
@@ -95,31 +118,11 @@ def save_submission(
             "UPDATE accounting_submissions SET receipt_id = %s WHERE id = %s;",
             (receipt_id, submission_id),
         )
-        cur.execute(
-            """
-            INSERT INTO messages
-            (business_id, source, sender, message_text, raw_data, whatsapp_message_id)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            ON CONFLICT (whatsapp_message_id) DO NOTHING;
-            """,
-            (
-                business_id,
-                "whatsapp",
-                sender,
-                f"[{submission_type}] Receipt {receipt_id}",
-                json.dumps(
-                    {
-                        "submission_type": submission_type,
-                        "receipt_id": receipt_id,
-                        **_json_safe(safe_payload),
-                    },
-                    default=str,
-                ),
-                whatsapp_message_id,
-            ),
-        )
         conn.commit()
         return submission_id, receipt_id
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         cur.close()
         conn.close()

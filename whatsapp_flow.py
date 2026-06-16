@@ -619,15 +619,24 @@ async def _finish_submission(
     whatsapp_message_id: Optional[str],
     proof_media_id: Optional[str],
 ) -> FlowResult:
-    _, receipt_id = save_submission(
-        employee_id=employee["id"],
-        sender=sender,
-        submission_type=submission_type,
-        amount=amount,
-        payload=payload,
-        whatsapp_message_id=whatsapp_message_id,
-        proof_media_id=proof_media_id,
-    )
+    try:
+        _, receipt_id = save_submission(
+            employee_id=employee["id"],
+            sender=sender,
+            submission_type=submission_type,
+            amount=amount,
+            payload=payload,
+            whatsapp_message_id=whatsapp_message_id,
+            proof_media_id=proof_media_id,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to save %s submission for sender %s (employee_id=%s)",
+            submission_type,
+            sender,
+            employee.get("id"),
+        )
+        raise
     set_main_menu(sender)
     _activate_lang(sender)
     await _reply(sender, format_saved(receipt_id, summary, _employee_name(employee)))
