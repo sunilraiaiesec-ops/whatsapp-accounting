@@ -28,6 +28,7 @@ from whatsapp_access import staff_pin_enabled
 from db import (
     DEFAULT_BUSINESS_ID,
     create_tables,
+    ensure_whatsapp_sessions_table,
     get_db_connection,
     can_submit_delivery_note,
     get_employee_by_phone,
@@ -88,6 +89,7 @@ templates = Jinja2Templates(directory="templates")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     create_tables()
+    ensure_whatsapp_sessions_table()
     backfill_task = asyncio.create_task(asyncio.to_thread(run_startup_backfills))
     yield
     backfill_task.cancel()
@@ -392,8 +394,15 @@ async def _process_whatsapp_payload(
             )
 
         if message_type == "text":
+            body = message.get("text", {}).get("body")
+            if not body:
+                await send_whatsapp_text(
+                    sender,
+                    format_unsupported_message_reply("empty text"),
+                )
+                return {"status": "ignored", "reason": "empty_text_body"}
             return await _handle_text_message(
-                sender, message["text"]["body"], whatsapp_message_id, employee
+                sender, body, whatsapp_message_id, employee
             )
 
         if message_type == "interactive":
@@ -422,35 +431,42 @@ async def _handle_text_message(sender, message_text, whatsapp_message_id, employ
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute(
-        """
-        INSERT INTO messages
-        (business_id, source, sender, message_text, raw_data, whatsapp_message_id)
-        VALUES (%s, %s, %s, %s, %s, %s)
-        RETURNING id;
-        """,
-        (
-            DEFAULT_BUSINESS_ID,
-            "whatsapp",
-            sender,
-            message_text,
-            json.dumps(raw_data),
-            whatsapp_message_id,
-        ),
-    )
-    message_id = cur.fetchone()[0]
+    try:
+        cur.execute(
+            """
+            INSERT INTO messages
+            (business_id, source, sender, message_text, raw_data, whatsapp_message_id)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING id;
+            """,
+            (
+                DEFAULT_BUSINESS_ID,
+                "whatsapp",
+                sender,
+                message_text,
+                json.dumps(raw_data),
+                whatsapp_message_id,
+            ),
+        )
+        message_id = cur.fetchone()[0]
 
-    transaction_id, party_id = insert_transaction(
-        cur,
-        parsed,
-        sender,
-        employee["id"],
-        status,
-        whatsapp_message_id=whatsapp_message_id,
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
+        transaction_id, party_id = insert_transaction(
+            cur,
+            parsed,
+            sender,
+            employee["id"],
+            status,
+            whatsapp_message_id=whatsapp_message_id,
+        )
+        conn.commit()
+    except psycopg2.IntegrityError as exc:
+        conn.rollback()
+        if exc.pgcode == psycopg2.errorcodes.UNIQUE_VIOLATION:
+            return {"status": "duplicate", "whatsapp_message_id": whatsapp_message_id}
+        raise
+    finally:
+        cur.close()
+        conn.close()
 
     party_balance = format_party_balance_line(party_id) if party_id else None
     reply = format_confirmation(parsed, employee["name"], status, party_balance)

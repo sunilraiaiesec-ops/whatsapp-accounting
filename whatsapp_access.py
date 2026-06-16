@@ -27,21 +27,23 @@ def staff_pin_enabled() -> bool:
 
 
 def verify_staff_pin(text: str) -> bool:
-    if not STAFF_PIN or len(STAFF_PIN) != PIN_LENGTH:
+    if not STAFF_PIN:
         return False
     cleaned = text.strip()
-    if not cleaned.isdigit() or len(cleaned) != PIN_LENGTH:
+    if not cleaned.isdigit() or len(cleaned) != len(STAFF_PIN):
         return False
     return secrets.compare_digest(cleaned, STAFF_PIN)
 
 
+def looks_like_pin_attempt(text: str) -> bool:
+    if not STAFF_PIN:
+        return False
+    cleaned = text.strip()
+    return cleaned.isdigit() and len(cleaned) == len(STAFF_PIN)
+
+
 def get_company_name() -> str:
     return COMPANY_NAME or "RR Foods SARL"
-
-
-def looks_like_pin_attempt(text: str) -> bool:
-    cleaned = text.strip()
-    return cleaned.isdigit() and len(cleaned) == PIN_LENGTH
 
 
 _GREETINGS = {
@@ -80,6 +82,10 @@ def _session_expired(pin_verified_at: Optional[datetime]) -> bool:
 
 
 def get_session(phone: str, business_id: int = DEFAULT_BUSINESS_ID) -> Optional[dict[str, Any]]:
+    from db import ensure_default_business, ensure_whatsapp_sessions_table
+
+    ensure_whatsapp_sessions_table()
+    ensure_default_business()
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute(
@@ -128,6 +134,10 @@ def reset_session(phone: str, business_id: int = DEFAULT_BUSINESS_ID) -> None:
 
 
 def set_session_after_pin(phone: str, business_id: int = DEFAULT_BUSINESS_ID) -> None:
+    from db import ensure_default_business, ensure_whatsapp_sessions_table
+
+    ensure_whatsapp_sessions_table()
+    ensure_default_business()
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
@@ -152,6 +162,10 @@ def set_session_action(
     action: str,
     business_id: int = DEFAULT_BUSINESS_ID,
 ) -> None:
+    from db import ensure_default_business, ensure_whatsapp_sessions_table
+
+    ensure_whatsapp_sessions_table()
+    ensure_default_business()
     state = STATE_CASH if action == ACTION_CASH else STATE_DELIVERY
     conn = get_db_connection()
     cur = conn.cursor()
@@ -207,6 +221,10 @@ def is_menu_command(text: str) -> bool:
 
 
 def ensure_session_row(phone: str, business_id: int = DEFAULT_BUSINESS_ID) -> dict[str, Any]:
+    from db import ensure_default_business, ensure_whatsapp_sessions_table
+
+    ensure_whatsapp_sessions_table()
+    ensure_default_business()
     session = get_session(phone, business_id=business_id)
     if session:
         return session
