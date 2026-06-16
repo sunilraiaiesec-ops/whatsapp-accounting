@@ -20,10 +20,8 @@ from whatsapp_access import (
     verify_staff_pin,
 )
 from whatsapp_client import (
-    format_action_menu_prompt,
     format_action_selected_reply,
     format_ask_pin_reply,
-    format_delivery_mode_reply,
     format_need_delivery_photo_reply,
     format_need_pin_first_reply,
     format_pin_expired_reply,
