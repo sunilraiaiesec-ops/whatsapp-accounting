@@ -90,12 +90,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="WhatsApp Accounting", lifespan=lifespan)
 
-app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, same_site="lax")
-
 
 @app.middleware("http")
 async def dashboard_auth_middleware(request: Request, call_next):
     return await require_dashboard_auth(request, call_next)
+
+
+# SessionMiddleware must wrap auth so request.session exists in require_dashboard_auth.
+app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, same_site="lax")
 
 
 PARSER_VERSION = "v3-delivery-photos"
