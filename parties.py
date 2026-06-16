@@ -353,3 +353,74 @@ def format_party_balance_line(party_id: int, business_id: int = DEFAULT_BUSINESS
     if not lines:
         return f"{name} balance: 0 FCFA (even)"
     return f"{name} — " + " · ".join(lines)
+
+
+PARTY_TYPE_CUSTOMER = "customer"
+PARTY_TYPE_SUPPLIER = "supplier"
+PARTY_TYPE_FACILITY = "facility"
+PARTY_TYPE_BOTH = "both"
+
+CUSTOMER_PARTY_TYPES = (PARTY_TYPE_CUSTOMER, PARTY_TYPE_BOTH)
+SUPPLIER_PARTY_TYPES = (PARTY_TYPE_SUPPLIER, PARTY_TYPE_FACILITY, PARTY_TYPE_BOTH)
+EXPENSE_PARTY_TYPES = SUPPLIER_PARTY_TYPES
+
+
+def list_parties_by_types(
+    party_types: tuple[str, ...],
+    business_id: int = DEFAULT_BUSINESS_ID,
+) -> list[dict[str, Any]]:
+    if not party_types:
+        return []
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        """
+        SELECT id, name, party_type
+        FROM parties
+        WHERE business_id = %s
+          AND party_type = ANY(%s)
+        ORDER BY name ASC;
+        """,
+        (business_id, list(party_types)),
+    )
+    rows = [dict(row) for row in cur.fetchall()]
+    cur.close()
+    conn.close()
+    return rows
+
+
+def create_party_record(
+    name: str,
+    party_type: str,
+    business_id: int = DEFAULT_BUSINESS_ID,
+) -> Optional[dict[str, Any]]:
+    cleaned = name.strip()
+    if not cleaned:
+        return None
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        party_id = find_or_create_party(cur, cleaned, business_id=business_id, party_type=party_type)
+        conn.commit()
+        if not party_id:
+            return None
+        cur.execute(
+            "SELECT id, name, party_type FROM parties WHERE id = %s;",
+            (party_id,),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+    finally:
+        cur.close()
+        conn.close()
+
+
+def can_manage_parties(employee: dict) -> bool:
+    """Govind, Vikash, and owners may add clients/suppliers."""
+    name = (employee.get("name") or "").lower()
+    role = (employee.get("role") or "").lower()
+    if "owner" in role:
+        return True
+    if "govind" in name or "vikash" in name:
+        return True
+    return False

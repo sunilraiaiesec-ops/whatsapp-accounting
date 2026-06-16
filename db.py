@@ -249,8 +249,10 @@ def create_tables():
     conn.close()
 
     from categories import seed_categories
+    from party_seeds import seed_default_customers
 
     seed_categories()
+    seed_default_customers()
 
 
 def ensure_whatsapp_sessions_table() -> None:
