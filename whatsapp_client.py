@@ -68,25 +68,30 @@ def format_unauthorized_reply() -> str:
     )
 
 
-def format_ask_pin_reply(employee_name: str) -> str:
+def format_welcome_pin_reply(employee_name: str, company_name: str) -> str:
     return (
-        f"Hi {employee_name} 👋\n\n"
-        "Enter your *team PIN* to continue.\n"
-        "Only the owner shares this PIN with staff."
+        f"Hello {employee_name} Welcome to the {company_name} Accounting Assistant. "
+        "Please enter your 6-digit PIN to continue."
     )
+
+
+def format_ask_pin_reply(employee_name: str) -> str:
+    company_name = (os.environ.get("BUSINESS_NAME") or "RR Foods SARL").strip()
+    return format_welcome_pin_reply(employee_name, company_name)
 
 
 def format_wrong_pin_reply() -> str:
     return (
         "⛔ Wrong PIN.\n"
-        "Ask the owner for the correct team PIN and try again."
+        "Please enter the correct 6-digit PIN from the owner."
     )
 
 
 def format_pin_expired_reply(employee_name: str) -> str:
+    company_name = (os.environ.get("BUSINESS_NAME") or "RR Foods SARL").strip()
     return (
-        f"Hi {employee_name}, your session expired.\n"
-        "Enter your team PIN again to continue."
+        f"Hello {employee_name} Welcome to the {company_name} Accounting Assistant. "
+        "Your session expired. Please enter your 6-digit PIN to continue."
     )
 
 

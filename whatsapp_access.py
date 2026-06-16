@@ -9,6 +9,8 @@ from db import DEFAULT_BUSINESS_ID, get_db_connection
 
 STAFF_PIN = (os.environ.get("WHATSAPP_STAFF_PIN") or "").strip()
 SESSION_HOURS = int(os.environ.get("WHATSAPP_SESSION_HOURS") or "8")
+COMPANY_NAME = (os.environ.get("BUSINESS_NAME") or "RR Foods SARL").strip()
+PIN_LENGTH = 6
 
 STATE_AWAITING_PIN = "awaiting_pin"
 STATE_AWAITING_ACTION = "awaiting_action"
@@ -27,7 +29,44 @@ def staff_pin_enabled() -> bool:
 def verify_staff_pin(text: str) -> bool:
     if not STAFF_PIN:
         return False
-    return secrets.compare_digest(text.strip(), STAFF_PIN)
+    cleaned = text.strip()
+    if not cleaned.isdigit() or len(cleaned) != PIN_LENGTH:
+        return False
+    return secrets.compare_digest(cleaned, STAFF_PIN)
+
+
+def get_company_name() -> str:
+    return COMPANY_NAME or "RR Foods SARL"
+
+
+def looks_like_pin_attempt(text: str) -> bool:
+    cleaned = text.strip()
+    return cleaned.isdigit() and len(cleaned) == PIN_LENGTH
+
+
+_GREETINGS = {
+    "hello",
+    "hi",
+    "hey",
+    "bonjour",
+    "salut",
+    "bonsoir",
+    "coucou",
+    "hola",
+    "good morning",
+    "good afternoon",
+    "good evening",
+}
+
+
+def is_greeting(text: str) -> bool:
+    normalized = text.strip().lower().strip("!.,?")
+    if not normalized:
+        return False
+    if normalized in _GREETINGS:
+        return True
+    first_word = normalized.split()[0]
+    return first_word in _GREETINGS
 
 
 def _session_expired(pin_verified_at: Optional[datetime]) -> bool:

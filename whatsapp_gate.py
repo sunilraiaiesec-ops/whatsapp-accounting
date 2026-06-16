@@ -11,7 +11,9 @@ from whatsapp_access import (
     STATE_DELIVERY,
     ensure_session_row,
     get_session,
+    is_greeting,
     is_menu_command,
+    looks_like_pin_attempt,
     parse_interactive_action,
     parse_text_action,
     set_session_action,
@@ -116,17 +118,23 @@ async def handle_whatsapp_access(
             )
 
         if state == STATE_AWAITING_PIN:
-            if verify_staff_pin(text):
-                set_session_after_pin(sender)
-                await send_whatsapp_action_menu(sender, employee["name"])
+            if looks_like_pin_attempt(text):
+                if verify_staff_pin(text):
+                    set_session_after_pin(sender)
+                    await send_whatsapp_action_menu(sender, employee["name"])
+                    return AccessDecision(
+                        proceed=False,
+                        status={"status": "pin_verified", "sender": sender},
+                    )
+                await send_whatsapp_text(sender, format_wrong_pin_reply())
                 return AccessDecision(
                     proceed=False,
-                    status={"status": "pin_verified", "sender": sender},
+                    status={"status": "wrong_pin", "sender": sender},
                 )
-            await send_whatsapp_text(sender, format_wrong_pin_reply())
+            await send_whatsapp_text(sender, format_ask_pin_reply(employee["name"]))
             return AccessDecision(
                 proceed=False,
-                status={"status": "wrong_pin", "sender": sender},
+                status={"status": "awaiting_pin", "sender": sender},
             )
 
         if state == STATE_AWAITING_ACTION:
@@ -168,7 +176,7 @@ async def handle_whatsapp_access(
         )
 
     if state == STATE_AWAITING_ACTION:
-        await send_whatsapp_action_menu(employee["name"])
+        await send_whatsapp_action_menu(sender, employee["name"])
         return AccessDecision(
             proceed=False,
             status={"status": "awaiting_action", "sender": sender},
