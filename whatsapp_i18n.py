@@ -138,7 +138,8 @@ PROMPTS_EN = PromptBundle(
 5 — 🚢 Supplier & Port Payment Confirmation
 0 — ❌ Cancel / Start Over
 
-Reply with the number (1–5), or 0 to start over.""",
+Reply 1–5, or 0 to cancel a step back to this menu.
+Send *Bonjour* (French) or *Hello*/*Hi* (English) anytime to restart from the PIN.""",
     master_menu_admin="""Thanks {name}. What do you want to do?
 
 1 — 💰 Cash Received (Sales Collection)
@@ -149,7 +150,8 @@ Reply with the number (1–5), or 0 to start over.""",
 6 — ➕ Add Client / Supplier (Admin)
 0 — ❌ Cancel / Start Over
 
-Reply with the number (1–6), or 0 to start over.""",
+Reply 1–6, or 0 to cancel a step back to this menu.
+Send *Bonjour* (French) or *Hello*/*Hi* (English) anytime to restart from the PIN.""",
     ask_pin=(
         "Hello {name}, welcome to the {company} Accounting Assistant.\n"
         "Please enter your 6-digit PIN to continue."
@@ -311,7 +313,8 @@ PROMPTS_FR = PromptBundle(
 5 — 🚢 Paiement fournisseur / port
 0 — ❌ Annuler / Recommencer
 
-Répondez avec le numéro (1–5), ou 0 pour recommencer.""",
+Répondez 1–5, ou 0 pour annuler une étape et revenir ici.
+Envoyez *Bonjour* (français) ou *Hello*/*Hi* (anglais) pour tout recommencer depuis le PIN.""",
     master_menu_admin="""Merci {name}. Que voulez-vous faire ?
 
 1 — 💰 Encaissement (vente)
@@ -322,7 +325,8 @@ Répondez avec le numéro (1–5), ou 0 pour recommencer.""",
 6 — ➕ Ajouter client / fournisseur (Admin)
 0 — ❌ Annuler / Recommencer
 
-Répondez avec le numéro (1–6), ou 0 pour recommencer.""",
+Répondez 1–6, ou 0 pour annuler une étape et revenir ici.
+Envoyez *Bonjour* (français) ou *Hello*/*Hi* (anglais) pour tout recommencer depuis le PIN.""",
     ask_pin=(
         "Bonjour {name}, bienvenue dans l'assistant comptable {company}.\n"
         "Veuillez saisir votre code PIN à 6 chiffres pour continuer."

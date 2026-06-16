@@ -41,7 +41,13 @@ def test_is_greeting():
 def test_is_cancel_command():
     assert is_cancel_command("0") is True
     assert is_cancel_command("menu") is True
+    assert is_cancel_command("annuler") is True
     assert is_cancel_command("50000") is False
+
+
+def test_bonjour_is_greeting_not_cancel():
+    assert is_greeting("Bonjour") is True
+    assert is_cancel_command("Bonjour") is False
 
 
 def test_welcome_pin_message():

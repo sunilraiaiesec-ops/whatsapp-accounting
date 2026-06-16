@@ -81,7 +81,10 @@ def is_greeting(text: str) -> bool:
 
 def is_cancel_command(text: str) -> bool:
     normalized = text.strip().lower()
-    return normalized in {"0", "cancel", "menu", "stop", "exit", "start over"}
+    return normalized in {
+        "0", "cancel", "menu", "stop", "exit", "start over",
+        "annuler", "annule", "annulation",
+    }
 
 
 def _session_expired(pin_verified_at: Optional[datetime]) -> bool:

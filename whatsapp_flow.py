@@ -398,6 +398,21 @@ async def _show_main_menu(phone: str, employee: dict) -> FlowResult:
     return FlowResult(status={"status": "main_menu", "sender": phone})
 
 
+async def _restart_session_with_greeting(
+    sender: str,
+    employee: dict,
+    text: str,
+) -> FlowResult:
+    """Full restart: clear session, set language from greeting, ask for PIN again."""
+    lang = detect_language_from_greeting(text)
+    reset_session(sender)
+    update_flow_data(sender, lang=lang)
+    set_prompt_lang(lang)
+    name = _employee_name(employee)
+    await _reply(sender, format_ask_pin(name, get_company_name()))
+    return FlowResult(status={"status": "awaiting_pin", "sender": sender, "lang": lang})
+
+
 async def handle_whatsapp_flow(
     sender: str,
     employee: dict,
@@ -423,6 +438,10 @@ async def handle_whatsapp_flow(
             return await _handle_pin(
                 sender, employee, text_body=text_body, is_media=is_media
             )
+
+        text = (text_body or "").strip()
+        if text and is_greeting(text):
+            return await _restart_session_with_greeting(sender, employee, text)
 
         if is_cancel_command(text_body or "") and state == STATE_MAIN_MENU:
             return await _show_main_menu(sender, employee)

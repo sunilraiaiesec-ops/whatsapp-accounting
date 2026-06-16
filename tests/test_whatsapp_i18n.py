@@ -33,4 +33,11 @@ def test_french_master_menu():
     set_prompt_lang("fr")
     menu = active_prompts().format_master_menu("Jean")
     assert "Encaissement" in menu
-    assert "Que voulez-vous faire" in menu
+    assert "Bonjour" in menu
+
+
+def test_english_master_menu_restart_hint():
+    set_prompt_lang("en")
+    menu = active_prompts().format_master_menu("Kumar")
+    assert "Bonjour" in menu
+    assert "Hello" in menu
