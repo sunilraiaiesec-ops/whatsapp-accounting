@@ -36,7 +36,7 @@ from whatsapp_access import (
     update_flow_data,
     verify_staff_pin,
 )
-from whatsapp_i18n import detect_language_from_greeting, get_session_lang
+from whatsapp_i18n import PromptBundle, detect_language_from_greeting, get_session_lang
 from whatsapp_client import send_whatsapp_text
 from whatsapp_parties import (
     ADD_NEW_CODE,
@@ -53,41 +53,6 @@ from whatsapp_parties import (
     search_parties,
 )
 from whatsapp_prompts import (
-    AP_NAME,
-    AP_SAVED,
-    AP_TYPE,
-    BK_AMOUNT,
-    BK_PROOF_DEPOSIT,
-    BK_PROOF_WITHDRAW,
-    BK_TYPE,
-    CR_AMOUNT,
-    CR_JUSTIFICATION,
-    CR_LOCATION,
-    CR_PROOF,
-    ERR_ADD_PARTY_DENIED,
-    ERR_AMOUNT,
-    ERR_CHOICE,
-    ERR_PARTY_PICKER,
-    ERR_PHOTO_OR_ZERO,
-    ERR_PHOTO_REQUIRED,
-    ERR_TEXT_REQUIRED,
-    ERR_UNEXPECTED_PHOTO,
-    EX_AMOUNT,
-    EX_CATEGORY,
-    EX_JUSTIFICATION,
-    EX_PROOF,
-    PICKER_CLIENT,
-    PICKER_EXPENSE_PARTY,
-    PICKER_SUPPLIER,
-    PICKER_TR_CLIENT,
-    SP_AMOUNT,
-    SP_PROOF,
-    SP_TYPE,
-    TR_DOCUMENT,
-    TR_PROOF,
-    TR_SHORTAGE,
-    TR_STATUS,
-    TR_TRUCK,
     format_master_menu,
     format_saved,
     format_ask_pin,
@@ -131,6 +96,12 @@ STEP_SP_PROOF = "sp.proof"
 STEP_AP_TYPE = "ap.type"
 STEP_AP_NAME = "ap.name"
 
+# In these steps, "0" means missing paperwork — not cancel.
+STEPS_WHERE_ZERO_IS_VALID = {
+    STEP_CR_PROOF,
+    STEP_EX_PROOF,
+}
+
 
 @dataclass
 class FlowResult:
@@ -170,8 +141,12 @@ def _activate_lang(sender: str, text: str | None = None) -> None:
     set_prompt_lang(get_session_lang(session))
 
 
+def _p() -> PromptBundle:
+    return active_prompts()
+
+
 def _menu_choices() -> dict[str, tuple[str, str, str]]:
-    p = active_prompts()
+    p = _p()
     return {
         "1": (TYPE_CASH_RECEIVED, STEP_CR_AMOUNT, p.cr_amount),
         "2": (TYPE_EXPENSE, STEP_EX_AMOUNT, p.ex_amount),
@@ -274,7 +249,7 @@ async def _handle_party_picker(
 ) -> FlowResult:
     text, is_media = kwargs["text"], kwargs["is_media"]
     if is_media:
-        await _reply(sender, ERR_UNEXPECTED_PHOTO.format(prompt=title))
+        await _reply(sender, _p().err_unexpected_photo.format(prompt=title))
         return FlowResult(status={"status": "validation_error", "step": step})
 
     session = ensure_session_row(sender)
@@ -329,7 +304,7 @@ async def _handle_party_picker(
 
     if action == "add_new":
         if not admin:
-            await _reply(sender, ERR_ADD_PARTY_DENIED)
+            await _reply(sender, _p().err_add_party_denied)
             if mode == PICKER_MODE_BROWSE:
                 await _send_party_browse(
                     sender, employee, title=title, party_types=party_types, page=page
@@ -356,7 +331,7 @@ async def _handle_party_picker(
             add_return_party_types=list(party_types),
         )
         advance_step(sender, STEP_AP_TYPE)
-        await _reply(sender, AP_TYPE)
+        await _reply(sender, _p().ap_type)
         return FlowResult(status={"status": "flow_step", "step": STEP_AP_TYPE})
 
     if action == "select":
@@ -367,7 +342,7 @@ async def _handle_party_picker(
         extra += f", or {ADD_NEW_CODE} to add new"
     if mode == PICKER_MODE_BROWSE:
         extra += ", or 98/97 to change page"
-    await _reply(sender, ERR_PARTY_PICKER.format(extra=extra))
+    await _reply(sender, _p().err_party_picker.format(extra=extra))
     if mode == PICKER_MODE_BROWSE:
         await _send_party_browse(
             sender, employee, title=title, party_types=party_types, page=page
@@ -443,11 +418,11 @@ async def handle_whatsapp_flow(
         if text and is_greeting(text):
             return await _restart_session_with_greeting(sender, employee, text)
 
-        if is_cancel_command(text_body or "") and state == STATE_MAIN_MENU:
-            return await _show_main_menu(sender, employee)
-
         if is_cancel_command(text_body or ""):
-            return await _show_main_menu(sender, employee)
+            session = ensure_session_row(sender)
+            step = session.get("state") or STATE_MAIN_MENU
+            if step not in STEPS_WHERE_ZERO_IS_VALID:
+                return await _show_main_menu(sender, employee)
 
         if state == STATE_MAIN_MENU:
             return await _handle_main_menu(
@@ -516,7 +491,7 @@ async def _handle_main_menu(
     if is_media:
         await _reply(
             sender,
-            ERR_UNEXPECTED_PHOTO.format(
+            _p().err_unexpected_photo.format(
                 prompt=format_master_menu(_employee_name(employee), admin=_is_admin(employee))
             ),
         )
@@ -530,13 +505,13 @@ async def _handle_main_menu(
             p = active_prompts()
             await _reply(
                 sender,
-                ERR_CHOICE.format(hint=p.menu_hint)
+                _p().err_choice.format(hint=p.menu_hint)
                 + "\n\n"
                 + format_master_menu(_employee_name(employee), admin=False),
             )
             return FlowResult(status={"status": "invalid_menu_choice", "sender": sender})
         start_flow(sender, TYPE_ADD_PARTY, STEP_AP_TYPE)
-        await _reply(sender, AP_TYPE)
+        await _reply(sender, _p().ap_type)
         return FlowResult(status={"status": "flow_started", "flow": TYPE_ADD_PARTY, "sender": sender})
 
     menu = _menu_choices()
@@ -545,7 +520,7 @@ async def _handle_main_menu(
         hint = p.menu_hint_admin if admin else p.menu_hint
         await _reply(
             sender,
-            ERR_CHOICE.format(hint=hint)
+            _p().err_choice.format(hint=hint)
             + "\n\n"
             + format_master_menu(_employee_name(employee), admin=admin),
         )
@@ -639,6 +614,7 @@ async def _finish_submission(
         proof_media_id=proof_media_id,
     )
     set_main_menu(sender)
+    _activate_lang(sender)
     await _reply(sender, format_saved(receipt_id, summary, _employee_name(employee)))
     return FlowResult(
         status={
@@ -655,32 +631,33 @@ async def _finish_submission(
 async def _step_cr_amount(sender, employee, **kwargs) -> FlowResult:
     text, is_media = kwargs["text"], kwargs["is_media"]
     if is_media:
-        await _reply(sender, ERR_UNEXPECTED_PHOTO.format(prompt=CR_AMOUNT))
+        await _reply(sender, _p().err_unexpected_photo.format(prompt=_p().cr_amount))
         return FlowResult(status={"status": "validation_error", "step": STEP_CR_AMOUNT})
     amount = _parse_amount(text)
     if amount is None:
-        await _reply(sender, ERR_AMOUNT)
+        await _reply(sender, _p().err_amount)
         return FlowResult(status={"status": "validation_error", "step": STEP_CR_AMOUNT})
     update_flow_data(sender, amount=amount)
     advance_step(sender, STEP_CR_CLIENT)
     await _start_party_picker(
-        sender, employee, title=PICKER_CLIENT, party_types=CUSTOMER_PARTY_TYPES
+        sender, employee, title=_p().picker_client, party_types=CUSTOMER_PARTY_TYPES
     )
     return FlowResult(status={"status": "flow_step", "step": STEP_CR_CLIENT})
 
 
 async def _step_cr_client(sender, employee, **kwargs) -> FlowResult:
     async def on_selected(s, e, party, **_kw):
+        _activate_lang(s)
         update_flow_data(s, client=party["name"], client_id=party["id"])
         advance_step(s, STEP_CR_LOCATION)
-        await _reply(s, CR_LOCATION)
+        await _reply(s, _p().cr_location)
         return FlowResult(status={"status": "flow_step", "step": STEP_CR_LOCATION})
 
     return await _handle_party_picker(
         sender,
         employee,
         party_types=CUSTOMER_PARTY_TYPES,
-        title=PICKER_CLIENT,
+        title=_p().picker_client,
         step=STEP_CR_CLIENT,
         on_selected=on_selected,
         **kwargs,
@@ -690,16 +667,16 @@ async def _step_cr_client(sender, employee, **kwargs) -> FlowResult:
 async def _step_cr_location(sender, employee, **kwargs) -> FlowResult:
     text, is_media = kwargs["text"], kwargs["is_media"]
     if is_media:
-        await _reply(sender, ERR_UNEXPECTED_PHOTO.format(prompt=CR_LOCATION))
+        await _reply(sender, _p().err_unexpected_photo.format(prompt=_p().cr_location))
         return FlowResult(status={"status": "validation_error", "step": STEP_CR_LOCATION})
     choice = _parse_choice(text, active_prompts().location_labels)
     if not choice:
-        await _reply(sender, ERR_CHOICE.format(hint="Reply 1, 2, or 3.") + "\n\n" + CR_LOCATION)
+        await _reply(sender, _p().err_choice.format(hint="Reply 1, 2, or 3.") + "\n\n" + _p().cr_location)
         return FlowResult(status={"status": "validation_error", "step": STEP_CR_LOCATION})
     labels = active_prompts().location_labels
     update_flow_data(sender, location=labels[choice], location_code=choice)
     advance_step(sender, STEP_CR_PROOF)
-    await _reply(sender, CR_PROOF)
+    await _reply(sender, _p().cr_proof)
     return FlowResult(status={"status": "flow_step", "step": STEP_CR_PROOF})
 
 
@@ -710,16 +687,16 @@ async def _step_cr_proof(sender, employee, **kwargs) -> FlowResult:
         return await _save_cash_received(sender, employee, kwargs)
     if text == "0":
         advance_step(sender, STEP_CR_JUSTIFICATION)
-        await _reply(sender, CR_JUSTIFICATION)
+        await _reply(sender, _p().cr_justification)
         return FlowResult(status={"status": "flow_step", "step": STEP_CR_JUSTIFICATION})
-    await _reply(sender, ERR_PHOTO_OR_ZERO)
+    await _reply(sender, _p().err_photo_or_zero)
     return FlowResult(status={"status": "validation_error", "step": STEP_CR_PROOF})
 
 
 async def _step_cr_justification(sender, employee, **kwargs) -> FlowResult:
     text, is_media = kwargs["text"], kwargs["is_media"]
     if is_media or not text:
-        await _reply(sender, ERR_TEXT_REQUIRED if not is_media else ERR_UNEXPECTED_PHOTO.format(prompt=CR_JUSTIFICATION))
+        await _reply(sender, _p().err_text_required if not is_media else _p().err_unexpected_photo.format(prompt=_p().cr_justification))
         return FlowResult(status={"status": "validation_error", "step": STEP_CR_JUSTIFICATION})
     update_flow_data(sender, missing_paperwork_reason=text, proof_skipped=True)
     return await _save_cash_received(sender, employee, kwargs)
@@ -747,48 +724,49 @@ async def _save_cash_received(sender, employee, kwargs) -> FlowResult:
 async def _step_ex_amount(sender, employee, **kwargs) -> FlowResult:
     text, is_media = kwargs["text"], kwargs["is_media"]
     if is_media:
-        await _reply(sender, ERR_UNEXPECTED_PHOTO.format(prompt=EX_AMOUNT))
+        await _reply(sender, _p().err_unexpected_photo.format(prompt=_p().ex_amount))
         return FlowResult(status={"status": "validation_error", "step": STEP_EX_AMOUNT})
     amount = _parse_amount(text)
     if amount is None:
-        await _reply(sender, ERR_AMOUNT)
+        await _reply(sender, _p().err_amount)
         return FlowResult(status={"status": "validation_error", "step": STEP_EX_AMOUNT})
     update_flow_data(sender, amount=amount)
     advance_step(sender, STEP_EX_CATEGORY)
-    await _reply(sender, EX_CATEGORY)
+    await _reply(sender, _p().ex_category)
     return FlowResult(status={"status": "flow_step", "step": STEP_EX_CATEGORY})
 
 
 async def _step_ex_category(sender, employee, **kwargs) -> FlowResult:
     text, is_media = kwargs["text"], kwargs["is_media"]
     if is_media:
-        await _reply(sender, ERR_UNEXPECTED_PHOTO.format(prompt=EX_CATEGORY))
+        await _reply(sender, _p().err_unexpected_photo.format(prompt=_p().ex_category))
         return FlowResult(status={"status": "validation_error", "step": STEP_EX_CATEGORY})
     choice = _parse_choice(text, active_prompts().expense_categories)
     if not choice:
-        await _reply(sender, ERR_CHOICE.format(hint="Reply 1–6.") + "\n\n" + EX_CATEGORY)
+        await _reply(sender, _p().err_choice.format(hint="Reply 1–6.") + "\n\n" + _p().ex_category)
         return FlowResult(status={"status": "validation_error", "step": STEP_EX_CATEGORY})
     categories = active_prompts().expense_categories
     update_flow_data(sender, category=categories[choice], category_code=choice)
     advance_step(sender, STEP_EX_PARTY)
     await _start_party_picker(
-        sender, employee, title=PICKER_EXPENSE_PARTY, party_types=EXPENSE_PARTY_TYPES
+        sender, employee, title=_p().picker_expense_party, party_types=EXPENSE_PARTY_TYPES
     )
     return FlowResult(status={"status": "flow_step", "step": STEP_EX_PARTY})
 
 
 async def _step_ex_party(sender, employee, **kwargs) -> FlowResult:
     async def on_selected(s, e, party, **_kw):
+        _activate_lang(s)
         update_flow_data(s, expense_party=party["name"], expense_party_id=party["id"])
         advance_step(s, STEP_EX_PROOF)
-        await _reply(s, EX_PROOF)
+        await _reply(s, _p().ex_proof)
         return FlowResult(status={"status": "flow_step", "step": STEP_EX_PROOF})
 
     return await _handle_party_picker(
         sender,
         employee,
         party_types=EXPENSE_PARTY_TYPES,
-        title=PICKER_EXPENSE_PARTY,
+        title=_p().picker_expense_party,
         step=STEP_EX_PARTY,
         on_selected=on_selected,
         **kwargs,
@@ -802,16 +780,16 @@ async def _step_ex_proof(sender, employee, **kwargs) -> FlowResult:
         return await _save_expense(sender, employee, kwargs)
     if text == "0":
         advance_step(sender, STEP_EX_JUSTIFICATION)
-        await _reply(sender, EX_JUSTIFICATION)
+        await _reply(sender, _p().ex_justification)
         return FlowResult(status={"status": "flow_step", "step": STEP_EX_JUSTIFICATION})
-    await _reply(sender, ERR_PHOTO_OR_ZERO)
+    await _reply(sender, _p().err_photo_or_zero)
     return FlowResult(status={"status": "validation_error", "step": STEP_EX_PROOF})
 
 
 async def _step_ex_justification(sender, employee, **kwargs) -> FlowResult:
     text, is_media = kwargs["text"], kwargs["is_media"]
     if is_media or not text:
-        await _reply(sender, ERR_TEXT_REQUIRED if not is_media else ERR_UNEXPECTED_PHOTO.format(prompt=EX_JUSTIFICATION))
+        await _reply(sender, _p().err_text_required if not is_media else _p().err_unexpected_photo.format(prompt=_p().ex_justification))
         return FlowResult(status={"status": "validation_error", "step": STEP_EX_JUSTIFICATION})
     update_flow_data(sender, missing_paperwork_reason=text, proof_skipped=True)
     return await _save_expense(sender, employee, kwargs)
@@ -839,28 +817,29 @@ async def _save_expense(sender, employee, kwargs) -> FlowResult:
 async def _step_tr_truck(sender, employee, **kwargs) -> FlowResult:
     text, is_media = kwargs["text"], kwargs["is_media"]
     if is_media or not text:
-        await _reply(sender, ERR_TEXT_REQUIRED if not is_media else ERR_UNEXPECTED_PHOTO.format(prompt=TR_TRUCK))
+        await _reply(sender, _p().err_text_required if not is_media else _p().err_unexpected_photo.format(prompt=_p().tr_truck))
         return FlowResult(status={"status": "validation_error", "step": STEP_TR_TRUCK})
     update_flow_data(sender, truck_id=text)
     advance_step(sender, STEP_TR_CLIENT)
     await _start_party_picker(
-        sender, employee, title=PICKER_TR_CLIENT, party_types=CUSTOMER_PARTY_TYPES
+        sender, employee, title=_p().picker_tr_client, party_types=CUSTOMER_PARTY_TYPES
     )
     return FlowResult(status={"status": "flow_step", "step": STEP_TR_CLIENT})
 
 
 async def _step_tr_client(sender, employee, **kwargs) -> FlowResult:
     async def on_selected(s, e, party, **_kw):
+        _activate_lang(s)
         update_flow_data(s, client=party["name"], client_id=party["id"])
         advance_step(s, STEP_TR_DOCUMENT)
-        await _reply(s, TR_DOCUMENT)
+        await _reply(s, _p().tr_document)
         return FlowResult(status={"status": "flow_step", "step": STEP_TR_DOCUMENT})
 
     return await _handle_party_picker(
         sender,
         employee,
         party_types=CUSTOMER_PARTY_TYPES,
-        title=PICKER_TR_CLIENT,
+        title=_p().picker_tr_client,
         step=STEP_TR_CLIENT,
         on_selected=on_selected,
         **kwargs,
@@ -870,50 +849,51 @@ async def _step_tr_client(sender, employee, **kwargs) -> FlowResult:
 async def _step_tr_document(sender, employee, **kwargs) -> FlowResult:
     text, is_media = kwargs["text"], kwargs["is_media"]
     if is_media or not text:
-        await _reply(sender, ERR_TEXT_REQUIRED if not is_media else ERR_UNEXPECTED_PHOTO.format(prompt=TR_DOCUMENT))
+        await _reply(sender, _p().err_text_required if not is_media else _p().err_unexpected_photo.format(prompt=_p().tr_document))
         return FlowResult(status={"status": "validation_error", "step": STEP_TR_DOCUMENT})
     update_flow_data(sender, document_id=text)
     advance_step(sender, STEP_TR_STATUS)
-    await _reply(sender, TR_STATUS)
+    await _reply(sender, _p().tr_status)
     return FlowResult(status={"status": "flow_step", "step": STEP_TR_STATUS})
 
 
 async def _step_tr_status(sender, employee, **kwargs) -> FlowResult:
     text, is_media = kwargs["text"], kwargs["is_media"]
     if is_media:
-        await _reply(sender, ERR_UNEXPECTED_PHOTO.format(prompt=TR_STATUS))
+        await _reply(sender, _p().err_unexpected_photo.format(prompt=_p().tr_status))
         return FlowResult(status={"status": "validation_error", "step": STEP_TR_STATUS})
     if text == "1":
         labels = active_prompts().loading_status_labels
         update_flow_data(sender, loading_status=labels["1"], loading_status_code="1", partial=False)
         advance_step(sender, STEP_TR_PROOF)
-        await _reply(sender, TR_PROOF)
+        await _reply(sender, _p().tr_proof)
         return FlowResult(status={"status": "flow_step", "step": STEP_TR_PROOF})
     if text == "2":
         labels = active_prompts().loading_status_labels
         update_flow_data(sender, loading_status=labels["2"], loading_status_code="2", partial=True)
         advance_step(sender, STEP_TR_SHORTAGE)
-        await _reply(sender, TR_SHORTAGE)
+        await _reply(sender, _p().tr_shortage)
         return FlowResult(status={"status": "flow_step", "step": STEP_TR_SHORTAGE})
-    await _reply(sender, ERR_CHOICE.format(hint="Reply 1 or 2.") + "\n\n" + TR_STATUS)
+    await _reply(sender, _p().err_choice.format(hint="Reply 1 or 2.") + "\n\n" + _p().tr_status)
     return FlowResult(status={"status": "validation_error", "step": STEP_TR_STATUS})
 
 
 async def _step_tr_shortage(sender, employee, **kwargs) -> FlowResult:
     text, is_media = kwargs["text"], kwargs["is_media"]
     if is_media or not text:
-        await _reply(sender, ERR_TEXT_REQUIRED if not is_media else ERR_UNEXPECTED_PHOTO.format(prompt=TR_SHORTAGE))
+        await _reply(sender, _p().err_text_required if not is_media else _p().err_unexpected_photo.format(prompt=_p().tr_shortage))
         return FlowResult(status={"status": "validation_error", "step": STEP_TR_SHORTAGE})
     update_flow_data(sender, shortage_details=text)
     advance_step(sender, STEP_TR_PROOF)
-    await _reply(sender, TR_PROOF)
+    await _reply(sender, _p().tr_proof)
     return FlowResult(status={"status": "flow_step", "step": STEP_TR_PROOF})
 
 
 async def _step_tr_proof(sender, employee, **kwargs) -> FlowResult:
+    _activate_lang(sender)
     is_media, media_id = kwargs["is_media"], kwargs["media_id"]
     if not is_media or not media_id:
-        await _reply(sender, ERR_PHOTO_REQUIRED + "\n\n" + TR_PROOF)
+        await _reply(sender, _p().err_photo_required + "\n\n" + _p().tr_proof)
         return FlowResult(status={"status": "validation_error", "step": STEP_TR_PROOF})
     update_flow_data(sender, proof_media_id=media_id)
     session = ensure_session_row(sender)
@@ -937,35 +917,35 @@ async def _step_tr_proof(sender, employee, **kwargs) -> FlowResult:
 async def _step_bk_type(sender, employee, **kwargs) -> FlowResult:
     text, is_media = kwargs["text"], kwargs["is_media"]
     if is_media:
-        await _reply(sender, ERR_UNEXPECTED_PHOTO.format(prompt=BK_TYPE))
+        await _reply(sender, _p().err_unexpected_photo.format(prompt=_p().bk_type))
         return FlowResult(status={"status": "validation_error", "step": STEP_BK_TYPE})
     choice = _parse_choice(text, active_prompts().bank_types)
     if not choice:
-        await _reply(sender, ERR_CHOICE.format(hint="Reply 1 or 2.") + "\n\n" + BK_TYPE)
+        await _reply(sender, _p().err_choice.format(hint="Reply 1 or 2.") + "\n\n" + _p().bk_type)
         return FlowResult(status={"status": "validation_error", "step": STEP_BK_TYPE})
     bank_types = active_prompts().bank_types
     update_flow_data(sender, bank_action=bank_types[choice], bank_action_code=choice)
     advance_step(sender, STEP_BK_AMOUNT)
-    await _reply(sender, BK_AMOUNT)
+    await _reply(sender, _p().bk_amount)
     return FlowResult(status={"status": "flow_step", "step": STEP_BK_AMOUNT})
 
 
 async def _step_bk_amount(sender, employee, **kwargs) -> FlowResult:
     text, is_media = kwargs["text"], kwargs["is_media"]
     if is_media:
-        await _reply(sender, ERR_UNEXPECTED_PHOTO.format(prompt=BK_AMOUNT))
+        await _reply(sender, _p().err_unexpected_photo.format(prompt=_p().bk_amount))
         return FlowResult(status={"status": "validation_error", "step": STEP_BK_AMOUNT})
     amount = _parse_amount(text)
     if amount is None:
-        await _reply(sender, ERR_AMOUNT)
+        await _reply(sender, _p().err_amount)
         return FlowResult(status={"status": "validation_error", "step": STEP_BK_AMOUNT})
     update_flow_data(sender, amount=amount)
     advance_step(sender, STEP_BK_PROOF)
     session = ensure_session_row(sender)
     proof_prompt = (
-        BK_PROOF_DEPOSIT
+        _p().bk_proof_deposit
         if (session.get("flow_data") or {}).get("bank_action_code") == "1"
-        else BK_PROOF_WITHDRAW
+        else _p().bk_proof_withdraw
     )
     update_flow_data(sender, proof_prompt=proof_prompt)
     await _reply(sender, proof_prompt)
@@ -973,12 +953,13 @@ async def _step_bk_amount(sender, employee, **kwargs) -> FlowResult:
 
 
 async def _step_bk_proof(sender, employee, **kwargs) -> FlowResult:
+    _activate_lang(sender)
     is_media, media_id = kwargs["is_media"], kwargs["media_id"]
     session = ensure_session_row(sender)
     data = session.get("flow_data") or {}
     if not is_media or not media_id:
-        prompt = data.get("proof_prompt") or BK_PROOF_DEPOSIT
-        await _reply(sender, ERR_PHOTO_REQUIRED + "\n\n" + prompt)
+        prompt = data.get("proof_prompt") or _p().bk_proof_deposit
+        await _reply(sender, _p().err_photo_required + "\n\n" + prompt)
         return FlowResult(status={"status": "validation_error", "step": STEP_BK_PROOF})
     update_flow_data(sender, proof_media_id=media_id)
     session = ensure_session_row(sender)
@@ -1002,33 +983,34 @@ async def _step_bk_proof(sender, employee, **kwargs) -> FlowResult:
 async def _step_sp_type(sender, employee, **kwargs) -> FlowResult:
     text, is_media = kwargs["text"], kwargs["is_media"]
     if is_media:
-        await _reply(sender, ERR_UNEXPECTED_PHOTO.format(prompt=SP_TYPE))
+        await _reply(sender, _p().err_unexpected_photo.format(prompt=_p().sp_type))
         return FlowResult(status={"status": "validation_error", "step": STEP_SP_TYPE})
     choice = _parse_choice(text, active_prompts().supplier_types)
     if not choice:
-        await _reply(sender, ERR_CHOICE.format(hint="Reply 1, 2, or 3.") + "\n\n" + SP_TYPE)
+        await _reply(sender, _p().err_choice.format(hint="Reply 1, 2, or 3.") + "\n\n" + _p().sp_type)
         return FlowResult(status={"status": "validation_error", "step": STEP_SP_TYPE})
     supplier_types = active_prompts().supplier_types
     update_flow_data(sender, payment_type=supplier_types[choice], payment_type_code=choice)
     advance_step(sender, STEP_SP_SUPPLIER)
     await _start_party_picker(
-        sender, employee, title=PICKER_SUPPLIER, party_types=SUPPLIER_PARTY_TYPES
+        sender, employee, title=_p().picker_supplier, party_types=SUPPLIER_PARTY_TYPES
     )
     return FlowResult(status={"status": "flow_step", "step": STEP_SP_SUPPLIER})
 
 
 async def _step_sp_supplier(sender, employee, **kwargs) -> FlowResult:
     async def on_selected(s, e, party, **_kw):
+        _activate_lang(s)
         update_flow_data(s, supplier=party["name"], supplier_id=party["id"])
         advance_step(s, STEP_SP_AMOUNT)
-        await _reply(s, SP_AMOUNT)
+        await _reply(s, _p().sp_amount)
         return FlowResult(status={"status": "flow_step", "step": STEP_SP_AMOUNT})
 
     return await _handle_party_picker(
         sender,
         employee,
         party_types=SUPPLIER_PARTY_TYPES,
-        title=PICKER_SUPPLIER,
+        title=_p().picker_supplier,
         step=STEP_SP_SUPPLIER,
         on_selected=on_selected,
         **kwargs,
@@ -1038,22 +1020,23 @@ async def _step_sp_supplier(sender, employee, **kwargs) -> FlowResult:
 async def _step_sp_amount(sender, employee, **kwargs) -> FlowResult:
     text, is_media = kwargs["text"], kwargs["is_media"]
     if is_media:
-        await _reply(sender, ERR_UNEXPECTED_PHOTO.format(prompt=SP_AMOUNT))
+        await _reply(sender, _p().err_unexpected_photo.format(prompt=_p().sp_amount))
         return FlowResult(status={"status": "validation_error", "step": STEP_SP_AMOUNT})
     amount = _parse_amount(text)
     if amount is None:
-        await _reply(sender, ERR_AMOUNT)
+        await _reply(sender, _p().err_amount)
         return FlowResult(status={"status": "validation_error", "step": STEP_SP_AMOUNT})
     update_flow_data(sender, amount=amount)
     advance_step(sender, STEP_SP_PROOF)
-    await _reply(sender, SP_PROOF)
+    await _reply(sender, _p().sp_proof)
     return FlowResult(status={"status": "flow_step", "step": STEP_SP_PROOF})
 
 
 async def _step_sp_proof(sender, employee, **kwargs) -> FlowResult:
+    _activate_lang(sender)
     is_media, media_id = kwargs["is_media"], kwargs["media_id"]
     if not is_media or not media_id:
-        await _reply(sender, ERR_PHOTO_REQUIRED + "\n\n" + SP_PROOF)
+        await _reply(sender, _p().err_photo_required + "\n\n" + _p().sp_proof)
         return FlowResult(status={"status": "validation_error", "step": STEP_SP_PROOF})
     update_flow_data(sender, proof_media_id=media_id)
     session = ensure_session_row(sender)
@@ -1103,26 +1086,28 @@ async def _return_after_add_party(sender: str, employee: dict) -> FlowResult:
 
 
 async def _step_ap_type(sender, employee, **kwargs) -> FlowResult:
+    _activate_lang(sender)
     if not _is_admin(employee):
         return await _show_main_menu(sender, employee)
 
     text, is_media = kwargs["text"], kwargs["is_media"]
     if is_media:
-        await _reply(sender, ERR_UNEXPECTED_PHOTO.format(prompt=AP_TYPE))
+        await _reply(sender, _p().err_unexpected_photo.format(prompt=_p().ap_type))
         return FlowResult(status={"status": "validation_error", "step": STEP_AP_TYPE})
     add_party_types = active_prompts().add_party_type_labels
     choice = _parse_choice(text, {k: v[1] for k, v in add_party_types.items()})
     if not choice:
-        await _reply(sender, ERR_CHOICE.format(hint="Reply 1, 2, or 3.") + "\n\n" + AP_TYPE)
+        await _reply(sender, _p().err_choice.format(hint="Reply 1, 2, or 3.") + "\n\n" + _p().ap_type)
         return FlowResult(status={"status": "validation_error", "step": STEP_AP_TYPE})
     party_type, type_label = add_party_types[choice]
     update_flow_data(sender, new_party_type=party_type, new_party_type_label=type_label)
     advance_step(sender, STEP_AP_NAME)
-    await _reply(sender, AP_NAME)
+    await _reply(sender, _p().ap_name)
     return FlowResult(status={"status": "flow_step", "step": STEP_AP_NAME})
 
 
 async def _step_ap_name(sender, employee, **kwargs) -> FlowResult:
+    _activate_lang(sender)
     if not _is_admin(employee):
         return await _show_main_menu(sender, employee)
 
@@ -1130,7 +1115,7 @@ async def _step_ap_name(sender, employee, **kwargs) -> FlowResult:
     if is_media or not text:
         await _reply(
             sender,
-            ERR_TEXT_REQUIRED if not is_media else ERR_UNEXPECTED_PHOTO.format(prompt=AP_NAME),
+            _p().err_text_required if not is_media else _p().err_unexpected_photo.format(prompt=_p().ap_name),
         )
         return FlowResult(status={"status": "validation_error", "step": STEP_AP_NAME})
 
@@ -1141,8 +1126,8 @@ async def _step_ap_name(sender, employee, **kwargs) -> FlowResult:
 
     party = create_party(text, party_type)
     if not party:
-        await _reply(sender, ERR_TEXT_REQUIRED + "\n\n" + AP_NAME)
+        await _reply(sender, _p().err_text_required + "\n\n" + _p().ap_name)
         return FlowResult(status={"status": "validation_error", "step": STEP_AP_NAME})
 
-    await _reply(sender, AP_SAVED.format(name=party["name"], type_label=type_label))
+    await _reply(sender, _p().ap_saved.format(name=party["name"], type_label=type_label))
     return await _return_after_add_party(sender, employee)
