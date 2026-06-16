@@ -12,10 +12,12 @@ from whatsapp_access import (
     STATE_DELIVERY,
     ensure_session_row,
     get_session,
+    is_greeting,
     is_menu_command,
     looks_like_pin_attempt,
     parse_interactive_action,
     parse_text_action,
+    reset_session,
     set_session_action,
     set_session_after_pin,
     staff_pin_enabled,
@@ -139,6 +141,15 @@ async def _handle_whatsapp_access_inner(
 
     if message_type == "text" and text_body is not None:
         text = text_body.strip()
+        name = employee.get("name") or "there"
+
+        if is_greeting(text):
+            reset_session(sender)
+            await send_whatsapp_text(sender, format_ask_pin_reply(name))
+            return AccessDecision(
+                proceed=False,
+                status={"status": "awaiting_pin", "sender": sender},
+            )
 
         if is_menu_command(text):
             if state == STATE_AWAITING_PIN:
@@ -193,6 +204,18 @@ async def _handle_whatsapp_access_inner(
             )
 
         if state == STATE_CASH:
+            if is_greeting(text) or parse_text_action(text) is not None:
+                set_session_after_pin(sender)
+                if parse_text_action(text) in (ACTION_CASH, ACTION_DELIVERY):
+                    action = parse_text_action(text)
+                    set_session_action(sender, action)
+                    await send_whatsapp_text(sender, format_action_selected_reply(action))
+                else:
+                    await send_whatsapp_action_menu(sender, name)
+                return AccessDecision(
+                    proceed=False,
+                    status={"status": "awaiting_action", "sender": sender},
+                )
             return AccessDecision(proceed=True, action=ACTION_CASH)
 
         if state == STATE_DELIVERY:
@@ -235,7 +258,14 @@ async def block_unless_cash_mode(
     if not staff_pin_enabled():
         return None
 
-    session = ensure_session_row(sender)
+    try:
+        session = ensure_session_row(sender)
+    except Exception:
+        logger.exception("Failed to load WhatsApp session for %s", sender)
+        name = employee.get("name") or "there"
+        await send_whatsapp_text(sender, format_ask_pin_reply(name))
+        return {"status": "session_error", "sender": sender}
+
     state = session.get("state") or STATE_AWAITING_PIN
     if state == STATE_CASH:
         return None

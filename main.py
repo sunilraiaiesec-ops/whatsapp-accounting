@@ -71,6 +71,7 @@ from reports import get_monthly_report
 from whatsapp_client import (
     check_whatsapp_token,
     download_whatsapp_media,
+    format_ask_pin_reply,
     format_confirmation,
     format_delivery_confirmation,
     format_delivery_received_ack,
@@ -411,6 +412,35 @@ async def _process_whatsapp_payload(
     if not access.proceed:
         return access.status or {"status": "access_denied", "sender": sender}
 
+    if message_type == "text" and not media:
+        body = message.get("text", {}).get("body")
+        if not body:
+            await send_whatsapp_text(
+                sender,
+                format_unsupported_message_reply("empty text"),
+            )
+            return {"status": "ignored", "reason": "empty_text_body"}
+        try:
+            blocked = await block_unless_cash_mode(sender, employee)
+            if blocked:
+                return blocked
+            return await _handle_text_message(
+                sender, body, whatsapp_message_id, employee
+            )
+        except Exception:
+            logger.exception("WhatsApp text handling failed: %s", whatsapp_message_id)
+            if staff_pin_enabled():
+                await send_whatsapp_text(
+                    sender,
+                    format_ask_pin_reply(employee.get("name") or "there"),
+                )
+            else:
+                await send_whatsapp_text(
+                    sender,
+                    "⚠️ Something went wrong saving your message. Please try again in a minute.",
+                )
+            return {"status": "error", "phase": "text"}
+
     try:
         if media:
             if not can_submit_delivery_note(employee):
@@ -420,21 +450,6 @@ async def _process_whatsapp_payload(
             return await _handle_image_message(
                 sender, media_id, mime_type, caption, whatsapp_message_id, employee,
                 message_type=message_type,
-            )
-
-        if message_type == "text":
-            body = message.get("text", {}).get("body")
-            if not body:
-                await send_whatsapp_text(
-                    sender,
-                    format_unsupported_message_reply("empty text"),
-                )
-                return {"status": "ignored", "reason": "empty_text_body"}
-            blocked = await block_unless_cash_mode(sender, employee)
-            if blocked:
-                return blocked
-            return await _handle_text_message(
-                sender, body, whatsapp_message_id, employee
             )
 
         if message_type == "interactive":
@@ -455,73 +470,82 @@ async def _process_whatsapp_payload(
 
 
 async def _handle_text_message(sender, message_text, whatsapp_message_id, employee):
-    parsed = parse_message(message_text)
-    status = transaction_status(parsed)
-    raw_data = {"from_user": sender, "text": message_text}
-
-    ensure_default_business()
-    conn = get_db_connection()
-    cur = conn.cursor()
-
     try:
-        cur.execute(
-            """
-            INSERT INTO messages
-            (business_id, source, sender, message_text, raw_data, whatsapp_message_id)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            RETURNING id;
-            """,
-            (
-                DEFAULT_BUSINESS_ID,
-                "whatsapp",
+        parsed = parse_message(message_text)
+        status = transaction_status(parsed)
+        raw_data = {"from_user": sender, "text": message_text}
+
+        ensure_default_business()
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        try:
+            cur.execute(
+                """
+                INSERT INTO messages
+                (business_id, source, sender, message_text, raw_data, whatsapp_message_id)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                RETURNING id;
+                """,
+                (
+                    DEFAULT_BUSINESS_ID,
+                    "whatsapp",
+                    sender,
+                    message_text,
+                    json.dumps(raw_data),
+                    whatsapp_message_id,
+                ),
+            )
+            message_id = cur.fetchone()[0]
+
+            transaction_id, party_id = insert_transaction(
+                cur,
+                parsed,
                 sender,
-                message_text,
-                json.dumps(raw_data),
+                employee["id"],
+                status,
+                whatsapp_message_id=whatsapp_message_id,
+            )
+            conn.commit()
+        except psycopg2.IntegrityError as exc:
+            conn.rollback()
+            if exc.pgcode == psycopg2.errorcodes.UNIQUE_VIOLATION:
+                return {"status": "duplicate", "whatsapp_message_id": whatsapp_message_id}
+            logger.exception(
+                "WhatsApp insert integrity error pgcode=%s message_id=%s",
+                exc.pgcode,
                 whatsapp_message_id,
-            ),
-        )
-        message_id = cur.fetchone()[0]
+            )
+            await send_whatsapp_text(
+                sender,
+                "⚠️ Could not save your message (database constraint). Please contact the owner.",
+            )
+            return {"status": "error", "phase": "integrity", "pgcode": exc.pgcode}
+        finally:
+            cur.close()
+            conn.close()
 
-        transaction_id, party_id = insert_transaction(
-            cur,
+        party_balance = format_party_balance_line(party_id) if party_id else None
+        reply = format_confirmation(
             parsed,
-            sender,
-            employee["id"],
+            employee.get("name"),
             status,
-            whatsapp_message_id=whatsapp_message_id,
+            party_balance,
         )
-        conn.commit()
-    except psycopg2.IntegrityError as exc:
-        conn.rollback()
-        if exc.pgcode == psycopg2.errorcodes.UNIQUE_VIOLATION:
-            return {"status": "duplicate", "whatsapp_message_id": whatsapp_message_id}
-        logger.exception(
-            "WhatsApp insert integrity error pgcode=%s message_id=%s",
-            exc.pgcode,
-            whatsapp_message_id,
-        )
-        await send_whatsapp_text(
-            sender,
-            "⚠️ Could not save your message (database constraint). Please contact the owner.",
-        )
-        return {"status": "error", "phase": "integrity", "pgcode": exc.pgcode}
-    finally:
-        cur.close()
-        conn.close()
+        replied = await send_whatsapp_text(sender, reply)
 
-    party_balance = format_party_balance_line(party_id) if party_id else None
-    reply = format_confirmation(parsed, employee["name"], status, party_balance)
-    replied = await send_whatsapp_text(sender, reply)
-
-    return {
-        "status": "received_and_saved",
-        "kind": "transaction",
-        "message_id": message_id,
-        "transaction_id": transaction_id,
-        "review_status": status,
-        "whatsapp_reply_sent": replied,
-        **parsed,
-    }
+        return {
+            "status": "received_and_saved",
+            "kind": "transaction",
+            "message_id": message_id,
+            "transaction_id": transaction_id,
+            "review_status": status,
+            "whatsapp_reply_sent": replied,
+            **parsed,
+        }
+    except Exception:
+        logger.exception("WhatsApp text save failed for sender %s", sender)
+        raise
 
 
 async def _handle_image_message(
