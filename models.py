@@ -21,3 +21,20 @@ class ProductUpdate(BaseModel):
 class EmployeeUpdate(BaseModel):
     name: Optional[str] = None
     role: Optional[str] = None
+
+
+class InvoiceLineInput(BaseModel):
+    description: str
+    quantity: float = 1.0
+    unit: Optional[str] = None
+    unit_price_fcfa: int
+    product_id: Optional[int] = None
+
+
+class InvoiceCreate(BaseModel):
+    party_id: int
+    invoice_date: Optional[str] = None
+    due_date: Optional[str] = None
+    notes: Optional[str] = None
+    linked_receipt_id: Optional[str] = None
+    lines: list[InvoiceLineInput]

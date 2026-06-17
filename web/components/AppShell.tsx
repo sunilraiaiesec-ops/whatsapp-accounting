@@ -8,6 +8,7 @@ import { logout } from "@/lib/client-api";
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/transactions", label: "Transactions" },
+  { href: "/invoices", label: "Invoices" },
   { href: "/deliveries", label: "Deliveries" },
   { href: "/parties", label: "Parties" },
   { href: "/review", label: "Review" },

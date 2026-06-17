@@ -87,3 +87,41 @@ export type MonthlyReport = {
     amount_owed: number;
   }>;
 };
+
+export type Product = {
+  id: number;
+  name: string;
+  default_unit: string | null;
+  default_unit_price_fcfa: number | null;
+  delivery_count?: number;
+  total_quantity_delivered?: number;
+};
+
+export type InvoiceLine = {
+  id: number;
+  description: string;
+  quantity: number;
+  unit: string | null;
+  unit_price_fcfa: number;
+  line_total_fcfa: number;
+  product_id: number | null;
+};
+
+export type InvoiceSummary = {
+  id: number;
+  invoice_number: string;
+  party_id: number | null;
+  party_name: string;
+  invoice_date: string;
+  due_date: string | null;
+  currency: string;
+  status: string;
+  notes: string | null;
+  linked_receipt_id: string | null;
+  total_fcfa: number;
+  created_at: string;
+};
+
+export type InvoiceDetail = InvoiceSummary & {
+  lines: InvoiceLine[];
+};

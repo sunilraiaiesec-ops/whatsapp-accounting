@@ -40,6 +40,7 @@ from db import (
     whatsapp_sessions_table_ready,
 )
 from whatsapp_submissions import ensure_accounting_submissions_table
+from invoices import ensure_invoices_table
 from categories import get_category_summary, list_categories
 from products import (
     get_weekly_deliveries_by_client,
@@ -94,6 +95,7 @@ async def lifespan(app: FastAPI):
     create_tables()
     ensure_whatsapp_sessions_table()
     ensure_accounting_submissions_table()
+    ensure_invoices_table()
     backfill_task = asyncio.create_task(asyncio.to_thread(run_startup_backfills))
     yield
     backfill_task.cancel()
@@ -1470,5 +1472,43 @@ def dashboard(request: Request, employee_id: Optional[int] = None):
             "selected_employee_id": employee_id,
             "category_summary": category_summary,
             "review_counts": review_counts,
+        },
+    )
+
+
+def _format_fcfa(amount: int) -> str:
+    return f"{int(amount):,} FCFA".replace(",", "\u202f")
+
+
+@app.get("/invoices/{invoice_id}/print", response_class=HTMLResponse)
+def invoice_print(request: Request, invoice_id: int):
+    from invoices import format_invoice_date_label, get_company_profile, get_invoice
+
+    invoice = get_invoice(invoice_id)
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    lines = []
+    for line in invoice["lines"]:
+        qty = line["quantity"]
+        qty_display = f"{qty:g}" if qty == int(qty) else str(qty)
+        lines.append(
+            {
+                **line,
+                "quantity_display": qty_display,
+                "unit_price_display": _format_fcfa(line["unit_price_fcfa"]),
+                "line_total_display": _format_fcfa(line["line_total_fcfa"]),
+            }
+        )
+
+    return templates.TemplateResponse(
+        request,
+        "invoice_print.html",
+        {
+            "company": get_company_profile(),
+            "invoice": {**invoice, "lines": lines},
+            "invoice_date_label": format_invoice_date_label(invoice["invoice_date"]),
+            "due_date_label": format_invoice_date_label(invoice.get("due_date")),
+            "total_display": _format_fcfa(invoice["total_fcfa"]),
         },
     )

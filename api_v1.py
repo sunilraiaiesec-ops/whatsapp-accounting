@@ -6,7 +6,8 @@ from fastapi import APIRouter, HTTPException
 from api_serializers import serialize_data
 from categories import get_category_summary, list_categories
 from db import DEFAULT_BUSINESS_ID, get_db_connection
-from models import ProductUpdate
+from invoices import create_invoice, get_invoice, list_invoices
+from models import InvoiceCreate, ProductUpdate
 from parties import get_party_detail, list_parties_with_balances
 from products import get_weekly_deliveries_by_client, list_products, update_product_price
 from reports import get_monthly_report
@@ -38,6 +39,9 @@ API_INDEX = {
         "review_queue": "GET /api/v1/review",
         "monthly_report": "GET /api/v1/reports/monthly",
         "employees": "GET /api/v1/employees",
+        "invoices": "GET /api/v1/invoices",
+        "create_invoice": "POST /api/v1/invoices",
+        "invoice_detail": "GET /api/v1/invoices/{invoice_id}",
     },
 }
 
@@ -319,3 +323,53 @@ def api_monthly_report(year: Optional[int] = None, month: Optional[int] = None):
 def api_employees():
     employees = _fetch_employees()
     return serialize_data({"items": employees, "count": len(employees)})
+
+
+@router.get("/invoices")
+def api_invoices(limit: int = 100):
+    rows = list_invoices(limit=limit)
+    return serialize_data({"items": rows, "count": len(rows)})
+
+
+@router.get("/invoices/{invoice_id}")
+def api_invoice_detail(invoice_id: int):
+    invoice = get_invoice(invoice_id)
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    return serialize_data(invoice)
+
+
+@router.post("/invoices")
+def api_create_invoice(body: InvoiceCreate):
+    from datetime import date as date_type
+
+    if not body.lines:
+        raise HTTPException(status_code=400, detail="At least one line item is required")
+
+    invoice_date = date_type.today()
+    if body.invoice_date:
+        try:
+            invoice_date = date_type.fromisoformat(body.invoice_date[:10])
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid invoice_date") from exc
+
+    due_date = None
+    if body.due_date:
+        try:
+            due_date = date_type.fromisoformat(body.due_date[:10])
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid due_date") from exc
+
+    try:
+        invoice = create_invoice(
+            party_id=body.party_id,
+            invoice_date=invoice_date,
+            due_date=due_date,
+            notes=body.notes,
+            linked_receipt_id=body.linked_receipt_id,
+            lines=[line.model_dump() for line in body.lines],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return serialize_data(invoice)
