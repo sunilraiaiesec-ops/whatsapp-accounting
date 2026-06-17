@@ -1113,6 +1113,42 @@ def update_employee(employee_id: int, input_data: EmployeeUpdate):
     }
 
 
+@app.delete("/employees/{employee_id}")
+def delete_employee(employee_id: int):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT name FROM employees WHERE id = %s AND business_id = %s;",
+            (employee_id, DEFAULT_BUSINESS_ID),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        name = row[0]
+        try:
+            cur.execute(
+                "DELETE FROM employees WHERE id = %s AND business_id = %s;",
+                (employee_id, DEFAULT_BUSINESS_ID),
+            )
+            conn.commit()
+            action = "deleted"
+        except psycopg2.errors.ForeignKeyViolation:
+            # Has linked transactions/deliveries/stock — keep history, just disable.
+            conn.rollback()
+            cur.execute(
+                "UPDATE employees SET is_active = FALSE "
+                "WHERE id = %s AND business_id = %s;",
+                (employee_id, DEFAULT_BUSINESS_ID),
+            )
+            conn.commit()
+            action = "deactivated"
+    finally:
+        cur.close()
+        conn.close()
+    return {"status": action, "employee_id": employee_id, "name": name}
+
+
 @app.patch("/transactions/{transaction_id}/confirm")
 def confirm_transaction(transaction_id: int):
     if not confirm_pending_transaction(transaction_id):
