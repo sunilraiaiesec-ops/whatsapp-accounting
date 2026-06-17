@@ -24,3 +24,21 @@ def test_parse_decimal_quantity():
     assert _parse_decimal("abc") is None
     assert _parse_decimal("0") is None
     assert _parse_decimal("") is None
+
+
+def test_coerce_cost():
+    from decimal import Decimal
+
+    import pytest
+
+    from inventory import _coerce_cost
+
+    assert _coerce_cost(None) is None
+    assert _coerce_cost("") is None
+    assert _coerce_cost("1500") == Decimal("1500")
+    assert _coerce_cost(1500.5) == Decimal("1500.5")
+    assert _coerce_cost(0) == Decimal("0")
+    with pytest.raises(ValueError):
+        _coerce_cost("-1")
+    with pytest.raises(ValueError):
+        _coerce_cost("abc")

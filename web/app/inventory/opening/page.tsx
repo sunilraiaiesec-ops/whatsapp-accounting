@@ -50,7 +50,7 @@ export default async function OpeningBalancesPage() {
               <th className="px-4 py-3">Product</th>
               <th className="px-4 py-3">Unit</th>
               <th className="px-4 py-3 text-right">Current on hand</th>
-              <th className="px-4 py-3">Opening count</th>
+              <th className="px-4 py-3">Opening count + unit cost</th>
             </tr>
           </thead>
           <tbody>
@@ -66,6 +66,7 @@ export default async function OpeningBalancesPage() {
                     productId={item.id}
                     mode="opening"
                     unit={item.default_unit}
+                    withCost
                   />
                 </td>
               </tr>

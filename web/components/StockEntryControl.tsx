@@ -30,17 +30,20 @@ export function StockEntryControl({
   mode,
   unit,
   initialValue,
+  withCost = false,
 }: {
   productId: number;
   mode: Mode;
   unit: string | null;
   initialValue?: number | null;
+  withCost?: boolean;
 }) {
   const router = useRouter();
   const config = CONFIG[mode];
   const [value, setValue] = useState(
     initialValue != null ? String(initialValue) : "",
   );
+  const [cost, setCost] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function submit() {
@@ -54,14 +57,31 @@ export function StockEntryControl({
       return;
     }
 
+    const body: {
+      product_id: number;
+      quantity: number;
+      unit: string | null;
+      unit_cost_fcfa?: number;
+    } = { product_id: productId, quantity, unit };
+
+    if (withCost && cost.trim() !== "") {
+      const costValue = Number(cost);
+      if (Number.isNaN(costValue) || costValue < 0) {
+        alert("Enter a valid unit cost");
+        return;
+      }
+      body.unit_cost_fcfa = costValue;
+    }
+
     setLoading(true);
     try {
       await clientApi(config.path, {
         method: "POST",
-        body: JSON.stringify({ product_id: productId, quantity, unit }),
+        body: JSON.stringify(body),
       });
       if (config.clearAfter) {
         setValue("");
+        setCost("");
       }
       router.refresh();
     } catch (error) {
@@ -81,6 +101,17 @@ export function StockEntryControl({
         placeholder={config.placeholder}
         className="w-24 rounded-lg border border-slate-300 px-2 py-1"
       />
+      {withCost ? (
+        <input
+          type="number"
+          inputMode="decimal"
+          min="0"
+          value={cost}
+          onChange={(event) => setCost(event.target.value)}
+          placeholder="Unit cost"
+          className="w-24 rounded-lg border border-slate-300 px-2 py-1"
+        />
+      ) : null}
       <button
         type="button"
         onClick={submit}

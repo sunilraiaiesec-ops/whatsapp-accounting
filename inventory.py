@@ -51,6 +51,10 @@ def ensure_stock_movements_table() -> None:
         WHERE source_type IS NOT NULL AND source_id IS NOT NULL;
         """
     )
+    cur.execute(
+        "ALTER TABLE stock_movements "
+        "ADD COLUMN IF NOT EXISTS unit_cost_fcfa NUMERIC(14, 4);"
+    )
     conn.commit()
     cur.close()
     conn.close()
@@ -61,6 +65,42 @@ def _coerce_qty(value: Any) -> Decimal:
         return Decimal(str(value))
     except (InvalidOperation, ValueError, TypeError) as exc:
         raise ValueError("Quantity must be a number") from exc
+
+
+def _coerce_cost(value: Any) -> Optional[Decimal]:
+    """Optional unit cost. Returns None when blank; raises on invalid/negative."""
+    if value is None or value == "":
+        return None
+    try:
+        cost = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise ValueError("Unit cost must be a number") from exc
+    if cost < 0:
+        raise ValueError("Unit cost cannot be negative")
+    return cost
+
+
+def _average_cost(cur, product_id: int, business_id: int) -> Decimal:
+    """Weighted-average unit cost from costed inbound movements (excludes
+    movements with no cost so quantity-only WhatsApp receipts don't drag it down)."""
+    cur.execute(
+        """
+        SELECT
+            COALESCE(SUM(quantity)
+                FILTER (WHERE quantity > 0 AND unit_cost_fcfa IS NOT NULL), 0),
+            COALESCE(SUM(quantity * unit_cost_fcfa)
+                FILTER (WHERE quantity > 0 AND unit_cost_fcfa IS NOT NULL), 0)
+        FROM stock_movements
+        WHERE product_id = %s AND business_id = %s;
+        """,
+        (product_id, business_id),
+    )
+    qty_raw, val_raw = cur.fetchone()
+    qty = Decimal(str(qty_raw or 0))
+    val = Decimal(str(val_raw or 0))
+    if qty <= 0:
+        return Decimal(0)
+    return val / qty
 
 
 def _product_unit(cur, product_id: int, business_id: int) -> Optional[str]:
@@ -148,17 +188,85 @@ def list_on_hand(business_id: int = DEFAULT_BUSINESS_ID) -> list[dict[str, Any]]
     return items
 
 
+def get_valuation(business_id: int = DEFAULT_BUSINESS_ID) -> dict[str, Any]:
+    """Weighted-average inventory valuation: per product on-hand x avg cost,
+    plus all-time COGS (sum of cost locked on outbound movements)."""
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        """
+        SELECT
+            p.id,
+            p.name,
+            p.default_unit,
+            COALESCE(SUM(m.quantity), 0) AS on_hand,
+            COALESCE(SUM(m.quantity)
+                FILTER (WHERE m.quantity > 0 AND m.unit_cost_fcfa IS NOT NULL), 0)
+                AS costed_in_qty,
+            COALESCE(SUM(m.quantity * m.unit_cost_fcfa)
+                FILTER (WHERE m.quantity > 0 AND m.unit_cost_fcfa IS NOT NULL), 0)
+                AS costed_in_val,
+            COALESCE(SUM(-m.quantity * m.unit_cost_fcfa)
+                FILTER (WHERE m.quantity < 0 AND m.unit_cost_fcfa IS NOT NULL), 0)
+                AS cogs_val,
+            COUNT(m.id) AS movement_count
+        FROM products p
+        LEFT JOIN stock_movements m
+            ON m.product_id = p.id AND m.business_id = %s
+        WHERE p.business_id = %s
+        GROUP BY p.id, p.name, p.default_unit
+        ORDER BY p.name ASC;
+        """,
+        (business_id, business_id),
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    items: list[dict[str, Any]] = []
+    total_value = Decimal(0)
+    total_cogs = Decimal(0)
+    for row in rows:
+        on_hand = Decimal(str(row["on_hand"] or 0))
+        in_qty = Decimal(str(row["costed_in_qty"] or 0))
+        in_val = Decimal(str(row["costed_in_val"] or 0))
+        cogs = Decimal(str(row["cogs_val"] or 0))
+        avg_cost = (in_val / in_qty) if in_qty > 0 else Decimal(0)
+        value = on_hand * avg_cost
+        total_value += value
+        total_cogs += cogs
+        items.append(
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "default_unit": row["default_unit"],
+                "on_hand": float(on_hand),
+                "avg_cost": float(round(avg_cost, 2)),
+                "stock_value": float(round(value)),
+                "movement_count": int(row["movement_count"] or 0),
+            }
+        )
+    return {
+        "items": items,
+        "count": len(items),
+        "total_stock_value": float(round(total_value)),
+        "total_cogs": float(round(total_cogs)),
+    }
+
+
 def set_opening_balance(
     product_id: int,
     quantity: Any,
     *,
     unit: Optional[str] = None,
+    unit_cost: Any = None,
     note: Optional[str] = None,
     employee_id: Optional[int] = None,
     business_id: int = DEFAULT_BUSINESS_ID,
 ) -> dict[str, Any]:
     """Set (or correct) the opening count for a product. Idempotent per product."""
     qty = _coerce_qty(quantity)
+    cost = _coerce_cost(unit_cost)
     ensure_stock_movements_table()
     conn = get_db_connection()
     cur = conn.cursor()
@@ -168,8 +276,8 @@ def set_opening_balance(
             """
             INSERT INTO stock_movements
                 (business_id, product_id, quantity, unit, movement_type,
-                 source_type, source_id, note, employee_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 source_type, source_id, note, employee_id, unit_cost_fcfa)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (source_type, source_id)
             WHERE source_type IS NOT NULL AND source_id IS NOT NULL
             DO UPDATE SET
@@ -177,6 +285,7 @@ def set_opening_balance(
                 unit = EXCLUDED.unit,
                 note = EXCLUDED.note,
                 employee_id = EXCLUDED.employee_id,
+                unit_cost_fcfa = EXCLUDED.unit_cost_fcfa,
                 movement_date = CURRENT_DATE;
             """,
             (
@@ -189,6 +298,7 @@ def set_opening_balance(
                 product_id,
                 note,
                 employee_id,
+                cost,
             ),
         )
         on_hand = _on_hand(cur, product_id, business_id)
@@ -204,6 +314,7 @@ def record_receipt(
     quantity: Any,
     *,
     unit: Optional[str] = None,
+    unit_cost: Any = None,
     note: Optional[str] = None,
     employee_id: Optional[int] = None,
     business_id: int = DEFAULT_BUSINESS_ID,
@@ -212,6 +323,7 @@ def record_receipt(
     qty = _coerce_qty(quantity)
     if qty <= 0:
         raise ValueError("Quantity must be positive")
+    cost = _coerce_cost(unit_cost)
     ensure_stock_movements_table()
     conn = get_db_connection()
     cur = conn.cursor()
@@ -221,8 +333,8 @@ def record_receipt(
             """
             INSERT INTO stock_movements
                 (business_id, product_id, quantity, unit, movement_type,
-                 source_type, source_id, note, employee_id)
-            VALUES (%s, %s, %s, %s, %s, 'manual', NULL, %s, %s)
+                 source_type, source_id, note, employee_id, unit_cost_fcfa)
+            VALUES (%s, %s, %s, %s, %s, 'manual', NULL, %s, %s, %s)
             RETURNING id;
             """,
             (
@@ -233,6 +345,7 @@ def record_receipt(
                 MOVEMENT_RECEIPT,
                 note,
                 employee_id,
+                cost,
             ),
         )
         movement_id = cur.fetchone()[0]
@@ -264,12 +377,15 @@ def record_delivery_movement(
         return
     if qty <= 0:
         return
+    # Lock COGS at the current weighted-average cost (0 -> store NULL = uncosted).
+    avg_cost = _average_cost(cur, product_id, business_id)
+    cost = avg_cost if avg_cost > 0 else None
     cur.execute(
         """
         INSERT INTO stock_movements
             (business_id, product_id, quantity, unit, movement_type,
-             source_type, source_id, employee_id)
-        VALUES (%s, %s, %s, %s, %s, 'delivery', %s, %s)
+             source_type, source_id, employee_id, unit_cost_fcfa)
+        VALUES (%s, %s, %s, %s, %s, 'delivery', %s, %s, %s)
         ON CONFLICT (source_type, source_id)
         WHERE source_type IS NOT NULL AND source_id IS NOT NULL
         DO NOTHING;
@@ -282,5 +398,6 @@ def record_delivery_movement(
             MOVEMENT_DELIVERY,
             delivery_id,
             employee_id,
+            cost,
         ),
     )

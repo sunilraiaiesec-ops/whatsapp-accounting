@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException
 from api_serializers import serialize_data
 from categories import get_category_summary, list_categories
 from db import DEFAULT_BUSINESS_ID, get_db_connection
-from inventory import list_on_hand, record_receipt, set_opening_balance
+from inventory import get_valuation, record_receipt, set_opening_balance
 from invoices import create_invoice, get_invoice, list_invoices
 from models import (
     InvoiceCreate,
@@ -350,15 +350,18 @@ def api_invoice_detail(invoice_id: int):
 
 @router.get("/inventory")
 def api_inventory():
-    rows = list_on_hand()
-    return serialize_data({"items": rows, "count": len(rows)})
+    return serialize_data(get_valuation())
 
 
 @router.post("/inventory/opening")
 def api_set_opening_balance(body: OpeningBalanceInput):
     try:
         result = set_opening_balance(
-            body.product_id, body.quantity, unit=body.unit, note=body.note
+            body.product_id,
+            body.quantity,
+            unit=body.unit,
+            unit_cost=body.unit_cost_fcfa,
+            note=body.note,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -369,7 +372,11 @@ def api_set_opening_balance(body: OpeningBalanceInput):
 def api_record_receipt(body: StockReceiptInput):
     try:
         result = record_receipt(
-            body.product_id, body.quantity, unit=body.unit, note=body.note
+            body.product_id,
+            body.quantity,
+            unit=body.unit,
+            unit_cost=body.unit_cost_fcfa,
+            note=body.note,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

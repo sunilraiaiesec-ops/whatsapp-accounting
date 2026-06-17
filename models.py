@@ -44,6 +44,7 @@ class OpeningBalanceInput(BaseModel):
     product_id: int
     quantity: float
     unit: Optional[str] = None
+    unit_cost_fcfa: Optional[float] = None
     note: Optional[str] = None
 
 
@@ -51,4 +52,5 @@ class StockReceiptInput(BaseModel):
     product_id: int
     quantity: float
     unit: Optional[str] = None
+    unit_cost_fcfa: Optional[float] = None
     note: Optional[str] = None
