@@ -650,6 +650,48 @@ async def _finish_submission(
     )
 
 
+# --- Party selection handlers (shared by pickers and add-new auto-select) ---
+
+async def _select_cr_client(sender, employee, party, **_kwargs) -> FlowResult:
+    _activate_lang(sender)
+    update_flow_data(sender, client=party["name"], client_id=party["id"])
+    advance_step(sender, STEP_CR_LOCATION)
+    await _reply(sender, _p().cr_location)
+    return FlowResult(status={"status": "flow_step", "step": STEP_CR_LOCATION})
+
+
+async def _select_ex_party(sender, employee, party, **_kwargs) -> FlowResult:
+    _activate_lang(sender)
+    update_flow_data(sender, expense_party=party["name"], expense_party_id=party["id"])
+    advance_step(sender, STEP_EX_PROOF)
+    await _reply(sender, _p().ex_proof)
+    return FlowResult(status={"status": "flow_step", "step": STEP_EX_PROOF})
+
+
+async def _select_tr_client(sender, employee, party, **_kwargs) -> FlowResult:
+    _activate_lang(sender)
+    update_flow_data(sender, client=party["name"], client_id=party["id"])
+    advance_step(sender, STEP_TR_DOCUMENT)
+    await _reply(sender, _p().tr_document)
+    return FlowResult(status={"status": "flow_step", "step": STEP_TR_DOCUMENT})
+
+
+async def _select_sp_supplier(sender, employee, party, **_kwargs) -> FlowResult:
+    _activate_lang(sender)
+    update_flow_data(sender, supplier=party["name"], supplier_id=party["id"])
+    advance_step(sender, STEP_SP_AMOUNT)
+    await _reply(sender, _p().sp_amount)
+    return FlowResult(status={"status": "flow_step", "step": STEP_SP_AMOUNT})
+
+
+PARTY_SELECTION_HANDLERS = {
+    STEP_CR_CLIENT: _select_cr_client,
+    STEP_EX_PARTY: _select_ex_party,
+    STEP_TR_CLIENT: _select_tr_client,
+    STEP_SP_SUPPLIER: _select_sp_supplier,
+}
+
+
 # --- Choice 1: Cash Received ---
 
 async def _step_cr_amount(sender, employee, **kwargs) -> FlowResult:
@@ -670,20 +712,13 @@ async def _step_cr_amount(sender, employee, **kwargs) -> FlowResult:
 
 
 async def _step_cr_client(sender, employee, **kwargs) -> FlowResult:
-    async def on_selected(s, e, party, **_kw):
-        _activate_lang(s)
-        update_flow_data(s, client=party["name"], client_id=party["id"])
-        advance_step(s, STEP_CR_LOCATION)
-        await _reply(s, _p().cr_location)
-        return FlowResult(status={"status": "flow_step", "step": STEP_CR_LOCATION})
-
     return await _handle_party_picker(
         sender,
         employee,
         party_types=CUSTOMER_PARTY_TYPES,
         title=_p().picker_client,
         step=STEP_CR_CLIENT,
-        on_selected=on_selected,
+        on_selected=_select_cr_client,
         **kwargs,
     )
 
@@ -782,20 +817,13 @@ async def _step_ex_category(sender, employee, **kwargs) -> FlowResult:
 
 
 async def _step_ex_party(sender, employee, **kwargs) -> FlowResult:
-    async def on_selected(s, e, party, **_kw):
-        _activate_lang(s)
-        update_flow_data(s, expense_party=party["name"], expense_party_id=party["id"])
-        advance_step(s, STEP_EX_PROOF)
-        await _reply(s, _p().ex_proof)
-        return FlowResult(status={"status": "flow_step", "step": STEP_EX_PROOF})
-
     return await _handle_party_picker(
         sender,
         employee,
         party_types=EXPENSE_PARTY_TYPES,
         title=_p().picker_expense_party,
         step=STEP_EX_PARTY,
-        on_selected=on_selected,
+        on_selected=_select_ex_party,
         **kwargs,
     )
 
@@ -858,20 +886,13 @@ async def _step_tr_truck(sender, employee, **kwargs) -> FlowResult:
 
 
 async def _step_tr_client(sender, employee, **kwargs) -> FlowResult:
-    async def on_selected(s, e, party, **_kw):
-        _activate_lang(s)
-        update_flow_data(s, client=party["name"], client_id=party["id"])
-        advance_step(s, STEP_TR_DOCUMENT)
-        await _reply(s, _p().tr_document)
-        return FlowResult(status={"status": "flow_step", "step": STEP_TR_DOCUMENT})
-
     return await _handle_party_picker(
         sender,
         employee,
         party_types=CUSTOMER_PARTY_TYPES,
         title=_p().picker_tr_client,
         step=STEP_TR_CLIENT,
-        on_selected=on_selected,
+        on_selected=_select_tr_client,
         **kwargs,
     )
 
@@ -1029,20 +1050,13 @@ async def _step_sp_type(sender, employee, **kwargs) -> FlowResult:
 
 
 async def _step_sp_supplier(sender, employee, **kwargs) -> FlowResult:
-    async def on_selected(s, e, party, **_kw):
-        _activate_lang(s)
-        update_flow_data(s, supplier=party["name"], supplier_id=party["id"])
-        advance_step(s, STEP_SP_AMOUNT)
-        await _reply(s, _p().sp_amount)
-        return FlowResult(status={"status": "flow_step", "step": STEP_SP_AMOUNT})
-
     return await _handle_party_picker(
         sender,
         employee,
         party_types=SUPPLIER_PARTY_TYPES,
         title=_p().picker_supplier,
         step=STEP_SP_SUPPLIER,
-        on_selected=on_selected,
+        on_selected=_select_sp_supplier,
         **kwargs,
     )
 
@@ -1088,27 +1102,41 @@ async def _step_sp_proof(sender, employee, **kwargs) -> FlowResult:
 # --- Admin: Add client / supplier ---
 
 
-async def _return_after_add_party(sender: str, employee: dict) -> FlowResult:
+async def _return_after_add_party(
+    sender: str, employee: dict, new_party: Optional[dict] = None
+) -> FlowResult:
     session = ensure_session_row(sender)
     data = session.get("flow_data") or {}
     return_step = data.get("add_return_step")
-    return_flow = data.get("add_return_flow")
     picker_title = data.get("add_return_picker_title")
     party_types_raw = data.get("add_return_party_types")
 
-    if return_step and return_flow and picker_title and party_types_raw:
+    # Clear the add-party bookkeeping but keep the rest of the flow data
+    # (amount, category, etc.) so the in-progress transaction is not lost.
+    update_flow_data(
+        sender,
+        add_return_step=None,
+        add_return_flow=None,
+        add_return_picker_title=None,
+        add_return_party_types=None,
+        new_party_type=None,
+        new_party_type_label=None,
+        party_picker_page=0,
+        party_search_results=[],
+        party_search_query="",
+    )
+
+    if return_step and party_types_raw:
         party_types = tuple(party_types_raw)
-        start_flow(sender, return_flow, return_step)
-        update_flow_data(
-            sender,
-            add_return_step=None,
-            add_return_flow=None,
-            add_return_picker_title=None,
-            add_return_party_types=None,
-            party_picker_page=0,
-        )
+        advance_step(sender, return_step)
+        selector = PARTY_SELECTION_HANDLERS.get(return_step)
+        if new_party and selector:
+            return await selector(sender, employee, new_party)
         await _start_party_picker(
-            sender, employee, title=picker_title, party_types=party_types
+            sender,
+            employee,
+            title=picker_title or _p().picker_client,
+            party_types=party_types,
         )
         return FlowResult(status={"status": "flow_step", "step": return_step})
 
@@ -1160,4 +1188,4 @@ async def _step_ap_name(sender, employee, **kwargs) -> FlowResult:
         return FlowResult(status={"status": "validation_error", "step": STEP_AP_NAME})
 
     await _reply(sender, _p().ap_saved.format(name=party["name"], type_label=type_label))
-    return await _return_after_add_party(sender, employee)
+    return await _return_after_add_party(sender, employee, new_party=party)
