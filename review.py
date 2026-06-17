@@ -182,6 +182,19 @@ def confirm_delivery_note(
         ),
     )
     updated = cur.fetchone()
+
+    if updated and product_meta["product_id"] and quantity:
+        from inventory import record_delivery_movement
+
+        record_delivery_movement(
+            cur,
+            product_id=product_meta["product_id"],
+            quantity=quantity,
+            unit=quantity_unit,
+            delivery_id=delivery_id,
+            business_id=business_id,
+        )
+
     conn.commit()
     cur.close()
     conn.close()

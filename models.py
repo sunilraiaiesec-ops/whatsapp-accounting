@@ -38,3 +38,17 @@ class InvoiceCreate(BaseModel):
     notes: Optional[str] = None
     linked_receipt_id: Optional[str] = None
     lines: list[InvoiceLineInput]
+
+
+class OpeningBalanceInput(BaseModel):
+    product_id: int
+    quantity: float
+    unit: Optional[str] = None
+    note: Optional[str] = None
+
+
+class StockReceiptInput(BaseModel):
+    product_id: int
+    quantity: float
+    unit: Optional[str] = None
+    note: Optional[str] = None

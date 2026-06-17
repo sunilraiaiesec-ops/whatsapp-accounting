@@ -41,6 +41,7 @@ from db import (
 )
 from whatsapp_submissions import ensure_accounting_submissions_table
 from invoices import ensure_invoices_table
+from inventory import ensure_stock_movements_table
 from categories import get_category_summary, list_categories
 from products import (
     get_weekly_deliveries_by_client,
@@ -96,6 +97,7 @@ async def lifespan(app: FastAPI):
     ensure_whatsapp_sessions_table()
     ensure_accounting_submissions_table()
     ensure_invoices_table()
+    ensure_stock_movements_table()
     backfill_task = asyncio.create_task(asyncio.to_thread(run_startup_backfills))
     yield
     backfill_task.cancel()

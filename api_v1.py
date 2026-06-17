@@ -6,8 +6,14 @@ from fastapi import APIRouter, HTTPException
 from api_serializers import serialize_data
 from categories import get_category_summary, list_categories
 from db import DEFAULT_BUSINESS_ID, get_db_connection
+from inventory import list_on_hand, record_receipt, set_opening_balance
 from invoices import create_invoice, get_invoice, list_invoices
-from models import InvoiceCreate, ProductUpdate
+from models import (
+    InvoiceCreate,
+    OpeningBalanceInput,
+    ProductUpdate,
+    StockReceiptInput,
+)
 from parties import get_party_detail, list_parties_with_balances
 from products import get_weekly_deliveries_by_client, list_products, update_product_price
 from reports import get_monthly_report
@@ -42,6 +48,9 @@ API_INDEX = {
         "invoices": "GET /api/v1/invoices",
         "create_invoice": "POST /api/v1/invoices",
         "invoice_detail": "GET /api/v1/invoices/{invoice_id}",
+        "inventory": "GET /api/v1/inventory",
+        "set_opening_balance": "POST /api/v1/inventory/opening",
+        "record_receipt": "POST /api/v1/inventory/receipts",
     },
 }
 
@@ -337,6 +346,34 @@ def api_invoice_detail(invoice_id: int):
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
     return serialize_data(invoice)
+
+
+@router.get("/inventory")
+def api_inventory():
+    rows = list_on_hand()
+    return serialize_data({"items": rows, "count": len(rows)})
+
+
+@router.post("/inventory/opening")
+def api_set_opening_balance(body: OpeningBalanceInput):
+    try:
+        result = set_opening_balance(
+            body.product_id, body.quantity, unit=body.unit, note=body.note
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return serialize_data(result)
+
+
+@router.post("/inventory/receipts")
+def api_record_receipt(body: StockReceiptInput):
+    try:
+        result = record_receipt(
+            body.product_id, body.quantity, unit=body.unit, note=body.note
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return serialize_data(result)
 
 
 @router.post("/invoices")
