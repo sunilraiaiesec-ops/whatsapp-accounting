@@ -6,8 +6,15 @@ import logging
 import re
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any, Optional
 
+from invoices import (
+    STATUS_CREDIT,
+    STATUS_PAID,
+    create_invoice,
+    invoice_public_url,
+)
 from parties import (
     CUSTOMER_PARTY_TYPES,
     EXPENSE_PARTY_TYPES,
@@ -21,6 +28,7 @@ from whatsapp_access import (
     TYPE_BANK,
     TYPE_CASH_RECEIVED,
     TYPE_EXPENSE,
+    TYPE_INVOICE,
     TYPE_MERCHANDISE,
     TYPE_SUPPLIER,
     advance_step,
@@ -105,6 +113,15 @@ STEP_SP_PROOF = "sp.proof"
 STEP_AP_TYPE = "ap.type"
 STEP_AP_NAME = "ap.name"
 
+STEP_INV_CLIENT = "inv.client"
+STEP_INV_DESCRIPTION = "inv.description"
+STEP_INV_QTY = "inv.qty"
+STEP_INV_PRICE = "inv.price"
+STEP_INV_PAYMENT = "inv.payment"
+
+# Offer to turn a saved cash-received transaction into an invoice (Option C).
+STEP_CR_OFFER_INVOICE = "cr.offer_invoice"
+
 # In these steps, "0" means missing paperwork — not cancel.
 STEPS_WHERE_ZERO_IS_VALID = {
     STEP_CR_PROOF,
@@ -126,6 +143,20 @@ def _parse_amount(text: str) -> Optional[int]:
         return int(digits)
     except ValueError:
         return None
+
+
+def _parse_decimal(text: str) -> Optional[float]:
+    cleaned = re.sub(r"[^\d.,]", "", (text or "").strip()).replace(",", ".")
+    if not cleaned:
+        return None
+    parts = cleaned.split(".")
+    if len(parts) > 2:
+        cleaned = parts[0] + "." + "".join(parts[1:])
+    try:
+        value = float(cleaned)
+    except ValueError:
+        return None
+    return value if value > 0 else None
 
 
 def _parse_choice(text: str, valid: dict[str, str]) -> Optional[str]:
@@ -516,11 +547,22 @@ async def _handle_main_menu(
     admin = _is_admin(employee)
 
     if choice == "6":
+        start_flow(sender, TYPE_INVOICE, STEP_INV_CLIENT)
+        await _start_party_picker(
+            sender,
+            employee,
+            title=_p().picker_invoice_client,
+            party_types=CUSTOMER_PARTY_TYPES,
+        )
+        return FlowResult(status={"status": "flow_started", "flow": TYPE_INVOICE, "sender": sender})
+
+    if choice == "7":
         if not admin:
             p = active_prompts()
+            hint = p.menu_hint_admin if admin else p.menu_hint
             await _reply(
                 sender,
-                _p().err_choice.format(hint=p.menu_hint)
+                _p().err_choice.format(hint=hint)
                 + "\n\n"
                 + format_master_menu(_employee_name(employee), admin=False),
             )
@@ -570,6 +612,7 @@ async def _handle_flow_step(
         STEP_CR_LOCATION: _step_cr_location,
         STEP_CR_PROOF: _step_cr_proof,
         STEP_CR_JUSTIFICATION: _step_cr_justification,
+        STEP_CR_OFFER_INVOICE: _step_cr_offer_invoice,
         STEP_EX_AMOUNT: _step_ex_amount,
         STEP_EX_CATEGORY: _step_ex_category,
         STEP_EX_PARTY: _step_ex_party,
@@ -590,6 +633,11 @@ async def _handle_flow_step(
         STEP_SP_PROOF: _step_sp_proof,
         STEP_AP_TYPE: _step_ap_type,
         STEP_AP_NAME: _step_ap_name,
+        STEP_INV_CLIENT: _step_inv_client,
+        STEP_INV_DESCRIPTION: _step_inv_description,
+        STEP_INV_QTY: _step_inv_qty,
+        STEP_INV_PRICE: _step_inv_price,
+        STEP_INV_PAYMENT: _step_inv_payment,
     }
 
     handler = handlers.get(state)
@@ -618,6 +666,7 @@ async def _finish_submission(
     summary: str,
     whatsapp_message_id: Optional[str],
     proof_media_id: Optional[str],
+    offer_invoice: bool = False,
 ) -> FlowResult:
     try:
         _, receipt_id = save_submission(
@@ -637,9 +686,31 @@ async def _finish_submission(
             employee.get("id"),
         )
         raise
-    set_main_menu(sender)
     _activate_lang(sender)
     await _reply(sender, format_saved(receipt_id, summary, _employee_name(employee)))
+
+    # Option C: offer to turn this cash sale into an invoice, but only when we
+    # have a client and amount to base the invoice on.
+    if offer_invoice and payload.get("client_id") and amount:
+        update_flow_data(
+            sender,
+            inv_from_receipt_id=receipt_id,
+            inv_client=payload.get("client"),
+            inv_client_id=payload.get("client_id"),
+            inv_amount=int(amount),
+        )
+        advance_step(sender, STEP_CR_OFFER_INVOICE)
+        await _reply(sender, _p().inv_offer)
+        return FlowResult(
+            status={
+                "status": "saved_offer_invoice",
+                "submission_type": submission_type,
+                "receipt_id": receipt_id,
+                "sender": sender,
+            }
+        )
+
+    set_main_menu(sender)
     return FlowResult(
         status={
             "status": "saved",
@@ -684,11 +755,20 @@ async def _select_sp_supplier(sender, employee, party, **_kwargs) -> FlowResult:
     return FlowResult(status={"status": "flow_step", "step": STEP_SP_AMOUNT})
 
 
+async def _select_inv_client(sender, employee, party, **_kwargs) -> FlowResult:
+    _activate_lang(sender)
+    update_flow_data(sender, inv_client=party["name"], inv_client_id=party["id"])
+    advance_step(sender, STEP_INV_DESCRIPTION)
+    await _reply(sender, _p().inv_description)
+    return FlowResult(status={"status": "flow_step", "step": STEP_INV_DESCRIPTION})
+
+
 PARTY_SELECTION_HANDLERS = {
     STEP_CR_CLIENT: _select_cr_client,
     STEP_EX_PARTY: _select_ex_party,
     STEP_TR_CLIENT: _select_tr_client,
     STEP_SP_SUPPLIER: _select_sp_supplier,
+    STEP_INV_CLIENT: _select_inv_client,
 }
 
 
@@ -778,6 +858,183 @@ async def _save_cash_received(
         summary=summary,
         whatsapp_message_id=kwargs.get("whatsapp_message_id"),
         proof_media_id=flow_data.get("proof_media_id"),
+        offer_invoice=True,
+    )
+
+
+# --- Invoices (Choice 6 + Option C from a cash sale) ---
+
+async def _create_invoice_and_reply(
+    sender,
+    employee,
+    *,
+    party_id: int,
+    lines: list[dict[str, Any]],
+    status: str,
+    linked_receipt_id: Optional[str] = None,
+) -> FlowResult:
+    _activate_lang(sender)
+    try:
+        invoice = create_invoice(
+            party_id=party_id,
+            invoice_date=date.today(),
+            lines=lines,
+            status=status,
+            linked_receipt_id=linked_receipt_id,
+        )
+    except Exception:
+        logger.exception("Failed to create invoice for sender %s", sender)
+        set_main_menu(sender)
+        await _reply(sender, _p().save_failed)
+        return FlowResult(status={"status": "invoice_error", "sender": sender})
+
+    status_label = _p().inv_status_paid if status == STATUS_PAID else _p().inv_status_credit
+    body = _p().inv_saved.format(
+        invoice_number=invoice["invoice_number"],
+        client=invoice["party_name"],
+        status_label=status_label,
+        amount=f"{int(invoice['total_fcfa']):,}",
+        link=invoice_public_url(invoice["id"]),
+    )
+    set_main_menu(sender)
+    await _reply(sender, body)
+    return FlowResult(
+        status={"status": "invoice_created", "invoice_id": invoice["id"], "sender": sender}
+    )
+
+
+async def _step_cr_offer_invoice(sender, employee, **kwargs) -> FlowResult:
+    text, is_media = kwargs["text"], kwargs["is_media"]
+    _activate_lang(sender)
+    if is_media:
+        await _reply(sender, _p().err_unexpected_photo.format(prompt=_p().inv_offer))
+        return FlowResult(status={"status": "validation_error", "step": STEP_CR_OFFER_INVOICE})
+    choice = (text or "").strip()
+    if choice == "2":
+        return await _show_main_menu(sender, employee)
+    if choice != "1":
+        await _reply(
+            sender,
+            _p().err_choice.format(hint="Reply 1 or 2.") + "\n\n" + _p().inv_offer,
+        )
+        return FlowResult(status={"status": "validation_error", "step": STEP_CR_OFFER_INVOICE})
+
+    session = ensure_session_row(sender)
+    data = session.get("flow_data") or {}
+    client_id = data.get("inv_client_id")
+    amount = int(data.get("inv_amount") or 0)
+    if not client_id or amount <= 0:
+        return await _show_main_menu(sender, employee)
+
+    lines = [
+        {
+            "description": _p().inv_cash_sale_desc,
+            "quantity": 1,
+            "unit_price_fcfa": amount,
+        }
+    ]
+    return await _create_invoice_and_reply(
+        sender,
+        employee,
+        party_id=client_id,
+        lines=lines,
+        status=STATUS_PAID,
+        linked_receipt_id=data.get("inv_from_receipt_id"),
+    )
+
+
+async def _step_inv_client(sender, employee, **kwargs) -> FlowResult:
+    return await _handle_party_picker(
+        sender,
+        employee,
+        party_types=CUSTOMER_PARTY_TYPES,
+        title=_p().picker_invoice_client,
+        step=STEP_INV_CLIENT,
+        on_selected=_select_inv_client,
+        **kwargs,
+    )
+
+
+async def _step_inv_description(sender, employee, **kwargs) -> FlowResult:
+    text, is_media = kwargs["text"], kwargs["is_media"]
+    if is_media or not text:
+        await _reply(
+            sender,
+            _p().err_text_required
+            if not is_media
+            else _p().err_unexpected_photo.format(prompt=_p().inv_description),
+        )
+        return FlowResult(status={"status": "validation_error", "step": STEP_INV_DESCRIPTION})
+    update_flow_data(sender, inv_description=text)
+    advance_step(sender, STEP_INV_QTY)
+    await _reply(sender, _p().inv_quantity)
+    return FlowResult(status={"status": "flow_step", "step": STEP_INV_QTY})
+
+
+async def _step_inv_qty(sender, employee, **kwargs) -> FlowResult:
+    text, is_media = kwargs["text"], kwargs["is_media"]
+    if is_media:
+        await _reply(sender, _p().err_unexpected_photo.format(prompt=_p().inv_quantity))
+        return FlowResult(status={"status": "validation_error", "step": STEP_INV_QTY})
+    qty = _parse_decimal(text)
+    if qty is None:
+        await _reply(sender, _p().err_amount)
+        return FlowResult(status={"status": "validation_error", "step": STEP_INV_QTY})
+    update_flow_data(sender, inv_quantity=qty)
+    advance_step(sender, STEP_INV_PRICE)
+    await _reply(sender, _p().inv_price)
+    return FlowResult(status={"status": "flow_step", "step": STEP_INV_PRICE})
+
+
+async def _step_inv_price(sender, employee, **kwargs) -> FlowResult:
+    text, is_media = kwargs["text"], kwargs["is_media"]
+    if is_media:
+        await _reply(sender, _p().err_unexpected_photo.format(prompt=_p().inv_price))
+        return FlowResult(status={"status": "validation_error", "step": STEP_INV_PRICE})
+    price = _parse_amount(text)
+    if price is None:
+        await _reply(sender, _p().err_amount)
+        return FlowResult(status={"status": "validation_error", "step": STEP_INV_PRICE})
+    update_flow_data(sender, inv_unit_price=price)
+    advance_step(sender, STEP_INV_PAYMENT)
+    await _reply(sender, _p().inv_payment)
+    return FlowResult(status={"status": "flow_step", "step": STEP_INV_PAYMENT})
+
+
+async def _step_inv_payment(sender, employee, **kwargs) -> FlowResult:
+    text, is_media = kwargs["text"], kwargs["is_media"]
+    _activate_lang(sender)
+    if is_media:
+        await _reply(sender, _p().err_unexpected_photo.format(prompt=_p().inv_payment))
+        return FlowResult(status={"status": "validation_error", "step": STEP_INV_PAYMENT})
+    choice = (text or "").strip()
+    if choice not in ("1", "2"):
+        await _reply(
+            sender,
+            _p().err_choice.format(hint="Reply 1 or 2.") + "\n\n" + _p().inv_payment,
+        )
+        return FlowResult(status={"status": "validation_error", "step": STEP_INV_PAYMENT})
+
+    status = STATUS_PAID if choice == "1" else STATUS_CREDIT
+    session = ensure_session_row(sender)
+    data = session.get("flow_data") or {}
+    client_id = data.get("inv_client_id")
+    if not client_id:
+        return await _show_main_menu(sender, employee)
+
+    lines = [
+        {
+            "description": data.get("inv_description") or _p().inv_cash_sale_desc,
+            "quantity": data.get("inv_quantity") or 1,
+            "unit_price_fcfa": int(data.get("inv_unit_price") or 0),
+        }
+    ]
+    return await _create_invoice_and_reply(
+        sender,
+        employee,
+        party_id=client_id,
+        lines=lines,
+        status=status,
     )
 
 

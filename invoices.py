@@ -17,6 +17,18 @@ COMPANY_ADDRESS = (os.environ.get("BUSINESS_ADDRESS") or "").strip()
 COMPANY_PHONE = (os.environ.get("BUSINESS_PHONE") or "").strip()
 COMPANY_EMAIL = (os.environ.get("BUSINESS_EMAIL") or "").strip()
 
+PUBLIC_BASE_URL = (
+    os.environ.get("PUBLIC_BASE_URL") or "https://whatsapp-accounting.onrender.com"
+).strip().rstrip("/")
+
+# Invoice payment status values
+STATUS_PAID = "paid"
+STATUS_CREDIT = "unpaid"
+
+
+def invoice_public_url(invoice_id: int) -> str:
+    return f"{PUBLIC_BASE_URL}/invoices/{invoice_id}/print"
+
 
 def get_company_profile() -> dict[str, str]:
     return {

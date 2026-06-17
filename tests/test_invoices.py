@@ -12,3 +12,15 @@ def test_line_total_rounds_half_up():
     assert _line_total(Decimal("10"), 74000) == 740000
     assert _line_total(Decimal("1.5"), 1000) == 1500
     assert _line_total(Decimal("2.5"), 1001) == 2503
+
+
+def test_parse_decimal_quantity():
+    from whatsapp_flow import _parse_decimal
+
+    assert _parse_decimal("3") == 3.0
+    assert _parse_decimal("2.5") == 2.5
+    assert _parse_decimal("2,5") == 2.5
+    assert _parse_decimal("1 200") == 1200.0
+    assert _parse_decimal("abc") is None
+    assert _parse_decimal("0") is None
+    assert _parse_decimal("") is None

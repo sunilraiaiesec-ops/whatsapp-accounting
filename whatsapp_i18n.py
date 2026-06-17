@@ -73,6 +73,17 @@ class PromptBundle:
     ap_type: str
     ap_name: str
     ap_saved: str
+    picker_invoice_client: str
+    inv_description: str
+    inv_quantity: str
+    inv_price: str
+    inv_payment: str
+    inv_payment_labels: dict[str, str]
+    inv_offer: str
+    inv_saved: str
+    inv_status_paid: str
+    inv_status_credit: str
+    inv_cash_sale_desc: str
     err_amount: str
     err_choice: str
     err_text_required: str
@@ -137,9 +148,10 @@ PROMPTS_EN = PromptBundle(
 3 — 🚚 Truck Loading & Delivery Note
 4 — 🏦 Bank Deposit / Withdrawal
 5 — 🚢 Supplier & Port Payment Confirmation
+6 — 🧾 Create Invoice (Cash or Credit)
 0 — ❌ Cancel / Start Over
 
-Reply 1–5, or 0 to cancel a step back to this menu.
+Reply 1–6, or 0 to cancel a step back to this menu.
 Send *Bonjour* (French) or *Hello*/*Hi* (English) anytime to restart from the PIN.""",
     master_menu_admin="""Thanks {name}. What do you want to do?
 
@@ -148,10 +160,11 @@ Send *Bonjour* (French) or *Hello*/*Hi* (English) anytime to restart from the PI
 3 — 🚚 Truck Loading & Delivery Note
 4 — 🏦 Bank Deposit / Withdrawal
 5 — 🚢 Supplier & Port Payment Confirmation
-6 — ➕ Add Client / Supplier (Admin)
+6 — 🧾 Create Invoice (Cash or Credit)
+7 — ➕ Add Client / Supplier (Admin)
 0 — ❌ Cancel / Start Over
 
-Reply 1–6, or 0 to cancel a step back to this menu.
+Reply 1–7, or 0 to cancel a step back to this menu.
 Send *Bonjour* (French) or *Hello*/*Hi* (English) anytime to restart from the PIN.""",
     ask_pin=(
         "Hello {name}, welcome to the {company} Accounting Assistant.\n"
@@ -207,6 +220,28 @@ Send *Bonjour* (French) or *Hello*/*Hi* (English) anytime to restart from the PI
     ),
     ap_name="Type the exact name to save (spelling will be used in all reports):",
     ap_saved="✅ Added *{name}* as {type_label}.\nIt is now available for everyone to select.",
+    picker_invoice_client="Who is this invoice for (client)?",
+    inv_description="What are you selling? (e.g. Rice 50kg bags)",
+    inv_quantity="Quantity? (Numbers only)",
+    inv_price="Unit price in FCFA? (Numbers only)",
+    inv_payment=(
+        "Is this a cash sale or on credit?\n"
+        "1 — 💵 Cash (paid now)\n"
+        "2 — 🧾 Credit (to be paid later)"
+    ),
+    inv_payment_labels={"1": "Cash (paid)", "2": "Credit (unpaid)"},
+    inv_offer=(
+        "Do you want an invoice for this sale?\n"
+        "1 — Yes\n2 — No"
+    ),
+    inv_saved=(
+        "🧾 Invoice *{invoice_number}* created for {client}.\n"
+        "{status_label} — {amount} FCFA\n\n"
+        "View / print:\n{link}"
+    ),
+    inv_status_paid="✅ Paid (cash)",
+    inv_status_credit="🕒 Credit — unpaid",
+    inv_cash_sale_desc="Cash sale",
     err_amount="⚠️ Please enter numbers only (e.g. 50000). Try again.",
     err_choice="⚠️ Invalid choice. {hint}",
     err_text_required="⚠️ Please type a short answer. Try again.",
@@ -218,8 +253,8 @@ Send *Bonjour* (French) or *Hello*/*Hi* (English) anytime to restart from the PI
         "⛔ Only Govind, Vikash, or owners can add new clients/suppliers.\n"
         "Please pick from the list or ask them to add the name."
     ),
-    menu_hint="Reply 1–5 to choose, or 0 to start over.",
-    menu_hint_admin="Reply 1–6 to choose, or 0 to start over.",
+    menu_hint="Reply 1–6 to choose, or 0 to start over.",
+    menu_hint_admin="Reply 1–7 to choose, or 0 to start over.",
     location_labels={
         "1": "My Possession",
         "2": "Warehouse Safe",
@@ -315,9 +350,10 @@ PROMPTS_FR = PromptBundle(
 3 — 🚚 Chargement camion / Bon de livraison
 4 — 🏦 Dépôt / Retrait bancaire
 5 — 🚢 Paiement fournisseur / port
+6 — 🧾 Créer une facture (comptant ou crédit)
 0 — ❌ Annuler / Recommencer
 
-Répondez 1–5, ou 0 pour annuler une étape et revenir ici.
+Répondez 1–6, ou 0 pour annuler une étape et revenir ici.
 Envoyez *Bonjour* (français) ou *Hello*/*Hi* (anglais) pour tout recommencer depuis le PIN.""",
     master_menu_admin="""Merci {name}. Que voulez-vous faire ?
 
@@ -326,10 +362,11 @@ Envoyez *Bonjour* (français) ou *Hello*/*Hi* (anglais) pour tout recommencer de
 3 — 🚚 Chargement camion / Bon de livraison
 4 — 🏦 Dépôt / Retrait bancaire
 5 — 🚢 Paiement fournisseur / port
-6 — ➕ Ajouter client / fournisseur (Admin)
+6 — 🧾 Créer une facture (comptant ou crédit)
+7 — ➕ Ajouter client / fournisseur (Admin)
 0 — ❌ Annuler / Recommencer
 
-Répondez 1–6, ou 0 pour annuler une étape et revenir ici.
+Répondez 1–7, ou 0 pour annuler une étape et revenir ici.
 Envoyez *Bonjour* (français) ou *Hello*/*Hi* (anglais) pour tout recommencer depuis le PIN.""",
     ask_pin=(
         "Bonjour {name}, bienvenue dans l'assistant comptable {company}.\n"
@@ -385,6 +422,28 @@ Envoyez *Bonjour* (français) ou *Hello*/*Hi* (anglais) pour tout recommencer de
     ),
     ap_name="Saisissez le nom exact à enregistrer (l'orthographe sera utilisée dans tous les rapports) :",
     ap_saved="✅ *{name}* ajouté comme {type_label}.\nDisponible pour tout le monde.",
+    picker_invoice_client="Pour quel client est cette facture ?",
+    inv_description="Que vendez-vous ? (ex. Riz sacs de 50 kg)",
+    inv_quantity="Quantité ? (chiffres uniquement)",
+    inv_price="Prix unitaire en FCFA ? (chiffres uniquement)",
+    inv_payment=(
+        "Vente au comptant ou à crédit ?\n"
+        "1 — 💵 Comptant (payé maintenant)\n"
+        "2 — 🧾 Crédit (à payer plus tard)"
+    ),
+    inv_payment_labels={"1": "Comptant (payé)", "2": "Crédit (impayé)"},
+    inv_offer=(
+        "Voulez-vous une facture pour cette vente ?\n"
+        "1 — Oui\n2 — Non"
+    ),
+    inv_saved=(
+        "🧾 Facture *{invoice_number}* créée pour {client}.\n"
+        "{status_label} — {amount} FCFA\n\n"
+        "Voir / imprimer :\n{link}"
+    ),
+    inv_status_paid="✅ Payé (comptant)",
+    inv_status_credit="🕒 Crédit — impayé",
+    inv_cash_sale_desc="Vente au comptant",
     err_amount="⚠️ Veuillez saisir des chiffres uniquement (ex. 50000). Réessayez.",
     err_choice="⚠️ Choix invalide. {hint}",
     err_text_required="⚠️ Veuillez saisir une courte réponse. Réessayez.",
@@ -396,8 +455,8 @@ Envoyez *Bonjour* (français) ou *Hello*/*Hi* (anglais) pour tout recommencer de
         "⛔ Seuls Govind, Vikash ou les propriétaires peuvent ajouter des noms.\n"
         "Choisissez dans la liste ou demandez-leur d'ajouter le nom."
     ),
-    menu_hint="Répondez 1–5 pour choisir, ou 0 pour recommencer.",
-    menu_hint_admin="Répondez 1–6 pour choisir, ou 0 pour recommencer.",
+    menu_hint="Répondez 1–6 pour choisir, ou 0 pour recommencer.",
+    menu_hint_admin="Répondez 1–7 pour choisir, ou 0 pour recommencer.",
     location_labels={
         "1": "En ma possession",
         "2": "Coffre entrepôt",
