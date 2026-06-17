@@ -86,6 +86,36 @@ def _on_hand(cur, product_id: int, business_id: int) -> float:
     return float(cur.fetchone()[0] or 0)
 
 
+def search_products(
+    term: str, business_id: int = DEFAULT_BUSINESS_ID, limit: int = 8
+) -> list[dict[str, Any]]:
+    """Find existing products by (accent-insensitive) name substring."""
+    from products import normalize_product_name
+
+    normalized = normalize_product_name(term)
+    if not normalized:
+        return []
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        """
+        SELECT id, name, default_unit
+        FROM products
+        WHERE business_id = %s AND normalized_name ILIKE %s
+        ORDER BY name ASC
+        LIMIT %s;
+        """,
+        (business_id, f"%{normalized}%", limit),
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return [
+        {"id": row["id"], "name": row["name"], "unit": row["default_unit"]}
+        for row in rows
+    ]
+
+
 def list_on_hand(business_id: int = DEFAULT_BUSINESS_ID) -> list[dict[str, Any]]:
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)

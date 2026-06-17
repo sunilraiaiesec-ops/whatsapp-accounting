@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Optional
 
+from inventory import record_receipt, search_products
 from invoices import (
     STATUS_CREDIT,
     STATUS_PAID,
@@ -28,6 +29,7 @@ from whatsapp_access import (
     TYPE_BANK,
     TYPE_CASH_RECEIVED,
     TYPE_EXPENSE,
+    TYPE_GOODS_RECEIVED,
     TYPE_INVOICE,
     TYPE_MERCHANDISE,
     TYPE_SUPPLIER,
@@ -118,6 +120,9 @@ STEP_INV_DESCRIPTION = "inv.description"
 STEP_INV_QTY = "inv.qty"
 STEP_INV_PRICE = "inv.price"
 STEP_INV_PAYMENT = "inv.payment"
+
+STEP_GR_PRODUCT = "gr.product"
+STEP_GR_QUANTITY = "gr.quantity"
 
 # Offer to turn a saved cash-received transaction into an invoice (Option C).
 STEP_CR_OFFER_INVOICE = "cr.offer_invoice"
@@ -557,6 +562,13 @@ async def _handle_main_menu(
         return FlowResult(status={"status": "flow_started", "flow": TYPE_INVOICE, "sender": sender})
 
     if choice == "7":
+        start_flow(sender, TYPE_GOODS_RECEIVED, STEP_GR_PRODUCT)
+        await _reply(sender, _p().gr_product)
+        return FlowResult(
+            status={"status": "flow_started", "flow": TYPE_GOODS_RECEIVED, "sender": sender}
+        )
+
+    if choice == "8":
         if not admin:
             p = active_prompts()
             hint = p.menu_hint_admin if admin else p.menu_hint
@@ -638,6 +650,8 @@ async def _handle_flow_step(
         STEP_INV_QTY: _step_inv_qty,
         STEP_INV_PRICE: _step_inv_price,
         STEP_INV_PAYMENT: _step_inv_payment,
+        STEP_GR_PRODUCT: _step_gr_product,
+        STEP_GR_QUANTITY: _step_gr_quantity,
     }
 
     handler = handlers.get(state)
@@ -1035,6 +1049,115 @@ async def _step_inv_payment(sender, employee, **kwargs) -> FlowResult:
         party_id=client_id,
         lines=lines,
         status=status,
+    )
+
+
+# --- Goods received (Choice 7) — quantity-only stock in ---
+
+async def _step_gr_product(sender, employee, **kwargs) -> FlowResult:
+    text, is_media = kwargs["text"], kwargs["is_media"]
+    _activate_lang(sender)
+    if is_media:
+        await _reply(sender, _p().err_unexpected_photo.format(prompt=_p().gr_product))
+        return FlowResult(status={"status": "validation_error", "step": STEP_GR_PRODUCT})
+
+    session = ensure_session_row(sender)
+    data = session.get("flow_data") or {}
+    candidates = data.get("gr_candidates") or []
+    choice = (text or "").strip()
+
+    if candidates and choice.isdigit():
+        index = int(choice)
+        if 1 <= index <= len(candidates):
+            chosen = candidates[index - 1]
+            update_flow_data(
+                sender,
+                gr_product_id=chosen["id"],
+                gr_product_name=chosen["name"],
+                gr_unit=chosen.get("unit"),
+                gr_candidates=[],
+            )
+            advance_step(sender, STEP_GR_QUANTITY)
+            await _reply(sender, _p().gr_quantity)
+            return FlowResult(status={"status": "flow_step", "step": STEP_GR_QUANTITY})
+
+    if not choice:
+        await _reply(sender, _p().gr_product)
+        return FlowResult(status={"status": "validation_error", "step": STEP_GR_PRODUCT})
+
+    results = search_products(choice)
+    if not results:
+        update_flow_data(sender, gr_candidates=[])
+        await _reply(sender, _p().gr_no_match)
+        return FlowResult(status={"status": "validation_error", "step": STEP_GR_PRODUCT})
+
+    if len(results) == 1:
+        chosen = results[0]
+        update_flow_data(
+            sender,
+            gr_product_id=chosen["id"],
+            gr_product_name=chosen["name"],
+            gr_unit=chosen.get("unit"),
+            gr_candidates=[],
+        )
+        advance_step(sender, STEP_GR_QUANTITY)
+        await _reply(sender, _p().gr_quantity)
+        return FlowResult(status={"status": "flow_step", "step": STEP_GR_QUANTITY})
+
+    slim = [{"id": r["id"], "name": r["name"], "unit": r.get("unit")} for r in results]
+    update_flow_data(sender, gr_candidates=slim)
+    listing = "\n".join(f"{i + 1} — {r['name']}" for i, r in enumerate(slim))
+    await _reply(sender, _p().gr_pick + "\n" + listing)
+    return FlowResult(status={"status": "flow_step", "step": STEP_GR_PRODUCT})
+
+
+async def _step_gr_quantity(sender, employee, **kwargs) -> FlowResult:
+    text, is_media = kwargs["text"], kwargs["is_media"]
+    _activate_lang(sender)
+    if is_media:
+        await _reply(sender, _p().err_unexpected_photo.format(prompt=_p().gr_quantity))
+        return FlowResult(status={"status": "validation_error", "step": STEP_GR_QUANTITY})
+
+    qty = _parse_decimal(text)
+    if qty is None:
+        await _reply(sender, _p().err_amount)
+        return FlowResult(status={"status": "validation_error", "step": STEP_GR_QUANTITY})
+
+    session = ensure_session_row(sender)
+    data = session.get("flow_data") or {}
+    product_id = data.get("gr_product_id")
+    if not product_id:
+        return await _show_main_menu(sender, employee)
+
+    try:
+        result = record_receipt(
+            product_id,
+            qty,
+            unit=data.get("gr_unit"),
+            employee_id=employee.get("id"),
+        )
+    except Exception:
+        logger.exception("Failed to record goods received for sender %s", sender)
+        set_main_menu(sender)
+        await _reply(sender, _p().save_failed)
+        return FlowResult(status={"status": "goods_received_error", "sender": sender})
+
+    set_main_menu(sender)
+    unit = data.get("gr_unit") or ""
+    on_hand = result.get("on_hand") or 0
+    body = _p().gr_saved.format(
+        quantity=f"{qty:g}",
+        unit=unit,
+        product=data.get("gr_product_name") or "",
+        on_hand=f"{float(on_hand):g}",
+    )
+    await _reply(sender, body)
+    return FlowResult(
+        status={
+            "status": "goods_received_saved",
+            "product_id": product_id,
+            "sender": sender,
+        }
     )
 
 

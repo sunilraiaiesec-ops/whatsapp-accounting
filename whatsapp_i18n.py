@@ -84,6 +84,11 @@ class PromptBundle:
     inv_status_paid: str
     inv_status_credit: str
     inv_cash_sale_desc: str
+    gr_product: str
+    gr_quantity: str
+    gr_pick: str
+    gr_no_match: str
+    gr_saved: str
     err_amount: str
     err_choice: str
     err_text_required: str
@@ -149,9 +154,10 @@ PROMPTS_EN = PromptBundle(
 4 — 🏦 Bank Deposit / Withdrawal
 5 — 🚢 Supplier & Port Payment Confirmation
 6 — 🧾 Create Invoice (Cash or Credit)
+7 — 📦 Goods Received (Stock In)
 0 — ❌ Cancel / Start Over
 
-Reply 1–6, or 0 to cancel a step back to this menu.
+Reply 1–7, or 0 to cancel a step back to this menu.
 Send *Bonjour* (French) or *Hello*/*Hi* (English) anytime to restart from the PIN.""",
     master_menu_admin="""Thanks {name}. What do you want to do?
 
@@ -161,10 +167,11 @@ Send *Bonjour* (French) or *Hello*/*Hi* (English) anytime to restart from the PI
 4 — 🏦 Bank Deposit / Withdrawal
 5 — 🚢 Supplier & Port Payment Confirmation
 6 — 🧾 Create Invoice (Cash or Credit)
-7 — ➕ Add Client / Supplier (Admin)
+7 — 📦 Goods Received (Stock In)
+8 — ➕ Add Client / Supplier (Admin)
 0 — ❌ Cancel / Start Over
 
-Reply 1–7, or 0 to cancel a step back to this menu.
+Reply 1–8, or 0 to cancel a step back to this menu.
 Send *Bonjour* (French) or *Hello*/*Hi* (English) anytime to restart from the PIN.""",
     ask_pin=(
         "Hello {name}, welcome to the {company} Accounting Assistant.\n"
@@ -242,6 +249,18 @@ Send *Bonjour* (French) or *Hello*/*Hi* (English) anytime to restart from the PI
     inv_status_paid="✅ Paid (cash)",
     inv_status_credit="🕒 Credit — unpaid",
     inv_cash_sale_desc="Cash sale",
+    gr_product="📦 Which product did you receive? Type the product name.",
+    gr_quantity="How many did you receive? (Numbers only)",
+    gr_pick="Which product? Reply the number:",
+    gr_no_match=(
+        "No matching product found. Type the name again, "
+        "or add it on the dashboard first. (0 to cancel.)"
+    ),
+    gr_saved=(
+        "✅ Stock updated.\n"
+        "+{quantity} {unit} {product}\n"
+        "On hand now: {on_hand} {unit}"
+    ),
     err_amount="⚠️ Please enter numbers only (e.g. 50000). Try again.",
     err_choice="⚠️ Invalid choice. {hint}",
     err_text_required="⚠️ Please type a short answer. Try again.",
@@ -253,8 +272,8 @@ Send *Bonjour* (French) or *Hello*/*Hi* (English) anytime to restart from the PI
         "⛔ Only Govind, Vikash, or owners can add new clients/suppliers.\n"
         "Please pick from the list or ask them to add the name."
     ),
-    menu_hint="Reply 1–6 to choose, or 0 to start over.",
-    menu_hint_admin="Reply 1–7 to choose, or 0 to start over.",
+    menu_hint="Reply 1–7 to choose, or 0 to start over.",
+    menu_hint_admin="Reply 1–8 to choose, or 0 to start over.",
     location_labels={
         "1": "My Possession",
         "2": "Warehouse Safe",
@@ -351,9 +370,10 @@ PROMPTS_FR = PromptBundle(
 4 — 🏦 Dépôt / Retrait bancaire
 5 — 🚢 Paiement fournisseur / port
 6 — 🧾 Créer une facture (comptant ou crédit)
+7 — 📦 Marchandises reçues (entrée stock)
 0 — ❌ Annuler / Recommencer
 
-Répondez 1–6, ou 0 pour annuler une étape et revenir ici.
+Répondez 1–7, ou 0 pour annuler une étape et revenir ici.
 Envoyez *Bonjour* (français) ou *Hello*/*Hi* (anglais) pour tout recommencer depuis le PIN.""",
     master_menu_admin="""Merci {name}. Que voulez-vous faire ?
 
@@ -363,10 +383,11 @@ Envoyez *Bonjour* (français) ou *Hello*/*Hi* (anglais) pour tout recommencer de
 4 — 🏦 Dépôt / Retrait bancaire
 5 — 🚢 Paiement fournisseur / port
 6 — 🧾 Créer une facture (comptant ou crédit)
-7 — ➕ Ajouter client / fournisseur (Admin)
+7 — 📦 Marchandises reçues (entrée stock)
+8 — ➕ Ajouter client / fournisseur (Admin)
 0 — ❌ Annuler / Recommencer
 
-Répondez 1–7, ou 0 pour annuler une étape et revenir ici.
+Répondez 1–8, ou 0 pour annuler une étape et revenir ici.
 Envoyez *Bonjour* (français) ou *Hello*/*Hi* (anglais) pour tout recommencer depuis le PIN.""",
     ask_pin=(
         "Bonjour {name}, bienvenue dans l'assistant comptable {company}.\n"
@@ -444,6 +465,18 @@ Envoyez *Bonjour* (français) ou *Hello*/*Hi* (anglais) pour tout recommencer de
     inv_status_paid="✅ Payé (comptant)",
     inv_status_credit="🕒 Crédit — impayé",
     inv_cash_sale_desc="Vente au comptant",
+    gr_product="📦 Quel produit avez-vous reçu ? Tapez le nom du produit.",
+    gr_quantity="Combien avez-vous reçu ? (chiffres uniquement)",
+    gr_pick="Quel produit ? Répondez par le numéro :",
+    gr_no_match=(
+        "Aucun produit correspondant. Retapez le nom, "
+        "ou ajoutez-le d'abord sur le tableau de bord. (0 pour annuler.)"
+    ),
+    gr_saved=(
+        "✅ Stock mis à jour.\n"
+        "+{quantity} {unit} {product}\n"
+        "En stock maintenant : {on_hand} {unit}"
+    ),
     err_amount="⚠️ Veuillez saisir des chiffres uniquement (ex. 50000). Réessayez.",
     err_choice="⚠️ Choix invalide. {hint}",
     err_text_required="⚠️ Veuillez saisir une courte réponse. Réessayez.",
@@ -455,8 +488,8 @@ Envoyez *Bonjour* (français) ou *Hello*/*Hi* (anglais) pour tout recommencer de
         "⛔ Seuls Govind, Vikash ou les propriétaires peuvent ajouter des noms.\n"
         "Choisissez dans la liste ou demandez-leur d'ajouter le nom."
     ),
-    menu_hint="Répondez 1–6 pour choisir, ou 0 pour recommencer.",
-    menu_hint_admin="Répondez 1–7 pour choisir, ou 0 pour recommencer.",
+    menu_hint="Répondez 1–7 pour choisir, ou 0 pour recommencer.",
+    menu_hint_admin="Répondez 1–8 pour choisir, ou 0 pour recommencer.",
     location_labels={
         "1": "En ma possession",
         "2": "Coffre entrepôt",
