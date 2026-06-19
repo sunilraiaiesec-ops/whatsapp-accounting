@@ -17,6 +17,30 @@ export function bankAndCashAccounts(orgId: string) {
   });
 }
 
+// Accounts that can appear on receipt lines (money in → credit side).
+export function receiptCounterpartAccounts(orgId: string) {
+  return prisma.account.findMany({
+    where: {
+      orgId,
+      subtype: { notIn: ["bank", "cash"] },
+      OR: [{ type: "INCOME" }, { subtype: "receivable", isControl: true }],
+    },
+    orderBy: { code: "asc" },
+  });
+}
+
+// Accounts that can appear on payment lines (money out → debit side).
+export function paymentCounterpartAccounts(orgId: string) {
+  return prisma.account.findMany({
+    where: {
+      orgId,
+      subtype: { notIn: ["bank", "cash"] },
+      OR: [{ type: "EXPENSE" }, { subtype: "payable", isControl: true }],
+    },
+    orderBy: { code: "asc" },
+  });
+}
+
 export async function bankAndCashWithBalances(orgId: string) {
   const accounts = await bankAndCashAccounts(orgId);
   if (accounts.length === 0) return [];
