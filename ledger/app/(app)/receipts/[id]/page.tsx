@@ -1,0 +1,106 @@
+import { notFound } from "next/navigation";
+
+import { requireContext } from "@/lib/auth/current";
+import { getReceipt } from "@/lib/documents";
+import { cloneReceiptAction } from "@/app/actions/documents";
+import { formatAmount } from "@/lib/money";
+import { DocToolbar } from "@/components/DocToolbar";
+import { TransactionJournal } from "@/components/TransactionJournal";
+
+export default async function ReceiptViewPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const ctx = await requireContext();
+  const cur = ctx.baseCurrency;
+
+  const data = await getReceipt(ctx.orgId, id);
+  if (!data) notFound();
+  const { receipt, entry, nav } = data;
+
+  return (
+    <div className="mx-auto max-w-3xl">
+      <DocToolbar
+        listHref="/receipts"
+        listLabel="Receipts"
+        id={receipt.id}
+        editHref={`/receipts/${receipt.id}/edit`}
+        cloneAction={cloneReceiptAction}
+        prevHref={nav.prevId ? `/receipts/${nav.prevId}` : null}
+        nextHref={nav.nextId ? `/receipts/${nav.nextId}` : null}
+        index={nav.index}
+        total={nav.total}
+      />
+
+      <div className="rounded-xl border border-slate-200 bg-white p-8">
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">Receipt</h1>
+            <p className="mt-1 text-lg text-slate-700">
+              {receipt.party?.name ?? "—"}
+            </p>
+          </div>
+          <div className="text-right text-sm">
+            <div className="font-semibold text-slate-900">{ctx.orgName}</div>
+            <div className="mt-2 text-slate-500">Date</div>
+            <div className="text-slate-900">
+              {receipt.date.toISOString().slice(0, 10)}
+            </div>
+            <div className="mt-2 text-slate-500">Reference</div>
+            <div className="text-slate-900">{receipt.number}</div>
+          </div>
+        </div>
+
+        {receipt.description ? (
+          <p className="mt-4 text-sm font-medium uppercase tracking-wide text-slate-500">
+            {receipt.description}
+          </p>
+        ) : null}
+
+        <p className="mt-4 text-sm text-slate-500">
+          Received into:{" "}
+          <span className="text-slate-900">{receipt.bankAccount.name}</span>
+        </p>
+
+        <table className="mt-4 w-full border border-slate-300 text-sm">
+          <thead>
+            <tr className="border-b border-slate-300 bg-slate-50 text-left">
+              <th className="px-4 py-2 font-semibold">Account</th>
+              <th className="w-48 px-4 py-2 text-right font-semibold">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {receipt.lines.map((l) => (
+              <tr key={l.id} className="border-b border-slate-200">
+                <td className="px-4 py-2">
+                  {l.account.name}
+                  {receipt.party && l.account.isControl
+                    ? ` — ${receipt.party.name}`
+                    : ""}
+                  {l.memo ? (
+                    <span className="ml-2 text-xs text-slate-400">{l.memo}</span>
+                  ) : null}
+                </td>
+                <td className="px-4 py-2 text-right tabular-nums">
+                  {formatAmount(l.amount, cur)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="font-semibold">
+              <td className="px-4 py-2 text-right">Total</td>
+              <td className="px-4 py-2 text-right tabular-nums">
+                {formatAmount(receipt.total, cur)}
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      {entry ? <TransactionJournal lines={entry.lines} currency={cur} /> : null}
+    </div>
+  );
+}

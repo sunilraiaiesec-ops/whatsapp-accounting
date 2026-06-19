@@ -1,0 +1,557 @@
+// Double-entry accounting ledger — multi-tenant SaaS core.
+// Every monetary amount is stored as BigInt in the smallest currency unit
+// (minor units). For XAF (FCFA) the exponent is 0, so 1 unit == 1 FCFA.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy & access control
+// ---------------------------------------------------------------------------
+
+model Organization {
+  id           String   @id @default(cuid())
+  name         String
+  baseCurrency String   @default("XAF")
+  createdAt    DateTime @default(now())
+
+  memberships   Membership[]
+  accounts      Account[]
+  parties       Party[]
+  entries       JournalEntry[]
+  lines         JournalLine[]
+  receipts         Receipt[]
+  payments         Payment[]
+  salesInvoices    SalesInvoice[]
+  purchaseInvoices PurchaseInvoice[]
+  transfers        InterAccountTransfer[]
+  creditNotes      CreditNote[]
+  debitNotes       DebitNote[]
+  inventoryItems   InventoryItem[]
+  goodsReceipts    GoodsReceipt[]
+  inventoryWriteOffs InventoryWriteOff[]
+
+  @@map("organizations")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  memberships Membership[]
+
+  @@map("users")
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  STAFF
+}
+
+model Membership {
+  id        String   @id @default(cuid())
+  orgId     String
+  userId    String
+  role      Role     @default(OWNER)
+  createdAt DateTime @default(now())
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, userId])
+  @@index([userId])
+  @@map("memberships")
+}
+
+// ---------------------------------------------------------------------------
+// Chart of accounts
+// ---------------------------------------------------------------------------
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  INCOME
+  EXPENSE
+}
+
+model Account {
+  id        String      @id @default(cuid())
+  orgId     String
+  code      String
+  name      String
+  type      AccountType
+  // Finer classification used by reports & document posting:
+  // bank, cash, receivable, payable, inventory, cogs, tax, equity, retained...
+  subtype   String?
+  parentId  String?
+  isControl Boolean     @default(false)
+  currency  String?
+  createdAt DateTime    @default(now())
+
+  org               Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  parent            Account?          @relation("AccountChildren", fields: [parentId], references: [id])
+  children          Account[]         @relation("AccountChildren")
+  lines                JournalLine[]
+  receiptDeposits      Receipt[]
+  receiptLines         ReceiptLine[]
+  paymentSources       Payment[]
+  paymentLines         PaymentLine[]
+  salesInvoiceLines    SalesInvoiceLine[]
+  purchaseInvoiceLines PurchaseInvoiceLine[]
+  transfersOut         InterAccountTransfer[] @relation("TransferFrom")
+  transfersIn          InterAccountTransfer[] @relation("TransferTo")
+  creditNoteLines      CreditNoteLine[]
+  debitNoteLines       DebitNoteLine[]
+  inventoryWriteOffs   InventoryWriteOff[]
+
+  @@unique([orgId, code])
+  @@index([orgId, type])
+  @@map("accounts")
+}
+
+// Customers / suppliers — the subledger behind AR / AP control accounts.
+model Party {
+  id        String   @id @default(cuid())
+  orgId     String
+  name      String
+  type      String   @default("both") // customer | supplier | both
+  phone     String?
+  createdAt DateTime @default(now())
+
+  org              Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  lines            JournalLine[]
+  receipts         Receipt[]
+  payments         Payment[]
+  salesInvoices    SalesInvoice[]
+  purchaseInvoices PurchaseInvoice[]
+  creditNotes      CreditNote[]
+  debitNotes       DebitNote[]
+  goodsReceipts    GoodsReceipt[]
+
+  @@index([orgId])
+  @@map("parties")
+}
+
+// ---------------------------------------------------------------------------
+// Double-entry core: every entry's debit total must equal its credit total.
+// ---------------------------------------------------------------------------
+
+model JournalEntry {
+  id          String   @id @default(cuid())
+  orgId       String
+  entryDate   DateTime @db.Date
+  description String?
+  reference   String?
+  // What produced this entry: manual, sales_invoice, receipt, payment, ...
+  sourceType  String   @default("manual")
+  sourceId    String?
+  createdAt   DateTime @default(now())
+
+  org   Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  lines JournalLine[]
+
+  @@index([orgId, entryDate])
+  @@map("journal_entries")
+}
+
+model JournalLine {
+  id        String  @id @default(cuid())
+  orgId     String
+  entryId   String
+  accountId String
+  debit     BigInt  @default(0)
+  credit    BigInt  @default(0)
+  partyId   String?
+  memo      String?
+
+  org     Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  entry   JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  account Account      @relation(fields: [accountId], references: [id])
+  party   Party?       @relation(fields: [partyId], references: [id])
+
+  @@index([orgId, accountId])
+  @@index([entryId])
+  @@index([partyId])
+  @@map("journal_lines")
+}
+
+// ---------------------------------------------------------------------------
+// Documents. Each document persists as its own record AND posts a balanced
+// journal entry (linked via journalEntryId). The ledger remains the single
+// source of truth for the reports; documents are the human-facing layer.
+// ---------------------------------------------------------------------------
+
+// Money received INTO a bank/cash account.
+// Posts: Dr bankAccount (total); Cr each line account.
+model Receipt {
+  id             String   @id @default(cuid())
+  orgId          String
+  number         String
+  date           DateTime @db.Date
+  reference      String?
+  description    String?
+  bankAccountId  String
+  partyId        String?
+  total          BigInt   @default(0)
+  journalEntryId String   @unique
+  createdAt      DateTime @default(now())
+
+  org         Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  bankAccount Account       @relation(fields: [bankAccountId], references: [id])
+  party       Party?        @relation(fields: [partyId], references: [id])
+  lines       ReceiptLine[]
+
+  @@unique([orgId, number])
+  @@index([orgId, date])
+  @@map("receipts")
+}
+
+model ReceiptLine {
+  id        String  @id @default(cuid())
+  receiptId String
+  accountId String
+  amount    BigInt
+  memo      String?
+
+  receipt Receipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  account Account @relation(fields: [accountId], references: [id])
+
+  @@index([receiptId])
+  @@map("receipt_lines")
+}
+
+// Money paid OUT of a bank/cash account.
+// Posts: Cr bankAccount (total); Dr each line account.
+model Payment {
+  id             String   @id @default(cuid())
+  orgId          String
+  number         String
+  date           DateTime @db.Date
+  reference      String?
+  description    String?
+  bankAccountId  String
+  partyId        String?
+  total          BigInt   @default(0)
+  journalEntryId String   @unique
+  createdAt      DateTime @default(now())
+
+  org         Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  bankAccount Account       @relation(fields: [bankAccountId], references: [id])
+  party       Party?        @relation(fields: [partyId], references: [id])
+  lines       PaymentLine[]
+
+  @@unique([orgId, number])
+  @@index([orgId, date])
+  @@map("payments")
+}
+
+model PaymentLine {
+  id        String  @id @default(cuid())
+  paymentId String
+  accountId String
+  amount    BigInt
+  memo      String?
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  account Account @relation(fields: [accountId], references: [id])
+
+  @@index([paymentId])
+  @@map("payment_lines")
+}
+
+// Credit sale to a customer.
+// Posts: Dr Accounts receivable (total, with party); Cr each income line.
+model SalesInvoice {
+  id             String   @id @default(cuid())
+  orgId          String
+  number         String
+  partyId        String
+  date           DateTime @db.Date
+  dueDate        DateTime? @db.Date
+  reference      String?
+  notes          String?
+  total          BigInt   @default(0)
+  status         String   @default("unpaid")
+  journalEntryId String   @unique
+  createdAt      DateTime @default(now())
+
+  org   Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  party Party              @relation(fields: [partyId], references: [id])
+  lines SalesInvoiceLine[]
+
+  @@unique([orgId, number])
+  @@index([orgId, date])
+  @@map("sales_invoices")
+}
+
+model SalesInvoiceLine {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  description String
+  quantity    Decimal @default(1) @db.Decimal(14, 3)
+  unitPrice   BigInt
+  lineTotal   BigInt
+  accountId   String
+  itemId      String?
+  cost        BigInt  @default(0)
+
+  invoice SalesInvoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  account Account        @relation(fields: [accountId], references: [id])
+  item    InventoryItem? @relation(fields: [itemId], references: [id])
+
+  @@index([invoiceId])
+  @@map("sales_invoice_lines")
+}
+
+// Credit purchase from a supplier (a bill).
+// Posts: Dr each expense/asset line; Cr Accounts payable (total, with party).
+model PurchaseInvoice {
+  id             String    @id @default(cuid())
+  orgId          String
+  number         String
+  partyId        String
+  supplierRef    String?
+  date           DateTime  @db.Date
+  dueDate        DateTime? @db.Date
+  notes          String?
+  total          BigInt    @default(0)
+  status         String    @default("unpaid")
+  journalEntryId String    @unique
+  createdAt      DateTime  @default(now())
+
+  org   Organization          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  party Party                 @relation(fields: [partyId], references: [id])
+  lines PurchaseInvoiceLine[]
+
+  @@unique([orgId, number])
+  @@index([orgId, date])
+  @@map("purchase_invoices")
+}
+
+model PurchaseInvoiceLine {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  description String
+  quantity    Decimal @default(1) @db.Decimal(14, 3)
+  unitPrice   BigInt
+  lineTotal   BigInt
+  accountId   String
+
+  invoice PurchaseInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  account Account         @relation(fields: [accountId], references: [id])
+
+  @@index([invoiceId])
+  @@map("purchase_invoice_lines")
+}
+
+// Moving money between two bank/cash accounts.
+// Posts: Dr destination account ; Cr source account.
+model InterAccountTransfer {
+  id             String   @id @default(cuid())
+  orgId          String
+  number         String
+  date           DateTime @db.Date
+  fromAccountId  String
+  toAccountId    String
+  amount         BigInt   @default(0)
+  reference      String?
+  description    String?
+  journalEntryId String   @unique
+  createdAt      DateTime @default(now())
+
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  fromAccount Account      @relation("TransferFrom", fields: [fromAccountId], references: [id])
+  toAccount   Account      @relation("TransferTo", fields: [toAccountId], references: [id])
+
+  @@unique([orgId, number])
+  @@index([orgId, date])
+  @@map("inter_account_transfers")
+}
+
+// Credit note — issued to a customer (sales return / refund).
+// Posts: Dr income/returns lines ; Cr Accounts receivable (total, party).
+model CreditNote {
+  id             String   @id @default(cuid())
+  orgId          String
+  number         String
+  partyId        String
+  date           DateTime @db.Date
+  reference      String?
+  notes          String?
+  total          BigInt   @default(0)
+  journalEntryId String   @unique
+  createdAt      DateTime @default(now())
+
+  org   Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  party Party            @relation(fields: [partyId], references: [id])
+  lines CreditNoteLine[]
+
+  @@unique([orgId, number])
+  @@index([orgId, date])
+  @@map("credit_notes")
+}
+
+model CreditNoteLine {
+  id          String  @id @default(cuid())
+  noteId      String
+  description String
+  quantity    Decimal @default(1) @db.Decimal(14, 3)
+  unitPrice   BigInt
+  lineTotal   BigInt
+  accountId   String
+
+  note    CreditNote @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  account Account    @relation(fields: [accountId], references: [id])
+
+  @@index([noteId])
+  @@map("credit_note_lines")
+}
+
+// Debit note — issued to a supplier (purchase return).
+// Posts: Dr Accounts payable (total, party) ; Cr expense/purchases lines.
+model DebitNote {
+  id             String   @id @default(cuid())
+  orgId          String
+  number         String
+  partyId        String
+  supplierRef    String?
+  date           DateTime @db.Date
+  notes          String?
+  total          BigInt   @default(0)
+  journalEntryId String   @unique
+  createdAt      DateTime @default(now())
+
+  org   Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  party Party           @relation(fields: [partyId], references: [id])
+  lines DebitNoteLine[]
+
+  @@unique([orgId, number])
+  @@index([orgId, date])
+  @@map("debit_notes")
+}
+
+model DebitNoteLine {
+  id          String  @id @default(cuid())
+  noteId      String
+  description String
+  quantity    Decimal @default(1) @db.Decimal(14, 3)
+  unitPrice   BigInt
+  lineTotal   BigInt
+  accountId   String
+
+  note    DebitNote @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  account Account   @relation(fields: [accountId], references: [id])
+
+  @@index([noteId])
+  @@map("debit_note_lines")
+}
+
+// ---------------------------------------------------------------------------
+// Inventory — perpetual, weighted-average cost.
+// qtyOnHand and valueOnHand are the subledger backing the Inventory control
+// account (1200). Average unit cost is derived as valueOnHand / qtyOnHand.
+// ---------------------------------------------------------------------------
+model InventoryItem {
+  id          String   @id @default(cuid())
+  orgId       String
+  code        String
+  name        String
+  salePrice   BigInt   @default(0)
+  qtyOnHand   Decimal  @default(0) @db.Decimal(18, 3)
+  valueOnHand BigInt   @default(0)
+  createdAt   DateTime @default(now())
+
+  org              Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  receiptLines     GoodsReceiptLine[]
+  writeOffLines    InventoryWriteOffLine[]
+  salesInvoiceLines SalesInvoiceLine[]
+
+  @@unique([orgId, code])
+  @@index([orgId])
+  @@map("inventory_items")
+}
+
+// Receiving stock from a supplier (on credit).
+// Posts: Dr Inventory on hand (total) ; Cr Accounts payable (total, party).
+model GoodsReceipt {
+  id             String   @id @default(cuid())
+  orgId          String
+  number         String
+  partyId        String
+  date           DateTime @db.Date
+  reference      String?
+  notes          String?
+  total          BigInt   @default(0)
+  journalEntryId String   @unique
+  createdAt      DateTime @default(now())
+
+  org   Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  party Party              @relation(fields: [partyId], references: [id])
+  lines GoodsReceiptLine[]
+
+  @@unique([orgId, number])
+  @@index([orgId, date])
+  @@map("goods_receipts")
+}
+
+model GoodsReceiptLine {
+  id        String  @id @default(cuid())
+  receiptId String
+  itemId    String
+  quantity  Decimal @db.Decimal(18, 3)
+  unitCost  BigInt
+  lineTotal BigInt
+
+  receipt GoodsReceipt  @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  item    InventoryItem @relation(fields: [itemId], references: [id])
+
+  @@index([receiptId])
+  @@map("goods_receipt_lines")
+}
+
+// Removing stock (damaged / lost / expired) at average cost.
+// Posts: Dr write-off expense (total) ; Cr Inventory on hand (total).
+model InventoryWriteOff {
+  id              String   @id @default(cuid())
+  orgId           String
+  number          String
+  date            DateTime @db.Date
+  expenseAccountId String
+  notes           String?
+  total           BigInt   @default(0)
+  journalEntryId  String   @unique
+  createdAt       DateTime @default(now())
+
+  org           Organization            @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  expenseAccount Account                @relation(fields: [expenseAccountId], references: [id])
+  lines         InventoryWriteOffLine[]
+
+  @@unique([orgId, number])
+  @@index([orgId, date])
+  @@map("inventory_write_offs")
+}
+
+model InventoryWriteOffLine {
+  id         String  @id @default(cuid())
+  writeOffId String
+  itemId     String
+  quantity   Decimal @db.Decimal(18, 3)
+  costValue  BigInt
+
+  writeOff InventoryWriteOff @relation(fields: [writeOffId], references: [id], onDelete: Cascade)
+  item     InventoryItem     @relation(fields: [itemId], references: [id])
+
+  @@index([writeOffId])
+  @@map("inventory_write_off_lines")
+}
