@@ -254,6 +254,28 @@
     "chartOfAccounts": "Plan comptable",
     "manualJournal": "Saisir une écriture au journal"
   },
+  "profile": {
+    "title": "Mon profil",
+    "subtitle": "Gérez les informations de votre compte personnel.",
+    "openMenu": "Ouvrir le menu du compte",
+    "myProfile": "Mon profil",
+    "language": "Langue",
+    "detailsTitle": "Informations personnelles",
+    "passwordTitle": "Changer le mot de passe",
+    "email": "E-mail",
+    "emailHint": "L'e-mail de connexion ne peut pas être modifié ici.",
+    "name": "Nom complet",
+    "phone": "Numéro de téléphone",
+    "phonePlaceholder": "+237 6XX XXX XXX",
+    "currentPassword": "Mot de passe actuel",
+    "newPassword": "Nouveau mot de passe",
+    "confirmPassword": "Confirmer le mot de passe",
+    "saveProfile": "Enregistrer le profil",
+    "savePassword": "Mettre à jour le mot de passe",
+    "saving": "Enregistrement…",
+    "saved": "Profil mis à jour.",
+    "passwordSaved": "Mot de passe mis à jour."
+  },
   "metadata": {
     "title": "Bantoo Books",
     "description": "Comptabilité en partie double pour votre entreprise"

@@ -2,7 +2,6 @@ import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 
 import { requireContext } from "@/lib/auth/current";
-import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 
 export default async function SettingsPage() {
   const ctx = await requireContext();
@@ -10,12 +9,9 @@ export default async function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-2xl">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold">{t("title")}</h1>
-          <p className="text-sm text-slate-500">{t("subtitle")}</p>
-        </div>
-        <LanguageSwitcher />
+      <div>
+        <h1 className="text-2xl font-semibold">{t("title")}</h1>
+        <p className="text-sm text-slate-500">{t("subtitle")}</p>
       </div>
 
       <div className="mt-6 space-y-4">

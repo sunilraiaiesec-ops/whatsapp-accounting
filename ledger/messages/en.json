@@ -254,6 +254,28 @@
     "chartOfAccounts": "Chart of accounts",
     "manualJournal": "Post a manual journal entry"
   },
+  "profile": {
+    "title": "My profile",
+    "subtitle": "Manage your personal account details.",
+    "openMenu": "Open account menu",
+    "myProfile": "My profile",
+    "language": "Language",
+    "detailsTitle": "Personal details",
+    "passwordTitle": "Change password",
+    "email": "Email",
+    "emailHint": "Your sign-in email cannot be changed here.",
+    "name": "Full name",
+    "phone": "Phone number",
+    "phonePlaceholder": "+237 6XX XXX XXX",
+    "currentPassword": "Current password",
+    "newPassword": "New password",
+    "confirmPassword": "Confirm new password",
+    "saveProfile": "Save profile",
+    "savePassword": "Update password",
+    "saving": "Saving…",
+    "saved": "Profile updated.",
+    "passwordSaved": "Password updated."
+  },
   "metadata": {
     "title": "Bantoo Books",
     "description": "Double-entry accounting for your business"

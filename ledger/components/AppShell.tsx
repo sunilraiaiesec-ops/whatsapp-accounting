@@ -1,20 +1,12 @@
 "use client";
 
 import { useState } from "react";
-
-import { BrandLogo } from "@/components/BrandLogo";
-import { LanguageSwitcher } from "@/components/LanguageSwitcher";
-import { Sidebar } from "@/components/Sidebar";
-import type { SidebarCounts } from "@/lib/sidebar";
 import { useTranslations } from "next-intl";
 
-function initials(name: string) {
-  return name
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((p) => p[0]?.toUpperCase() ?? "")
-    .join("");
-}
+import { BrandLogo } from "@/components/BrandLogo";
+import { Sidebar } from "@/components/Sidebar";
+import { UserMenu } from "@/components/UserMenu";
+import type { SidebarCounts } from "@/lib/sidebar";
 
 export function AppShell({
   orgName,
@@ -95,23 +87,12 @@ export function AppShell({
               </label>
             </div>
 
-            <div className="ml-auto flex items-center gap-3">
-              <LanguageSwitcher />
-              <div className="hidden text-right sm:block">
-                <div className="max-w-[180px] truncate text-sm font-semibold text-slate-900">
-                  {orgName}
-                </div>
-                <div className="text-xs text-[var(--muted)]">
-                  {baseCurrency} · {userEmail}
-                </div>
-              </div>
-              <div
-                className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--brand)] text-sm font-bold text-white"
-                title={userName}
-              >
-                {initials(userName)}
-              </div>
-            </div>
+            <UserMenu
+              userName={userName}
+              userEmail={userEmail}
+              orgName={orgName}
+              baseCurrency={baseCurrency}
+            />
           </div>
         </header>
 

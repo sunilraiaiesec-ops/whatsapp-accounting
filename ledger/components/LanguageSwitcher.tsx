@@ -7,7 +7,13 @@ import { useTransition } from "react";
 import { setLocaleAction } from "@/app/actions/locale";
 import type { AppLocale } from "@/i18n/routing";
 
-export function LanguageSwitcher() {
+export function LanguageSwitcher({
+  variant = "pill",
+  onChange,
+}: {
+  variant?: "pill" | "menu";
+  onChange?: () => void;
+}) {
   const t = useTranslations("common");
   const locale = useLocale() as AppLocale;
   const router = useRouter();
@@ -18,12 +24,30 @@ export function LanguageSwitcher() {
     startTransition(async () => {
       await setLocaleAction(next);
       router.refresh();
+      onChange?.();
     });
   }
 
+  const buttonClass = (code: AppLocale) =>
+    variant === "menu"
+      ? `flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition ${
+          locale === code
+            ? "bg-[var(--brand)] text-white"
+            : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+        }`
+      : `rounded-full px-2.5 py-1 transition ${
+          locale === code
+            ? "bg-[var(--brand)] text-white"
+            : "text-slate-600 hover:text-slate-900"
+        }`;
+
   return (
     <div
-      className="inline-flex rounded-full border border-[var(--border)] bg-white p-0.5 text-xs font-semibold shadow-sm"
+      className={
+        variant === "menu"
+          ? "grid grid-cols-2 gap-2"
+          : "inline-flex rounded-full border border-[var(--border)] bg-white p-0.5 text-xs font-semibold shadow-sm"
+      }
       role="group"
       aria-label={t("language")}
     >
@@ -33,13 +57,9 @@ export function LanguageSwitcher() {
           type="button"
           disabled={pending}
           onClick={() => switchLocale(code)}
-          className={`rounded-full px-2.5 py-1 transition ${
-            locale === code
-              ? "bg-[var(--brand)] text-white"
-              : "text-slate-600 hover:text-slate-900"
-          }`}
+          className={buttonClass(code)}
         >
-          {code.toUpperCase()}
+          {code === "fr" ? t("french") : t("english")}
         </button>
       ))}
     </div>
