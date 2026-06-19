@@ -16,7 +16,6 @@ export default async function AppLayout({
       counts={counts}
       userName={ctx.userName}
       userEmail={ctx.userEmail}
-      baseCurrency={ctx.baseCurrency}
     >
       {children}
     </AppShell>

@@ -36,12 +36,10 @@ export function UserMenu({
   userName,
   userEmail,
   orgName,
-  baseCurrency,
 }: {
   userName: string;
   userEmail: string;
   orgName: string;
-  baseCurrency: string;
 }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -69,11 +67,8 @@ export function UserMenu({
   return (
     <div className="ml-auto flex items-center gap-3">
       <div className="hidden text-right sm:block">
-        <div className="max-w-[180px] truncate text-sm font-semibold text-slate-900">
+        <div className="max-w-[200px] truncate text-sm font-semibold text-slate-900">
           {orgName}
-        </div>
-        <div className="text-xs text-[var(--muted)]">
-          {baseCurrency} · {userEmail}
         </div>
       </div>
 

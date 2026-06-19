@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 
 import { BrandLogo } from "@/components/BrandLogo";
+import { GlobalSearch } from "@/components/GlobalSearch";
 import { Sidebar } from "@/components/Sidebar";
 import { UserMenu } from "@/components/UserMenu";
 import type { SidebarCounts } from "@/lib/sidebar";
@@ -13,14 +14,12 @@ export function AppShell({
   counts,
   userName,
   userEmail,
-  baseCurrency,
   children,
 }: {
   orgName: string;
   counts: SidebarCounts;
   userName: string;
   userEmail: string;
-  baseCurrency: string;
   children: React.ReactNode;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -61,37 +60,14 @@ export function AppShell({
 
             <BrandLogo href="/dashboard" />
 
-            <div className="hidden min-w-0 flex-1 md:block">
-              <label className="relative block max-w-xl">
-                <span className="sr-only">{t("search")}</span>
-                <svg
-                  className="pointer-events-none absolute left-3.5 top-1/2 z-10 -translate-y-1/2 text-slate-400"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.25"
-                  aria-hidden
-                >
-                  <circle cx="11" cy="11" r="7" />
-                  <path d="M20 20l-3-3" strokeLinecap="round" />
-                </svg>
-                <input
-                  type="search"
-                  placeholder={t("searchPlaceholder")}
-                  className="input-search"
-                  disabled
-                  title={t("searchSoon")}
-                />
-              </label>
+            <div className="hidden min-w-0 max-w-xl flex-1 md:block">
+              <GlobalSearch />
             </div>
 
             <UserMenu
               userName={userName}
               userEmail={userEmail}
               orgName={orgName}
-              baseCurrency={baseCurrency}
             />
           </div>
         </header>
