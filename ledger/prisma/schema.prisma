@@ -7,8 +7,12 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  // Runtime queries use the pooled connection (PgBouncer) on Vercel.
+  url       = env("DATABASE_URL")
+  // Migrations need a direct (unpooled) connection because advisory locks
+  // do not work through the transaction pooler. Falls back to DATABASE_URL.
+  directUrl = env("DIRECT_URL")
 }
 
 // ---------------------------------------------------------------------------
