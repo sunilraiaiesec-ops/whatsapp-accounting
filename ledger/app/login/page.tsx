@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useActionState } from "react";
 
 import { loginAction, type AuthState } from "@/app/actions/auth";
+import { BrandLogo } from "@/components/BrandLogo";
 
 const initial: AuthState = {};
 
@@ -13,9 +14,7 @@ export default function LoginPage() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-[var(--background)] p-6">
       <div className="w-full max-w-sm card-surface p-8">
-        <p className="text-lg font-bold text-[var(--brand)]">
-          Bantoo<span className="text-slate-800">Books</span>
-        </p>
+        <BrandLogo href="/login" size="auth" />
         <h1 className="mt-3 text-2xl font-semibold tracking-tight">Sign in</h1>
         <p className="mt-1 text-sm text-[var(--muted)]">Welcome back to your books.</p>
 

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useActionState } from "react";
 
 import { signupAction, type AuthState } from "@/app/actions/auth";
+import { BrandLogo } from "@/components/BrandLogo";
 
 const initial: AuthState = {};
 
@@ -15,9 +16,7 @@ export default function SignupPage() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-[var(--background)] p-6">
       <div className="w-full max-w-md card-surface p-8">
-        <p className="text-lg font-bold text-[var(--brand)]">
-          Bantoo<span className="text-slate-800">Books</span>
-        </p>
+        <BrandLogo href="/signup" size="auth" />
         <h1 className="mt-3 text-2xl font-semibold tracking-tight">Create your company</h1>
         <p className="mt-1 text-sm text-[var(--muted)]">
           A fresh set of books with a chart of accounts, ready in seconds.

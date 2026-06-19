@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { BrandLogo } from "@/components/BrandLogo";
 import { Sidebar } from "@/components/Sidebar";
 import type { SidebarCounts } from "@/lib/sidebar";
 
@@ -63,11 +64,7 @@ export function AppShell({
               </svg>
             </button>
 
-            <div className="hidden shrink-0 md:block">
-              <div className="text-lg font-bold tracking-tight text-[var(--brand)]">
-                Bantoo<span className="text-slate-800">Books</span>
-              </div>
-            </div>
+            <BrandLogo href="/dashboard" />
 
             <div className="hidden min-w-0 flex-1 md:block">
               <label className="relative block max-w-xl">

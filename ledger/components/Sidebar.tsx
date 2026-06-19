@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { BrandLogo } from "@/components/BrandLogo";
 import { logoutAction } from "@/app/actions/auth";
 import type { SidebarCounts } from "@/lib/sidebar";
 
@@ -105,10 +106,10 @@ export function Sidebar({
         open ? "translate-x-0" : "-translate-x-full md:translate-x-0"
       }`}
     >
-      <div className="flex items-start justify-between px-4 py-4">
-        <div className="min-w-0 md:hidden">
-          <div className="text-lg font-bold text-[var(--brand)]">BantooBooks</div>
-          <div className="truncate text-xs text-[var(--muted)]">{orgName}</div>
+      <div className="flex items-start justify-between px-4 py-4 md:hidden">
+        <div className="min-w-0">
+          <BrandLogo href="/dashboard" />
+          <div className="mt-1 truncate text-xs text-[var(--muted)]">{orgName}</div>
         </div>
         <button
           type="button"
