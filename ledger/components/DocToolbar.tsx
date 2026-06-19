@@ -26,16 +26,16 @@ export function DocToolbar({
   total: number;
 }) {
   const btn =
-    "rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50";
+    "inline-flex items-center rounded-full border border-[var(--border)] bg-white px-3.5 py-1.5 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50";
 
   return (
-    <div className="mb-4 flex flex-wrap items-center justify-between gap-3 print:hidden">
+    <div className="mb-5 flex flex-wrap items-center justify-between gap-3 print:hidden">
       <div className="flex flex-wrap items-center gap-2">
         <Link href={listHref} className={btn}>
           ← {listLabel}
         </Link>
         {editHref ? (
-          <Link href={editHref} className={btn}>
+          <Link href={editHref} className={`${btn} border-[var(--brand)]/30 text-[var(--brand)]`}>
             Edit
           </Link>
         ) : (
@@ -57,7 +57,7 @@ export function DocToolbar({
         </button>
       </div>
 
-      <div className="flex items-center gap-2 text-sm text-slate-500">
+      <div className="flex items-center gap-2 text-sm text-[var(--muted)]">
         {prevHref ? (
           <Link href={prevHref} className={btn}>
             ‹ Prev
@@ -65,7 +65,7 @@ export function DocToolbar({
         ) : (
           <span className={`${btn} opacity-40`}>‹ Prev</span>
         )}
-        <span className="tabular-nums">
+        <span className="rounded-full bg-slate-100 px-3 py-1 tabular-nums text-slate-600">
           {index} / {total}
         </span>
         {nextHref ? (

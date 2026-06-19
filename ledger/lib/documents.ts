@@ -17,6 +17,36 @@ function formatNumber(prefix: string, count: number) {
 
 type LineInput = { accountId: string; amount: bigint; memo?: string | null };
 
+export async function assertCashDocLines(
+  tx: Prisma.TransactionClient,
+  orgId: string,
+  bankAccountId: string,
+  lines: LineInput[],
+  kind: "receipt" | "payment",
+) {
+  if (lines.some((l) => l.accountId === bankAccountId)) {
+    throw new DocumentError(
+      kind === "receipt"
+        ? "The receiving account cannot be the same as a line account. Choose income or accounts receivable for the credit line."
+        : "The paying account cannot be the same as a line account. Choose an expense or accounts payable for the debit line.",
+    );
+  }
+
+  const bankCash = await tx.account.findMany({
+    where: {
+      orgId,
+      id: { in: lines.map((l) => l.accountId) },
+      subtype: { in: ["bank", "cash"] },
+    },
+    select: { name: true },
+  });
+  if (bankCash.length > 0) {
+    throw new DocumentError(
+      `Line accounts must be income, receivable, expense, or payable — not "${bankCash[0].name}".`,
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Receipt — money received into a bank/cash account.
 // Dr bankAccount (total) ; Cr each line account.
@@ -37,6 +67,8 @@ export async function createReceipt(
   const total = lines.reduce((s, l) => s + l.amount, 0n);
 
   return prisma.$transaction(async (tx) => {
+    await assertCashDocLines(tx, orgId, input.bankAccountId, lines, "receipt");
+
     const accounts = await tx.account.findMany({
       where: { orgId, id: { in: lines.map((l) => l.accountId) } },
       select: { id: true, isControl: true },
@@ -110,6 +142,8 @@ export async function createPayment(
   const total = lines.reduce((s, l) => s + l.amount, 0n);
 
   return prisma.$transaction(async (tx) => {
+    await assertCashDocLines(tx, orgId, input.bankAccountId, lines, "payment");
+
     const accounts = await tx.account.findMany({
       where: { orgId, id: { in: lines.map((l) => l.accountId) } },
       select: { id: true, isControl: true },

@@ -5,8 +5,14 @@ import { accountsByType } from "@/lib/accounts";
 import { listParties } from "@/lib/parties";
 import { PurchaseInvoiceForm } from "@/components/PurchaseInvoiceForm";
 
-export default async function NewPurchaseInvoicePage() {
+export default async function NewPurchaseInvoicePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ partyId?: string }>;
+}) {
+  const { partyId } = await searchParams;
   const ctx = await requireContext();
+  const today = new Date().toISOString().slice(0, 10);
   const [suppliers, expense, asset] = await Promise.all([
     listParties(ctx.orgId, "supplier"),
     accountsByType(ctx.orgId, "EXPENSE"),
@@ -36,6 +42,18 @@ export default async function NewPurchaseInvoicePage() {
 
       <PurchaseInvoiceForm
         currency={ctx.baseCurrency}
+        defaults={
+          partyId
+            ? {
+                partyId,
+                supplierRef: "",
+                date: today,
+                dueDate: "",
+                notes: "",
+                lines: [],
+              }
+            : undefined
+        }
         suppliers={suppliers.map((s) => ({ id: s.id, label: s.name }))}
         expenseAccounts={accounts.map((a) => ({
           id: a.id,

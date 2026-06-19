@@ -8,7 +8,7 @@ import {
   inventoryAccount,
   cogsAccount,
 } from "@/lib/accounts";
-import { DocumentError } from "@/lib/documents";
+import { DocumentError, assertCashDocLines } from "@/lib/documents";
 
 type LineInput = { accountId: string; amount: bigint; memo?: string | null };
 
@@ -128,6 +128,8 @@ export async function updateReceipt(
   const total = lines.reduce((s, l) => s + l.amount, 0n);
 
   return prisma.$transaction(async (tx) => {
+    await assertCashDocLines(tx, orgId, input.bankAccountId, lines, "receipt");
+
     const controlIds = await controlIdsFor(
       tx,
       orgId,
@@ -202,6 +204,8 @@ export async function updatePayment(
   const total = lines.reduce((s, l) => s + l.amount, 0n);
 
   return prisma.$transaction(async (tx) => {
+    await assertCashDocLines(tx, orgId, input.bankAccountId, lines, "payment");
+
     const controlIds = await controlIdsFor(
       tx,
       orgId,

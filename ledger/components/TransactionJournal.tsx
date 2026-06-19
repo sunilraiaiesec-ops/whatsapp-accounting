@@ -21,11 +21,11 @@ export function TransactionJournal({
   const totalCredit = lines.reduce((s, l) => s + l.credit, 0n);
 
   return (
-    <section className="mt-6">
-      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">
+    <section className="mt-6 print:hidden">
+      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
         Transaction Journal
       </h2>
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div className="card-surface overflow-hidden">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">

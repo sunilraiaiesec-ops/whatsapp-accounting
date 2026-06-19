@@ -8,9 +8,15 @@ import { formatAmount } from "@/lib/money";
 import { SalesInvoiceForm } from "@/components/SalesInvoiceForm";
 import { PageHeader } from "@/components/ui/PageHeader";
 
-export default async function NewSalesInvoicePage() {
+export default async function NewSalesInvoicePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ partyId?: string }>;
+}) {
+  const { partyId } = await searchParams;
   const ctx = await requireContext();
   const t = await getTranslations("salesInvoices");
+  const today = new Date().toISOString().slice(0, 10);
 
   const [customers, income, items] = await Promise.all([
     listParties(ctx.orgId, "customer"),
@@ -31,6 +37,18 @@ export default async function NewSalesInvoicePage() {
 
       <SalesInvoiceForm
         currency={ctx.baseCurrency}
+        defaults={
+          partyId
+            ? {
+                partyId,
+                reference: "",
+                date: today,
+                dueDate: "",
+                notes: "",
+                lines: [],
+              }
+            : undefined
+        }
         customers={customers.map((c) => ({ id: c.id, label: c.name }))}
         incomeAccounts={income.map((a) => ({
           id: a.id,

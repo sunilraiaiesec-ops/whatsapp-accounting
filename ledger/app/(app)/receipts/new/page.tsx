@@ -2,15 +2,21 @@ import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 
 import { requireContext } from "@/lib/auth/current";
-import { accountsByType, bankAndCashAccounts, receiptCounterpartAccounts } from "@/lib/accounts";
+import { bankAndCashAccounts, receiptCounterpartAccounts } from "@/lib/accounts";
 import { listParties } from "@/lib/parties";
 import { createReceiptAction } from "@/app/actions/documents";
 import { CashDocForm } from "@/components/CashDocForm";
 
-export default async function NewReceiptPage() {
+export default async function NewReceiptPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ partyId?: string }>;
+}) {
+  const { partyId } = await searchParams;
   const ctx = await requireContext();
   const t = await getTranslations("receipts");
   const tn = await getTranslations("nav");
+  const today = new Date().toISOString().slice(0, 10);
 
   const [banks, accounts, parties] = await Promise.all([
     bankAndCashAccounts(ctx.orgId),
@@ -19,7 +25,9 @@ export default async function NewReceiptPage() {
   ]);
 
   const defaultLine =
-    accounts.find((a) => a.subtype === "sales") ?? accounts[0];
+    accounts.find((a) => a.subtype === "receivable") ??
+    accounts.find((a) => a.subtype === "sales") ??
+    accounts[0];
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -40,6 +48,18 @@ export default async function NewReceiptPage() {
           label: `${a.code} — ${a.name}`,
         }))}
         defaultLineAccountId={defaultLine?.id ?? ""}
+        defaults={
+          partyId
+            ? {
+                partyId,
+                date: today,
+                bankAccountId: "",
+                reference: "",
+                description: "",
+                lines: [],
+              }
+            : undefined
+        }
       />
     </div>
   );

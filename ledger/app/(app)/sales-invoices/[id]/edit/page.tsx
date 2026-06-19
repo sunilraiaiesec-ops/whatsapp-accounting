@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { requireContext } from "@/lib/auth/current";
@@ -8,6 +7,7 @@ import { listParties } from "@/lib/parties";
 import { listInventoryItems } from "@/lib/inventory";
 import { formatAmount } from "@/lib/money";
 import { SalesInvoiceForm } from "@/components/SalesInvoiceForm";
+import { PageHeader } from "@/components/ui/PageHeader";
 
 export default async function EditSalesInvoicePage({
   params,
@@ -29,10 +29,12 @@ export default async function EditSalesInvoicePage({
 
   return (
     <div className="mx-auto max-w-4xl">
-      <Link href={`/sales-invoices/${id}`} className="text-sm text-slate-500 hover:text-slate-900">
-        ← Back to invoice
-      </Link>
-      <h1 className="mt-2 text-2xl font-semibold">Edit Sales Invoice {invoice.number}</h1>
+      <PageHeader
+        title={`Edit ${invoice.number}`}
+        subtitle={`Update invoice for ${invoice.party.name}.`}
+        backHref={`/sales-invoices/${id}`}
+        backLabel="View invoice"
+      />
 
       <SalesInvoiceForm
         documentId={invoice.id}

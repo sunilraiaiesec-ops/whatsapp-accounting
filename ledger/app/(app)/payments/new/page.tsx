@@ -7,10 +7,16 @@ import { listParties } from "@/lib/parties";
 import { createPaymentAction } from "@/app/actions/documents";
 import { CashDocForm } from "@/components/CashDocForm";
 
-export default async function NewPaymentPage() {
+export default async function NewPaymentPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ partyId?: string }>;
+}) {
+  const { partyId } = await searchParams;
   const ctx = await requireContext();
   const t = await getTranslations("payments");
   const tn = await getTranslations("nav");
+  const today = new Date().toISOString().slice(0, 10);
 
   const [banks, accounts, parties] = await Promise.all([
     bankAndCashAccounts(ctx.orgId),
@@ -19,7 +25,9 @@ export default async function NewPaymentPage() {
   ]);
 
   const defaultLine =
-    accounts.find((a) => a.code === "6000") ?? accounts[0];
+    accounts.find((a) => a.subtype === "payable") ??
+    accounts.find((a) => a.code === "6000") ??
+    accounts[0];
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -40,6 +48,18 @@ export default async function NewPaymentPage() {
           label: `${a.code} — ${a.name}`,
         }))}
         defaultLineAccountId={defaultLine?.id ?? ""}
+        defaults={
+          partyId
+            ? {
+                partyId,
+                date: today,
+                bankAccountId: "",
+                reference: "",
+                description: "",
+                lines: [],
+              }
+            : undefined
+        }
       />
     </div>
   );
