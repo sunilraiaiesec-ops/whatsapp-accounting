@@ -55,6 +55,32 @@
     "searchPlaceholder": "Clients, factures, encaissements…",
     "searchSoon": "Recherche bientôt disponible"
   },
+  "create": {
+    "title": "Créer",
+    "close": "Fermer le menu Créer",
+    "sections": {
+      "customers": "Clients",
+      "suppliers": "Fournisseurs",
+      "accounting": "Comptabilité & divers"
+    },
+    "items": {
+      "salesInvoice": "Facture client",
+      "receivePayment": "Encaissement",
+      "creditNote": "Avoir client",
+      "addCustomer": "Ajouter un client",
+      "salesOrder": "Commande client",
+      "purchaseInvoice": "Facture fournisseur",
+      "payment": "Décaissement",
+      "debitNote": "Avoir fournisseur",
+      "goodsReceipt": "Entrée de stock",
+      "addSupplier": "Ajouter un fournisseur",
+      "journalEntry": "Écriture au journal",
+      "transfer": "Virement",
+      "inventoryItem": "Article de stock",
+      "writeOff": "Perte de stock",
+      "bankAccount": "Compte banque ou caisse"
+    }
+  },
   "auth": {
     "signIn": "Connexion",
     "signInSubtitle": "Bon retour dans vos livres comptables.",

@@ -55,6 +55,32 @@
     "searchPlaceholder": "Find customers, invoices, receipts…",
     "searchSoon": "Search coming soon"
   },
+  "create": {
+    "title": "Create new",
+    "close": "Close create menu",
+    "sections": {
+      "customers": "Customers",
+      "suppliers": "Suppliers",
+      "accounting": "Accounting & other"
+    },
+    "items": {
+      "salesInvoice": "Invoice",
+      "receivePayment": "Receive payment",
+      "creditNote": "Credit note",
+      "addCustomer": "Add customer",
+      "salesOrder": "Sales order",
+      "purchaseInvoice": "Bill",
+      "payment": "Payment",
+      "debitNote": "Debit note",
+      "goodsReceipt": "Goods receipt",
+      "addSupplier": "Add supplier",
+      "journalEntry": "Journal entry",
+      "transfer": "Transfer",
+      "inventoryItem": "Inventory item",
+      "writeOff": "Inventory write-off",
+      "bankAccount": "Bank or cash account"
+    }
+  },
   "auth": {
     "signIn": "Sign in",
     "signInSubtitle": "Welcome back to your books.",

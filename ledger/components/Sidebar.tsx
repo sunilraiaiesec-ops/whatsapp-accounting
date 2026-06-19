@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 
 import { logoutAction } from "@/app/actions/auth";
 import { BrandLogo } from "@/components/BrandLogo";
+import { CreateMenu } from "@/components/CreateMenu";
 import type { SidebarCounts } from "@/lib/sidebar";
 
 type NavItem = {
@@ -134,14 +135,7 @@ export function Sidebar({
       </div>
 
       <div className="px-3 pb-2">
-        <Link
-          href="/receipts/new"
-          onClick={onNavigate}
-          className="btn-brand w-full gap-2"
-        >
-          <span className="text-lg leading-none">+</span>
-          {tc("create")}
-        </Link>
+        <CreateMenu onNavigate={onNavigate} />
       </div>
 
       <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2">
