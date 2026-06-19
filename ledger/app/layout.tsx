@@ -11,10 +11,6 @@ export async function generateMetadata(): Promise<Metadata> {
     description: t("description"),
     metadataBase: new URL("https://books.bantoobooks.com"),
     applicationName: t("title"),
-    icons: {
-      icon: [{ url: "/icon", type: "image/png" }],
-      apple: [{ url: "/apple-icon", type: "image/png" }],
-    },
   };
 }
 
