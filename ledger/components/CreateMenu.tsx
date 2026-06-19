@@ -7,6 +7,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { createPortal } from "react-dom";
 import { useTranslations } from "next-intl";
@@ -72,6 +73,14 @@ type PanelLayout = {
 };
 
 const HOVER_CLOSE_DELAY = 300;
+
+function useClientMounted() {
+  return useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
+}
 
 function computePanelLayout(button: HTMLButtonElement): PanelLayout {
   const rect = button.getBoundingClientRect();
@@ -179,7 +188,7 @@ export function CreateMenu({ onNavigate }: { onNavigate?: () => void }) {
       typeof window !== "undefined" &&
       window.matchMedia("(hover: hover) and (pointer: fine)").matches,
   );
-  const [mounted, setMounted] = useState(false);
+  const mounted = useClientMounted();
   const [layout, setLayout] = useState<PanelLayout | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -229,10 +238,9 @@ export function CreateMenu({ onNavigate }: { onNavigate?: () => void }) {
   }, [clearCloseTimer, isPointerOverMenu]);
 
   useEffect(() => {
-    setMounted(true);
     const media = window.matchMedia("(hover: hover) and (pointer: fine)");
-    function sync() {
-      setHoverCapable(media.matches);
+    function sync(event: MediaQueryListEvent) {
+      setHoverCapable(event.matches);
     }
     media.addEventListener("change", sync);
     return () => media.removeEventListener("change", sync);
@@ -243,10 +251,7 @@ export function CreateMenu({ onNavigate }: { onNavigate?: () => void }) {
   }, [clearCloseTimer]);
 
   useLayoutEffect(() => {
-    if (!open) {
-      setLayout(null);
-      return;
-    }
+    if (!open) return;
     refreshLayout();
   }, [open, refreshLayout]);
 
