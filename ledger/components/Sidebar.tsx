@@ -134,7 +134,7 @@ export function Sidebar({
         </button>
       </div>
 
-      <div className="px-3 pb-2">
+      <div className="overflow-visible px-3 pb-2">
         <CreateMenu onNavigate={onNavigate} />
       </div>
 
