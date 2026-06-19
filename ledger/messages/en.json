@@ -61,7 +61,7 @@
     "sections": {
       "customers": "Customers",
       "suppliers": "Suppliers",
-      "accounting": "Accounting & other"
+      "other": "Other"
     },
     "items": {
       "salesInvoice": "Invoice",

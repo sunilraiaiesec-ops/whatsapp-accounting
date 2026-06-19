@@ -61,7 +61,7 @@
     "sections": {
       "customers": "Clients",
       "suppliers": "Fournisseurs",
-      "accounting": "Comptabilité & divers"
+      "other": "Autre"
     },
     "items": {
       "salesInvoice": "Facture client",

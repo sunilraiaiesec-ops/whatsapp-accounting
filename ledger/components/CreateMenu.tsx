@@ -37,7 +37,7 @@ const SECTIONS: CreateSection[] = [
     ],
   },
   {
-    titleKey: "accounting",
+    titleKey: "other",
     items: [
       { labelKey: "journalEntry", href: "/journal/new" },
       { labelKey: "transfer", href: "/inter-account-transfers/new" },
@@ -60,11 +60,7 @@ export function CreateMenu({ onNavigate }: { onNavigate?: () => void }) {
       if (event.key === "Escape") setOpen(false);
     }
     document.addEventListener("keydown", onKeyDown);
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      document.body.style.overflow = "";
-    };
+    return () => document.removeEventListener("keydown", onKeyDown);
   }, [open]);
 
   function close() {
@@ -85,7 +81,7 @@ export function CreateMenu({ onNavigate }: { onNavigate?: () => void }) {
         onClick={() => setOpen((value) => !value)}
         className={`btn-brand w-full gap-2 ${open ? "ring-2 ring-[var(--brand)]/40" : ""}`}
       >
-        <span className="text-lg leading-none">{open ? "×" : "+"}</span>
+        <span className="text-lg leading-none">+</span>
         {tc("create")}
       </button>
 
@@ -94,7 +90,7 @@ export function CreateMenu({ onNavigate }: { onNavigate?: () => void }) {
           <button
             type="button"
             aria-label={t("close")}
-            className="fixed inset-0 z-[60] bg-slate-900/30 md:left-56 lg:left-60"
+            className="fixed inset-0 z-[60] bg-slate-900/25 md:left-56 lg:left-60"
             onClick={close}
           />
 
@@ -102,35 +98,35 @@ export function CreateMenu({ onNavigate }: { onNavigate?: () => void }) {
             ref={panelRef}
             role="dialog"
             aria-label={t("title")}
-            className="fixed left-0 top-0 z-[70] flex h-full w-full flex-col overflow-hidden border-r border-[var(--border)] bg-white shadow-2xl md:left-56 md:max-w-3xl lg:left-60"
+            className="fixed z-[70] flex max-h-[min(34rem,calc(100vh-5rem))] w-[min(100vw-1.5rem,52rem)] flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-white shadow-2xl left-3 right-3 top-[4.5rem] mx-auto md:left-56 md:right-auto md:top-[3.75rem] md:mx-0 lg:left-60"
           >
-            <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
-              <h2 className="text-lg font-semibold text-slate-900">{t("title")}</h2>
+            <div className="flex items-center justify-between border-b border-[var(--border)] bg-slate-50/80 px-6 py-3.5">
+              <h2 className="text-base font-semibold text-slate-900">{t("title")}</h2>
               <button
                 type="button"
                 aria-label={t("close")}
                 onClick={close}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-white hover:text-slate-800"
               >
                 ✕
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-5">
-              <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="overflow-y-auto">
+              <div className="divide-y divide-[var(--border)] md:grid md:grid-cols-3 md:divide-x md:divide-y-0">
                 {SECTIONS.map((section) => (
-                  <section key={section.titleKey}>
-                    <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-500">
+                  <section key={section.titleKey} className="px-6 py-5 md:py-6">
+                    <h3 className="mb-3 text-sm font-semibold text-slate-800">
                       {t(`sections.${section.titleKey}`)}
                     </h3>
-                    <ul className="space-y-0.5">
+                    <ul className="space-y-1">
                       {section.items.map((item) =>
                         item.soon || !item.href ? (
                           <li key={item.labelKey}>
-                            <span className="flex items-center justify-between rounded-lg px-3 py-2.5 text-sm text-slate-400">
-                              {t(`items.${item.labelKey}`)}
+                            <span className="flex items-center justify-between gap-3 rounded-lg px-2 py-2.5 text-[15px] leading-snug text-slate-400">
+                              <span>{t(`items.${item.labelKey}`)}</span>
                               {item.soon ? (
-                                <span className="text-[10px] font-semibold uppercase">
+                                <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide">
                                   {tc("soon")}
                                 </span>
                               ) : null}
@@ -141,7 +137,7 @@ export function CreateMenu({ onNavigate }: { onNavigate?: () => void }) {
                             <Link
                               href={item.href}
                               onClick={handleNavigate}
-                              className="block rounded-lg px-3 py-2.5 text-sm font-medium text-slate-800 transition hover:bg-[var(--brand)]/10 hover:text-[var(--brand)]"
+                              className="block rounded-lg px-2 py-2.5 text-[15px] leading-snug text-slate-700 transition hover:bg-[var(--brand)]/10 hover:text-[var(--brand)]"
                             >
                               {t(`items.${item.labelKey}`)}
                             </Link>
