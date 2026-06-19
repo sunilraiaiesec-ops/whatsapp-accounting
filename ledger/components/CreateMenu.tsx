@@ -1,7 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
 import { useTranslations } from "next-intl";
 
 type CreateItem = {
@@ -47,6 +54,51 @@ const SECTIONS: CreateSection[] = [
     ],
   },
 ];
+
+type PanelLayout = {
+  panelTop: number;
+  panelLeft: number;
+  bridgeTop: number;
+  bridgeLeft: number;
+  bridgeWidth: number;
+  bridgeHeight: number;
+};
+
+const HOVER_CLOSE_DELAY = 300;
+
+function computePanelLayout(button: HTMLButtonElement): PanelLayout {
+  const rect = button.getBoundingClientRect();
+  const panelWidth = Math.min(window.innerWidth - 24, 832);
+  const panelHeight = Math.min(window.innerHeight - 24, 544);
+  const besideLeft = rect.right;
+  const fitsBeside =
+    window.innerWidth >= 768 && besideLeft + panelWidth <= window.innerWidth - 12;
+
+  let panelTop: number;
+  let panelLeft: number;
+
+  if (fitsBeside) {
+    panelTop = rect.top;
+    panelLeft = besideLeft;
+  } else {
+    panelTop = rect.bottom + 8;
+    panelLeft = Math.max(12, Math.min(rect.left, window.innerWidth - panelWidth - 12));
+  }
+
+  const bridgeLeft = Math.min(rect.right - 16, panelLeft);
+  const bridgeRight = Math.max(rect.right + 8, panelLeft + 32);
+  const bridgeTop = Math.min(rect.top, panelTop);
+  const bridgeBottom = Math.max(rect.bottom, panelTop + panelHeight);
+
+  return {
+    panelTop,
+    panelLeft,
+    bridgeTop,
+    bridgeLeft,
+    bridgeWidth: Math.max(bridgeRight - bridgeLeft, 24),
+    bridgeHeight: Math.max(bridgeBottom - bridgeTop, rect.height),
+  };
+}
 
 function CreatePanel({
   onClose,
@@ -115,20 +167,116 @@ function CreatePanel({
 
 export function CreateMenu({ onNavigate }: { onNavigate?: () => void }) {
   const [open, setOpen] = useState(false);
-  const [hoverCapable, setHoverCapable] = useState(false);
+  const [hoverCapable, setHoverCapable] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.matchMedia("(hover: hover) and (pointer: fine)").matches,
+  );
+  const [mounted, setMounted] = useState(false);
+  const [layout, setLayout] = useState<PanelLayout | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const bridgeRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const closeTimerRef = useRef<number | null>(null);
   const t = useTranslations("create");
   const tc = useTranslations("common");
 
+  const isPointerOverMenu = useCallback(() => {
+    return Boolean(
+      rootRef.current?.matches(":hover") ||
+        bridgeRef.current?.matches(":hover") ||
+        panelRef.current?.matches(":hover"),
+    );
+  }, []);
+
+  const refreshLayout = useCallback(() => {
+    const button = buttonRef.current;
+    if (!button) return;
+    setLayout(computePanelLayout(button));
+  }, []);
+
+  const clearCloseTimer = useCallback(() => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  }, []);
+
+  const openMenu = useCallback(() => {
+    clearCloseTimer();
+    const button = buttonRef.current;
+    if (button) {
+      setLayout(computePanelLayout(button));
+    }
+    setOpen(true);
+  }, [clearCloseTimer]);
+
+  const scheduleClose = useCallback(() => {
+    clearCloseTimer();
+    closeTimerRef.current = window.setTimeout(() => {
+      if (!isPointerOverMenu()) {
+        setOpen(false);
+      }
+    }, HOVER_CLOSE_DELAY);
+  }, [clearCloseTimer, isPointerOverMenu]);
+
   useEffect(() => {
+    setMounted(true);
     const media = window.matchMedia("(hover: hover) and (pointer: fine)");
     function sync() {
       setHoverCapable(media.matches);
     }
-    sync();
     media.addEventListener("change", sync);
     return () => media.removeEventListener("change", sync);
   }, []);
+
+  useEffect(() => {
+    return () => clearCloseTimer();
+  }, [clearCloseTimer]);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setLayout(null);
+      return;
+    }
+    refreshLayout();
+  }, [open, refreshLayout]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function onLayoutChange() {
+      refreshLayout();
+    }
+
+    window.addEventListener("resize", onLayoutChange);
+    window.addEventListener("scroll", onLayoutChange, true);
+    return () => {
+      window.removeEventListener("resize", onLayoutChange);
+      window.removeEventListener("scroll", onLayoutChange, true);
+    };
+  }, [open, refreshLayout]);
+
+  useEffect(() => {
+    if (!open || !hoverCapable) return;
+
+    function onPointerMove(event: PointerEvent) {
+      const target = event.target as Node;
+      if (
+        rootRef.current?.contains(target) ||
+        bridgeRef.current?.contains(target) ||
+        panelRef.current?.contains(target)
+      ) {
+        clearCloseTimer();
+        return;
+      }
+      scheduleClose();
+    }
+
+    document.addEventListener("pointermove", onPointerMove);
+    return () => document.removeEventListener("pointermove", onPointerMove);
+  }, [open, hoverCapable, clearCloseTimer, scheduleClose]);
 
   useEffect(() => {
     if (!open) return;
@@ -142,7 +290,11 @@ export function CreateMenu({ onNavigate }: { onNavigate?: () => void }) {
   useEffect(() => {
     if (!open || hoverCapable) return;
     function onPointerDown(event: PointerEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (
+        !rootRef.current?.contains(target) &&
+        !panelRef.current?.contains(target)
+      ) {
         setOpen(false);
       }
     }
@@ -151,6 +303,7 @@ export function CreateMenu({ onNavigate }: { onNavigate?: () => void }) {
   }, [open, hoverCapable]);
 
   function close() {
+    clearCloseTimer();
     setOpen(false);
   }
 
@@ -159,33 +312,55 @@ export function CreateMenu({ onNavigate }: { onNavigate?: () => void }) {
     onNavigate?.();
   }
 
-  return (
-    <div
-      ref={rootRef}
-      className="relative"
-      onMouseEnter={hoverCapable ? () => setOpen(true) : undefined}
-      onMouseLeave={hoverCapable ? () => setOpen(false) : undefined}
-    >
-      <button
-        type="button"
-        aria-expanded={open}
-        aria-haspopup="true"
-        onClick={hoverCapable ? undefined : () => setOpen((value) => !value)}
-        className={`btn-brand w-full gap-2 ${open ? "ring-2 ring-[var(--brand)]/40" : ""}`}
-      >
-        <span className="text-lg leading-none">+</span>
-        {tc("create")}
-      </button>
+  const hoverHandlers = hoverCapable
+    ? { onMouseEnter: openMenu, onMouseLeave: scheduleClose }
+    : undefined;
 
-      {open ? (
+  const panel =
+    open && layout && mounted ? (
+      <>
         <div
+          ref={bridgeRef}
+          aria-hidden
+          className="fixed z-[99]"
+          style={{
+            top: layout.bridgeTop,
+            left: layout.bridgeLeft,
+            width: layout.bridgeWidth,
+            height: layout.bridgeHeight,
+          }}
+          {...hoverHandlers}
+        />
+        <div
+          ref={panelRef}
           role="menu"
           aria-label={t("title")}
-          className="absolute left-0 top-full z-[70] w-full pt-2 md:left-full md:top-0 md:w-auto md:pl-2 md:pt-0"
+          className="fixed z-[100]"
+          style={{ top: layout.panelTop, left: layout.panelLeft }}
+          {...hoverHandlers}
         >
           <CreatePanel onClose={close} onNavigate={handleNavigate} />
         </div>
-      ) : null}
-    </div>
+      </>
+    ) : null;
+
+  return (
+    <>
+      <div ref={rootRef} className="relative" {...hoverHandlers}>
+        <button
+          ref={buttonRef}
+          type="button"
+          aria-expanded={open}
+          aria-haspopup="true"
+          onClick={hoverCapable ? undefined : () => setOpen((value) => !value)}
+          className={`btn-brand w-full gap-2 ${open ? "ring-2 ring-[var(--brand)]/40" : ""}`}
+        >
+          <span className="text-lg leading-none">+</span>
+          {tc("create")}
+        </button>
+      </div>
+
+      {panel && mounted ? createPortal(panel, document.body) : null}
+    </>
   );
 }
