@@ -1,26 +1,33 @@
 import Link from "next/link";
+import { getTranslations } from "next-intl/server";
 
 import { requireContext } from "@/lib/auth/current";
-import { listAccounts, bankAndCashAccounts } from "@/lib/accounts";
+import { bankAndCashAccounts, paymentCounterpartAccounts } from "@/lib/accounts";
 import { listParties } from "@/lib/parties";
 import { createPaymentAction } from "@/app/actions/documents";
 import { CashDocForm } from "@/components/CashDocForm";
 
 export default async function NewPaymentPage() {
   const ctx = await requireContext();
+  const t = await getTranslations("payments");
+  const tn = await getTranslations("nav");
+
   const [banks, accounts, parties] = await Promise.all([
     bankAndCashAccounts(ctx.orgId),
-    listAccounts(ctx.orgId),
+    paymentCounterpartAccounts(ctx.orgId),
     listParties(ctx.orgId),
   ]);
+
+  const defaultLine =
+    accounts.find((a) => a.code === "6000") ?? accounts[0];
 
   return (
     <div className="mx-auto max-w-3xl">
       <Link href="/payments" className="text-sm text-slate-500 hover:text-slate-900">
-        ← Back to payments
+        ← {tn("payments")}
       </Link>
-      <h1 className="mt-2 text-2xl font-semibold">New Payment</h1>
-      <p className="text-sm text-slate-500">Record money paid out.</p>
+      <h1 className="mt-2 text-2xl font-semibold">{t("newTitle")}</h1>
+      <p className="text-sm text-slate-500">{t("newSubtitle")}</p>
 
       <CashDocForm
         mode="payment"
@@ -32,6 +39,7 @@ export default async function NewPaymentPage() {
           id: a.id,
           label: `${a.code} — ${a.name}`,
         }))}
+        defaultLineAccountId={defaultLine?.id ?? ""}
       />
     </div>
   );

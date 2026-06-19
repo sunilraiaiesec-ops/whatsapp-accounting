@@ -4,10 +4,13 @@ import { notFound } from "next/navigation";
 import { requireContext } from "@/lib/auth/current";
 import { getReceipt } from "@/lib/documents";
 import { updateReceiptAction } from "@/app/actions/document-update";
-import { listAccounts, bankAndCashAccounts } from "@/lib/accounts";
 import { listParties } from "@/lib/parties";
 import { formatAmount } from "@/lib/money";
 import { CashDocForm } from "@/components/CashDocForm";
+import {
+  bankAndCashAccounts,
+  receiptCounterpartAccounts,
+} from "@/lib/accounts";
 
 export default async function EditReceiptPage({
   params,
@@ -22,7 +25,7 @@ export default async function EditReceiptPage({
 
   const [banks, accounts, parties] = await Promise.all([
     bankAndCashAccounts(ctx.orgId),
-    listAccounts(ctx.orgId),
+    receiptCounterpartAccounts(ctx.orgId),
     listParties(ctx.orgId),
   ]);
 

@@ -1,39 +1,44 @@
 import Link from "next/link";
+import { getTranslations } from "next-intl/server";
 
 import { requireContext } from "@/lib/auth/current";
 import { formatAmount } from "@/lib/money";
 import { balanceSheet, profitAndLoss } from "@/lib/reports";
 import { getSidebarCounts } from "@/lib/sidebar";
 
-function greeting(firstName: string) {
-  const hour = new Date().getHours();
-  if (hour < 12) return `Good morning, ${firstName}!`;
-  if (hour < 17) return `Good afternoon, ${firstName}!`;
-  return `Good evening, ${firstName}!`;
-}
-
-const CATEGORIES = [
-  { label: "Accounting", href: "/reports", emoji: "📊" },
-  { label: "Expenses & Bills", href: "/payments", emoji: "💳" },
-  { label: "Sales & Get Paid", href: "/sales-invoices", emoji: "💰" },
-  { label: "Customers", href: "/customers", emoji: "👥" },
-  { label: "Inventory", href: "/inventory-items", emoji: "📦" },
-  { label: "Purchases", href: "/purchase-invoices", emoji: "🛒" },
-];
-
-const CREATE_ACTIONS = [
-  { label: "Add customer", href: "/customers" },
-  { label: "Create invoice", href: "/sales-invoices/new" },
-  { label: "Record receipt", href: "/receipts/new" },
-  { label: "Record payment", href: "/payments/new" },
-  { label: "Add supplier", href: "/suppliers" },
-  { label: "Journal entry", href: "/journal/new" },
-];
-
 export default async function DashboardPage() {
   const ctx = await requireContext();
+  const t = await getTranslations("dashboard");
+  const tc = await getTranslations("common");
+  const tn = await getTranslations("nav");
   const cur = ctx.baseCurrency;
   const firstName = ctx.userName.split(/\s+/)[0] ?? ctx.userName;
+
+  const hour = new Date().getHours();
+  const greeting =
+    hour < 12
+      ? t("greetingMorning", { name: firstName })
+      : hour < 17
+        ? t("greetingAfternoon", { name: firstName })
+        : t("greetingEvening", { name: firstName });
+
+  const categories = [
+    { label: t("categoryAccounting"), href: "/reports", emoji: "📊" },
+    { label: t("categoryExpenses"), href: "/payments", emoji: "💳" },
+    { label: t("categorySales"), href: "/sales-invoices", emoji: "💰" },
+    { label: t("categoryCustomers"), href: "/customers", emoji: "👥" },
+    { label: t("categoryInventory"), href: "/inventory-items", emoji: "📦" },
+    { label: t("categoryPurchases"), href: "/purchase-invoices", emoji: "🛒" },
+  ];
+
+  const createActions = [
+    { label: t("addCustomer"), href: "/customers" },
+    { label: t("createInvoice"), href: "/sales-invoices/new" },
+    { label: t("recordReceipt"), href: "/receipts/new" },
+    { label: t("recordPayment"), href: "/payments/new" },
+    { label: t("addSupplier"), href: "/suppliers" },
+    { label: t("journalEntry"), href: "/journal/new" },
+  ];
 
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -54,11 +59,11 @@ export default async function DashboardPage() {
   return (
     <div className="mx-auto max-w-6xl">
       <h1 className="text-2xl font-semibold tracking-tight text-slate-900 md:text-3xl">
-        {greeting(firstName)}
+        {greeting}
       </h1>
 
       <div className="mt-5 flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {CATEGORIES.map((c) => (
+        {categories.map((c) => (
           <Link key={c.href} href={c.href} className="pill-category">
             <span aria-hidden>{c.emoji}</span>
             {c.label}
@@ -68,13 +73,13 @@ export default async function DashboardPage() {
 
       <section className="mt-8">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-800">Create actions</h2>
+          <h2 className="text-sm font-semibold text-slate-800">{t("createActions")}</h2>
           <Link href="/receipts/new" className="text-sm font-medium text-[var(--brand)] hover:underline">
-            Show all
+            {tc("showAll")}
           </Link>
         </div>
         <div className="flex flex-wrap gap-2">
-          {CREATE_ACTIONS.map((a) => (
+          {createActions.map((a) => (
             <Link key={a.href} href={a.href} className="pill-action">
               <span className="text-[var(--brand)]">+</span>
               {a.label}
@@ -85,15 +90,13 @@ export default async function DashboardPage() {
 
       <section className="mt-10">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-slate-900">
-            Business at a glance
-          </h2>
-          <span className="text-xs text-[var(--muted)]">This month</span>
+          <h2 className="text-lg font-semibold text-slate-900">{t("glanceTitle")}</h2>
+          <span className="text-xs text-[var(--muted)]">{tc("thisMonth")}</span>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          <Widget title="Profit & Loss">
-            <p className="text-xs text-[var(--muted)]">Net profit for the month</p>
+          <Widget title={t("profitLoss")}>
+            <p className="text-xs text-[var(--muted)]">{t("netProfitMonth")}</p>
             <p
               className={`mt-1 text-3xl font-bold tracking-tight ${
                 pnl.netProfit >= 0n ? "text-slate-900" : "text-red-600"
@@ -103,52 +106,48 @@ export default async function DashboardPage() {
               <span className="text-lg font-normal text-slate-400">{cur}</span>
             </p>
             <div className="mt-4 flex h-3 overflow-hidden rounded-full bg-slate-100">
-              <div
-                className="bg-[var(--brand)]"
-                style={{ width: `${incomePct}%` }}
-                title="Income"
-              />
-              <div
-                className="bg-slate-400"
-                style={{ width: `${expensePct}%` }}
-                title="Expenses"
-              />
+              <div className="bg-[var(--brand)]" style={{ width: `${incomePct}%` }} title={t("income")} />
+              <div className="bg-slate-400" style={{ width: `${expensePct}%` }} title={t("expenses")} />
             </div>
             <div className="mt-3 flex justify-between text-xs text-[var(--muted)]">
-              <span>Income {formatAmount(pnl.totalIncome, cur)}</span>
-              <span>Expenses {formatAmount(pnl.totalExpenses, cur)}</span>
+              <span>
+                {t("income")} {formatAmount(pnl.totalIncome, cur)}
+              </span>
+              <span>
+                {t("expenses")} {formatAmount(pnl.totalExpenses, cur)}
+              </span>
             </div>
           </Widget>
 
-          <Widget title="Balance sheet">
+          <Widget title={t("balanceSheet")}>
             <div className="space-y-4">
-              <MetricRow label="Total assets" value={formatAmount(bs.totalAssets, cur)} unit={cur} />
+              <MetricRow label={t("totalAssets")} value={formatAmount(bs.totalAssets, cur)} unit={cur} />
               <MetricRow
-                label="Total liabilities"
+                label={t("totalLiabilities")}
                 value={formatAmount(bs.totalLiabilities, cur)}
                 unit={cur}
               />
-              <MetricRow label="Equity" value={formatAmount(bs.totalEquity, cur)} unit={cur} />
+              <MetricRow label={t("equity")} value={formatAmount(bs.totalEquity, cur)} unit={cur} />
             </div>
             <p className="mt-4 text-sm">
               <span className={bs.balanced ? "text-[var(--brand)]" : "text-red-600"}>
-                {bs.balanced ? "Books are balanced ✓" : "Out of balance ✗"}
+                {bs.balanced ? t("balanced") : t("unbalanced")}
               </span>
             </p>
           </Widget>
 
-          <Widget title="Activity">
+          <Widget title={t("activity")}>
             <div className="grid grid-cols-2 gap-3">
-              <CountPill label="Customers" value={counts["/customers"] ?? 0} />
-              <CountPill label="Receipts" value={counts["/receipts"] ?? 0} />
-              <CountPill label="Payments" value={counts["/payments"] ?? 0} />
-              <CountPill label="Invoices" value={counts["/sales-invoices"] ?? 0} />
+              <CountPill label={tn("customers")} value={counts["/customers"] ?? 0} />
+              <CountPill label={tn("receipts")} value={counts["/receipts"] ?? 0} />
+              <CountPill label={tn("payments")} value={counts["/payments"] ?? 0} />
+              <CountPill label={t("invoices")} value={counts["/sales-invoices"] ?? 0} />
             </div>
             <Link
               href="/reports/profit-loss"
               className="mt-4 inline-block text-sm font-medium text-[var(--brand)] hover:underline"
             >
-              View full reports →
+              {t("viewReports")}
             </Link>
           </Widget>
         </div>

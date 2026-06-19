@@ -1,16 +1,22 @@
 import type { Metadata, Viewport } from "next";
+import { NextIntlClientProvider } from "next-intl";
+import { getLocale, getMessages, getTranslations } from "next-intl/server";
+
 import "./globals.css";
 
-export const metadata: Metadata = {
-  title: "Bantoo Books",
-  description: "Double-entry accounting for your business",
-  metadataBase: new URL("https://books.bantoobooks.com"),
-  applicationName: "Bantoo Books",
-  icons: {
-    icon: [{ url: "/icon", type: "image/png" }],
-    apple: [{ url: "/apple-icon", type: "image/png" }],
-  },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslations("metadata");
+  return {
+    title: t("title"),
+    description: t("description"),
+    metadataBase: new URL("https://books.bantoobooks.com"),
+    applicationName: t("title"),
+    icons: {
+      icon: [{ url: "/icon", type: "image/png" }],
+      apple: [{ url: "/apple-icon", type: "image/png" }],
+    },
+  };
+}
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -19,15 +25,18 @@ export const viewport: Viewport = {
   themeColor: "#3d6b32",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const locale = await getLocale();
+  const messages = await getMessages();
+
   return (
-    <html lang="en" className="h-full">
+    <html lang={locale} className="h-full">
       <body className="min-h-full bg-slate-50 text-slate-900 antialiased">
-        {children}
+        <NextIntlClientProvider messages={messages}>{children}</NextIntlClientProvider>
       </body>
     </html>
   );

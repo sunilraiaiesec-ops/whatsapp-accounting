@@ -4,7 +4,10 @@ import { notFound } from "next/navigation";
 import { requireContext } from "@/lib/auth/current";
 import { getPayment } from "@/lib/documents";
 import { updatePaymentAction } from "@/app/actions/document-update";
-import { listAccounts, bankAndCashAccounts } from "@/lib/accounts";
+import {
+  bankAndCashAccounts,
+  paymentCounterpartAccounts,
+} from "@/lib/accounts";
 import { listParties } from "@/lib/parties";
 import { formatAmount } from "@/lib/money";
 import { CashDocForm } from "@/components/CashDocForm";
@@ -22,7 +25,7 @@ export default async function EditPaymentPage({
 
   const [banks, accounts, parties] = await Promise.all([
     bankAndCashAccounts(ctx.orgId),
-    listAccounts(ctx.orgId),
+    paymentCounterpartAccounts(ctx.orgId),
     listParties(ctx.orgId),
   ]);
 

@@ -3,8 +3,10 @@
 import { useState } from "react";
 
 import { BrandLogo } from "@/components/BrandLogo";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { Sidebar } from "@/components/Sidebar";
 import type { SidebarCounts } from "@/lib/sidebar";
+import { useTranslations } from "next-intl";
 
 function initials(name: string) {
   return name
@@ -30,6 +32,7 @@ export function AppShell({
   children: React.ReactNode;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const t = useTranslations("nav");
 
   return (
     <div className="flex min-h-screen bg-[var(--background)]">
@@ -55,7 +58,7 @@ export function AppShell({
           <div className="flex items-center gap-3 px-4 py-3 md:gap-4 md:px-6">
             <button
               type="button"
-              aria-label="Open menu"
+              aria-label={t("openMenu")}
               className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[var(--border)] text-slate-700 md:hidden"
               onClick={() => setMenuOpen(true)}
             >
@@ -68,7 +71,7 @@ export function AppShell({
 
             <div className="hidden min-w-0 flex-1 md:block">
               <label className="relative block max-w-xl">
-                <span className="sr-only">Search</span>
+                <span className="sr-only">{t("search")}</span>
                 <svg
                   className="pointer-events-none absolute left-3.5 top-1/2 z-10 -translate-y-1/2 text-slate-400"
                   width="16"
@@ -84,15 +87,16 @@ export function AppShell({
                 </svg>
                 <input
                   type="search"
-                  placeholder="Find customers, invoices, receipts…"
+                  placeholder={t("searchPlaceholder")}
                   className="input-search"
                   disabled
-                  title="Search coming soon"
+                  title={t("searchSoon")}
                 />
               </label>
             </div>
 
             <div className="ml-auto flex items-center gap-3">
+              <LanguageSwitcher />
               <div className="hidden text-right sm:block">
                 <div className="max-w-[180px] truncate text-sm font-semibold text-slate-900">
                   {orgName}

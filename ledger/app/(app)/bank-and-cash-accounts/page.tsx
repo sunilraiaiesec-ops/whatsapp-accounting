@@ -1,3 +1,5 @@
+import { getTranslations } from "next-intl/server";
+
 import { requireContext } from "@/lib/auth/current";
 import { bankAndCashWithBalances } from "@/lib/accounts";
 import { formatAmount } from "@/lib/money";
@@ -5,16 +7,15 @@ import { BankAccountForm } from "@/components/BankAccountForm";
 
 export default async function BankAndCashAccountsPage() {
   const ctx = await requireContext();
+  const t = await getTranslations("bank");
   const cur = ctx.baseCurrency;
   const accounts = await bankAndCashWithBalances(ctx.orgId);
   const total = accounts.reduce((s, a) => s + a.balance, 0n);
 
   return (
     <div>
-      <h1 className="text-2xl font-semibold">Bank and Cash Accounts</h1>
-      <p className="text-sm text-slate-500">
-        Money in your bank and cash accounts, with live balances from the ledger.
-      </p>
+      <h1 className="text-2xl font-semibold">{t("title")}</h1>
+      <p className="text-sm text-slate-500">{t("subtitle")}</p>
 
       <div className="mt-6">
         <BankAccountForm />
@@ -24,9 +25,9 @@ export default async function BankAndCashAccountsPage() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-              <th className="px-4 py-2 font-medium">Account</th>
-              <th className="px-4 py-2 font-medium">Type</th>
-              <th className="px-4 py-2 text-right font-medium">Balance</th>
+              <th className="px-4 py-2 font-medium">{t("account")}</th>
+              <th className="px-4 py-2 font-medium">{t("type")}</th>
+              <th className="px-4 py-2 text-right font-medium">{t("balance")}</th>
             </tr>
           </thead>
           <tbody>
@@ -46,7 +47,7 @@ export default async function BankAndCashAccountsPage() {
           <tfoot>
             <tr className="border-t-2 border-slate-300 bg-slate-50 font-semibold">
               <td className="px-4 py-2" colSpan={2}>
-                Total
+                {t("total")}
               </td>
               <td className="px-4 py-2 text-right tabular-nums">
                 {formatAmount(total, cur)} {cur}

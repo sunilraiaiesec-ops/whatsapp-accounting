@@ -1,50 +1,60 @@
 "use client";
 
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { usePathname } from "next/navigation";
 
-import { BrandLogo } from "@/components/BrandLogo";
 import { logoutAction } from "@/app/actions/auth";
+import { BrandLogo } from "@/components/BrandLogo";
 import type { SidebarCounts } from "@/lib/sidebar";
 
-type NavItem = { href: string; label: string; soon?: boolean; icon: string };
+type NavItem = {
+  href: string;
+  labelKey: string;
+  soon?: boolean;
+  icon: string;
+};
 
 const PINNED: NavItem[] = [
-  { href: "/dashboard", label: "Home", icon: "⌂" },
-  { href: "/reports", label: "Reports", icon: "▤" },
+  { href: "/dashboard", labelKey: "home", icon: "⌂" },
+  { href: "/reports", labelKey: "reports", icon: "▤" },
 ];
 
 const NAV: NavItem[] = [
-  { href: "/bank-and-cash-accounts", label: "Bank & Cash", icon: "◉" },
-  { href: "/receipts", label: "Receipts", icon: "↓" },
-  { href: "/payments", label: "Payments", icon: "↑" },
-  { href: "/inter-account-transfers", label: "Transfers", icon: "⇄" },
-  { href: "/customers", label: "Customers", icon: "👤" },
-  { href: "/sales-invoices", label: "Sales Invoices", icon: "📄" },
-  { href: "/credit-notes", label: "Credit Notes", icon: "↩" },
-  { href: "/suppliers", label: "Suppliers", icon: "🏭" },
-  { href: "/purchase-invoices", label: "Purchase Invoices", icon: "📥" },
-  { href: "/debit-notes", label: "Debit Notes", icon: "↪" },
-  { href: "/goods-receipts", label: "Goods Receipts", icon: "📦" },
-  { href: "/inventory-items", label: "Inventory", icon: "▦" },
-  { href: "/inventory-write-offs", label: "Write-offs", icon: "✕" },
-  { href: "/journal", label: "Journal", icon: "≡" },
-  { href: "/settings", label: "Settings", icon: "⚙" },
-  { href: "/bank-reconciliations", label: "Bank Recon", soon: true, icon: "◎" },
-  { href: "/sales-orders", label: "Sales Orders", soon: true, icon: "🛒" },
-  { href: "/delivery-notes", label: "Delivery Notes", soon: true, icon: "🚚" },
+  { href: "/bank-and-cash-accounts", labelKey: "bankCash", icon: "◉" },
+  { href: "/receipts", labelKey: "receipts", icon: "↓" },
+  { href: "/payments", labelKey: "payments", icon: "↑" },
+  { href: "/inter-account-transfers", labelKey: "transfers", icon: "⇄" },
+  { href: "/customers", labelKey: "customers", icon: "👤" },
+  { href: "/sales-invoices", labelKey: "salesInvoices", icon: "📄" },
+  { href: "/credit-notes", labelKey: "creditNotes", icon: "↩" },
+  { href: "/suppliers", labelKey: "suppliers", icon: "🏭" },
+  { href: "/purchase-invoices", labelKey: "purchaseInvoices", icon: "📥" },
+  { href: "/debit-notes", labelKey: "debitNotes", icon: "↪" },
+  { href: "/goods-receipts", labelKey: "goodsReceipts", icon: "📦" },
+  { href: "/inventory-items", labelKey: "inventory", icon: "▦" },
+  { href: "/inventory-write-offs", labelKey: "writeOffs", icon: "✕" },
+  { href: "/journal", labelKey: "journal", icon: "≡" },
+  { href: "/settings", labelKey: "settings", icon: "⚙" },
+  { href: "/bank-reconciliations", labelKey: "bankRecon", soon: true, icon: "◎" },
+  { href: "/sales-orders", labelKey: "salesOrders", soon: true, icon: "🛒" },
+  { href: "/delivery-notes", labelKey: "deliveryNotes", soon: true, icon: "🚚" },
 ];
 
 function NavLink({
   item,
+  label,
   active,
   count,
   onNavigate,
+  soonLabel,
 }: {
   item: NavItem;
+  label: string;
   active: boolean;
   count?: number;
   onNavigate?: () => void;
+  soonLabel: string;
 }) {
   if (item.soon) {
     return (
@@ -52,8 +62,8 @@ function NavLink({
         <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-50 text-base">
           {item.icon}
         </span>
-        <span className="truncate">{item.label}</span>
-        <span className="ml-auto text-[10px] uppercase">soon</span>
+        <span className="truncate">{label}</span>
+        <span className="ml-auto text-[10px] uppercase">{soonLabel}</span>
       </span>
     );
   }
@@ -75,7 +85,7 @@ function NavLink({
       >
         {item.icon}
       </span>
-      <span className="truncate">{item.label}</span>
+      <span className="truncate">{label}</span>
       {typeof count === "number" && count > 0 ? (
         <span className="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-xs tabular-nums text-slate-500">
           {count}
@@ -99,6 +109,8 @@ export function Sidebar({
   onClose?: () => void;
 }) {
   const pathname = usePathname();
+  const t = useTranslations("nav");
+  const tc = useTranslations("common");
 
   return (
     <aside
@@ -113,7 +125,7 @@ export function Sidebar({
         </div>
         <button
           type="button"
-          aria-label="Close menu"
+          aria-label={t("closeMenu")}
           className="ml-auto inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 md:hidden"
           onClick={onClose}
         >
@@ -128,38 +140,38 @@ export function Sidebar({
           className="btn-brand w-full gap-2"
         >
           <span className="text-lg leading-none">+</span>
-          Create
+          {tc("create")}
         </Link>
       </div>
 
       <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2">
         <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-          Menu
+          {t("menu")}
         </p>
         {PINNED.map((item) => (
           <NavLink
             key={item.href}
             item={item}
-            active={
-              pathname === item.href || pathname.startsWith(item.href + "/")
-            }
+            label={t(item.labelKey)}
+            active={pathname === item.href || pathname.startsWith(item.href + "/")}
             count={counts[item.href]}
             onNavigate={onNavigate}
+            soonLabel={tc("soon")}
           />
         ))}
 
         <p className="mt-4 px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-          Business
+          {t("business")}
         </p>
         {NAV.map((item) => (
           <NavLink
             key={item.href}
             item={item}
-            active={
-              pathname === item.href || pathname.startsWith(item.href + "/")
-            }
+            label={t(item.labelKey)}
+            active={pathname === item.href || pathname.startsWith(item.href + "/")}
             count={counts[item.href]}
             onNavigate={onNavigate}
+            soonLabel={tc("soon")}
           />
         ))}
       </nav>
@@ -169,7 +181,7 @@ export function Sidebar({
           type="submit"
           className="w-full rounded-xl px-3 py-2.5 text-left text-sm text-slate-600 hover:bg-slate-50"
         >
-          Sign out
+          {t("signOut")}
         </button>
       </form>
     </aside>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 
 import type { DocState } from "@/app/actions/documents";
 import { parseAmount, formatAmount } from "@/lib/money";
@@ -9,7 +10,7 @@ type Option = { id: string; label: string };
 type Row = { accountId: string; amount: string };
 
 const initial: DocState = {};
-const emptyRow = (): Row => ({ accountId: "", amount: "" });
+const emptyRow = (accountId = ""): Row => ({ accountId, amount: "" });
 
 type CashDefaults = {
   date: string;
@@ -29,6 +30,7 @@ export function CashDocForm({
   currency,
   documentId,
   defaults,
+  defaultLineAccountId = "",
 }: {
   mode: "receipt" | "payment";
   action: (prev: DocState, fd: FormData) => Promise<DocState>;
@@ -38,11 +40,22 @@ export function CashDocForm({
   currency: string;
   documentId?: string;
   defaults?: CashDefaults;
+  defaultLineAccountId?: string;
 }) {
   const [state, formAction, pending] = useActionState(action, initial);
+  const tc = useTranslations("common");
+  const t = useTranslations(mode === "receipt" ? "receipts" : "payments");
   const today = new Date().toISOString().slice(0, 10);
+  const [bankAccountId, setBankAccountId] = useState(defaults?.bankAccountId ?? "");
   const [rows, setRows] = useState<Row[]>(
-    defaults?.lines?.length ? defaults.lines : [emptyRow()],
+    defaults?.lines?.length
+      ? defaults.lines
+      : [emptyRow(defaultLineAccountId)],
+  );
+
+  const lineAccounts = useMemo(
+    () => accounts.filter((a) => a.id !== bankAccountId),
+    [accounts, bankAccountId],
   );
 
   const total = useMemo(
@@ -69,7 +82,7 @@ export function CashDocForm({
       {documentId ? <input type="hidden" name="id" value={documentId} /> : null}
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="block">
-          <span className="text-sm font-medium text-slate-700">Date</span>
+          <span className="text-sm font-medium text-slate-700">{tc("date")}</span>
           <input
             type="date"
             name="date"
@@ -79,14 +92,22 @@ export function CashDocForm({
         </label>
         <label className="block">
           <span className="text-sm font-medium text-slate-700">
-            {isReceipt ? "Received into" : "Paid from"}
+            {isReceipt ? t("receivedInto") : t("paidFrom")}
           </span>
           <select
             name="bankAccountId"
-            defaultValue={defaults?.bankAccountId ?? ""}
+            value={bankAccountId}
+            onChange={(e) => {
+              const next = e.target.value;
+              setBankAccountId(next);
+              setRows((prev) =>
+                prev.map((r) => (r.accountId === next ? { ...r, accountId: "" } : r)),
+              );
+            }}
             className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            required
           >
-            <option value="">Select account…</option>
+            <option value="">{tc("selectAccount")}</option>
             {bankAccounts.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.label}
@@ -96,7 +117,7 @@ export function CashDocForm({
         </label>
         <label className="block">
           <span className="text-sm font-medium text-slate-700">
-            {isReceipt ? "Received from" : "Paid to"} (optional)
+            {isReceipt ? t("receivedFrom") : t("paidTo")} ({t("optionalParty")})
           </span>
           <select
             name="partyId"
@@ -112,9 +133,7 @@ export function CashDocForm({
           </select>
         </label>
         <label className="block">
-          <span className="text-sm font-medium text-slate-700">
-            Reference (optional)
-          </span>
+          <span className="text-sm font-medium text-slate-700">{tc("referenceOptional")}</span>
           <input
             name="reference"
             defaultValue={defaults?.reference ?? ""}
@@ -124,9 +143,7 @@ export function CashDocForm({
       </div>
 
       <label className="block">
-        <span className="text-sm font-medium text-slate-700">
-          Description (optional)
-        </span>
+        <span className="text-sm font-medium text-slate-700">{tc("descriptionOptional")}</span>
         <input
           name="description"
           defaultValue={defaults?.description ?? ""}
@@ -135,13 +152,18 @@ export function CashDocForm({
       </label>
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <div className="border-b border-slate-200 bg-slate-50 px-3 py-2">
+          <p className="text-xs text-slate-600">
+            {isReceipt ? t("creditLineHelp") : t("debitLineHelp")}
+          </p>
+        </div>
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
               <th className="px-3 py-2 font-medium">
-                {isReceipt ? "Credit account (income / receivable)" : "Debit account (expense / payable)"}
+                {isReceipt ? t("creditAccount") : t("debitAccount")}
               </th>
-              <th className="w-44 px-3 py-2 text-right font-medium">Amount</th>
+              <th className="w-44 px-3 py-2 text-right font-medium">{t("amount")}</th>
               <th className="w-10" />
             </tr>
           </thead>
@@ -153,9 +175,10 @@ export function CashDocForm({
                     value={row.accountId}
                     onChange={(e) => update(i, { accountId: e.target.value })}
                     className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+                    required
                   >
-                    <option value="">Select account…</option>
-                    {accounts.map((a) => (
+                    <option value="">{tc("selectAccount")}</option>
+                    {lineAccounts.map((a) => (
                       <option key={a.id} value={a.id}>
                         {a.label}
                       </option>
@@ -168,6 +191,7 @@ export function CashDocForm({
                     value={row.amount}
                     onChange={(e) => update(i, { amount: e.target.value })}
                     className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-right text-sm"
+                    required
                   />
                 </td>
                 <td className="px-2 py-2 text-center">
@@ -192,10 +216,12 @@ export function CashDocForm({
               <td className="px-3 py-2">
                 <button
                   type="button"
-                  onClick={() => setRows((prev) => [...prev, emptyRow()])}
+                  onClick={() =>
+                    setRows((prev) => [...prev, emptyRow(defaultLineAccountId)])
+                  }
                   className="text-sm text-slate-600 hover:text-slate-900"
                 >
-                  + Add line
+                  {t("addLine")}
                 </button>
               </td>
               <td className="px-3 py-2 text-right tabular-nums">
@@ -217,10 +243,14 @@ export function CashDocForm({
         )}
         <button
           type="submit"
-          disabled={pending || total <= 0n}
+          disabled={pending || total <= 0n || !bankAccountId}
           className="rounded-lg bg-slate-900 px-5 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-40"
         >
-          {pending ? "Saving…" : documentId ? "Save changes" : isReceipt ? "Save receipt" : "Save payment"}
+          {pending
+            ? tc("saving")
+            : documentId
+              ? t("saveChanges")
+              : t("save")}
         </button>
       </div>
     </form>

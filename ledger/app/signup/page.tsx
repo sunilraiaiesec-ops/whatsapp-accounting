@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { useActionState } from "react";
 
 import { signupAction, type AuthState } from "@/app/actions/auth";
 import { BrandLogo } from "@/components/BrandLogo";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 
 const initial: AuthState = {};
 
@@ -12,30 +14,32 @@ const CURRENCIES = ["XAF", "XOF", "USD", "EUR", "GBP", "NGN", "GHS", "KES"];
 
 export default function SignupPage() {
   const [state, action, pending] = useActionState(signupAction, initial);
+  const t = useTranslations("auth");
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-[var(--background)] p-6">
+      <div className="absolute right-4 top-4">
+        <LanguageSwitcher />
+      </div>
       <div className="w-full max-w-md card-surface p-8">
         <BrandLogo href="/signup" size="auth" />
-        <h1 className="mt-3 text-2xl font-semibold tracking-tight">Create your company</h1>
-        <p className="mt-1 text-sm text-[var(--muted)]">
-          A fresh set of books with a chart of accounts, ready in seconds.
-        </p>
+        <h1 className="mt-3 text-2xl font-semibold tracking-tight">{t("signUp")}</h1>
+        <p className="mt-1 text-sm text-[var(--muted)]">{t("signUpSubtitle")}</p>
 
         <form action={action} className="mt-6 space-y-4">
-          <Field label="Your name" name="name" autoComplete="name" />
-          <Field label="Company name" name="orgName" autoComplete="organization" />
-          <Field label="Email" name="email" type="email" autoComplete="email" />
+          <Field label={t("name")} name="name" autoComplete="name" />
+          <Field label={t("companyName")} name="orgName" autoComplete="organization" />
+          <Field label={t("email")} name="email" type="email" autoComplete="email" />
           <Field
-            label="Password"
+            label={t("password")}
             name="password"
             type="password"
             autoComplete="new-password"
-            hint="At least 8 characters"
+            hint={t("passwordHint")}
           />
 
           <label className="block">
-            <span className="text-sm font-medium text-slate-700">Base currency</span>
+            <span className="text-sm font-medium text-slate-700">{t("currency")}</span>
             <select name="baseCurrency" defaultValue="XAF" className="input-modern mt-1">
               {CURRENCIES.map((c) => (
                 <option key={c} value={c}>
@@ -50,14 +54,14 @@ export default function SignupPage() {
           ) : null}
 
           <button type="submit" disabled={pending} className="btn-brand w-full disabled:opacity-50">
-            {pending ? "Creating…" : "Create company"}
+            {pending ? t("creating") : t("createCompany")}
           </button>
         </form>
 
         <p className="mt-6 text-center text-sm text-[var(--muted)]">
-          Already have an account?{" "}
+          {t("hasAccount")}{" "}
           <Link href="/login" className="font-semibold text-[var(--brand)] hover:underline">
-            Sign in
+            {t("signInLink")}
           </Link>
         </p>
       </div>
