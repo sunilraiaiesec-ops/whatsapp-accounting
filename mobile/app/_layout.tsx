@@ -32,6 +32,8 @@ export default function RootLayout() {
         <Stack.Screen name="login" options={{ headerShown: false }} />
         <Stack.Screen name="signup" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="receipt-new" options={{ title: "New receipt" }} />
+        <Stack.Screen name="payment-new" options={{ title: "New payment" }} />
       </Stack>
     </AuthProvider>
   );

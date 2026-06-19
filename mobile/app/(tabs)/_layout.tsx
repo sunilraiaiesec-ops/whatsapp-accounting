@@ -1,8 +1,25 @@
 import { SymbolView } from "expo-symbols";
-import { Tabs } from "expo-router";
-import { Pressable } from "react-native";
+import { router, Tabs } from "expo-router";
+import { Pressable, Text } from "react-native";
 
 import { useAuth } from "@/lib/auth";
+
+function NewButton({ href, label }: { href: "/receipt-new" | "/payment-new"; label: string }) {
+  return (
+    <Pressable
+      onPress={() => router.push(href)}
+      style={{
+        marginRight: 16,
+        backgroundColor: "#0f172a",
+        borderRadius: 8,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+      }}
+    >
+      <Text style={{ color: "#fff", fontWeight: "600", fontSize: 13 }}>{label}</Text>
+    </Pressable>
+  );
+}
 
 export default function TabLayout() {
   const { org, signOut } = useAuth();
@@ -55,6 +72,7 @@ export default function TabLayout() {
         name="receipts"
         options={{
           title: "Receipts",
+          headerRight: () => <NewButton href="/receipt-new" label="+ New" />,
           tabBarIcon: ({ color }) => (
             <SymbolView
               name={{ ios: "arrow.down.circle", android: "south", web: "south" }}
@@ -68,6 +86,7 @@ export default function TabLayout() {
         name="payments"
         options={{
           title: "Payments",
+          headerRight: () => <NewButton href="/payment-new" label="+ New" />,
           tabBarIcon: ({ color }) => (
             <SymbolView
               name={{ ios: "arrow.up.circle", android: "north", web: "north" }}

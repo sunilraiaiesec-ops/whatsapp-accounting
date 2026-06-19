@@ -57,7 +57,7 @@ export default function PaymentsScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         ListEmptyComponent={
           <Text style={styles.empty}>
-            No payments yet. Record payments on the web app for now.
+            No payments yet. Tap + New to record money paid out.
           </Text>
         }
         renderItem={({ item }) => (

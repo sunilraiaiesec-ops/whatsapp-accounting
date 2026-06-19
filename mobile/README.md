@@ -7,7 +7,7 @@ Expo (React Native) app for **iOS and Android**. Connects to the same backend as
 - Sign in / sign up
 - Dashboard summary (assets, profit, counts)
 - Customers — list and add
-- Receipts and payments — list (create on web for now)
+- Receipts and payments — list and create
 
 ## Setup
 

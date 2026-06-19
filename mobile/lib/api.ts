@@ -88,6 +88,20 @@ export type PaymentRow = {
   party: string | null;
 };
 
+export type AccountOption = {
+  id: string;
+  code: string;
+  name: string;
+  subtype: string | null;
+};
+
+export type Supplier = {
+  id: string;
+  name: string;
+  phone: string | null;
+  type: string;
+};
+
 export function login(email: string, password: string) {
   return apiRequest<AuthResponse>("/api/v1/auth/login", {
     method: "POST",
@@ -133,4 +147,55 @@ export function fetchReceipts(token: string) {
 
 export function fetchPayments(token: string) {
   return apiRequest<{ payments: PaymentRow[] }>("/api/v1/payments", { token });
+}
+
+export function fetchAccounts(token: string) {
+  return apiRequest<{ bankAndCash: AccountOption[]; accounts: AccountOption[] }>(
+    "/api/v1/accounts",
+    { token },
+  );
+}
+
+export function fetchSuppliers(token: string) {
+  return apiRequest<{ suppliers: Supplier[] }>("/api/v1/suppliers", { token });
+}
+
+export function createReceipt(
+  token: string,
+  input: {
+    date?: string;
+    bankAccountId: string;
+    partyId?: string | null;
+    description?: string | null;
+    lines: { accountId: string; amount: string; memo?: string | null }[];
+  },
+) {
+  return apiRequest<{ receipt: { id: string; number: string; total: string } }>(
+    "/api/v1/receipts",
+    {
+      method: "POST",
+      token,
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function createPayment(
+  token: string,
+  input: {
+    date?: string;
+    bankAccountId: string;
+    partyId?: string | null;
+    description?: string | null;
+    lines: { accountId: string; amount: string; memo?: string | null }[];
+  },
+) {
+  return apiRequest<{ payment: { id: string; number: string; total: string } }>(
+    "/api/v1/payments",
+    {
+      method: "POST",
+      token,
+      body: JSON.stringify(input),
+    },
+  );
 }

@@ -57,7 +57,7 @@ export default function ReceiptsScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         ListEmptyComponent={
           <Text style={styles.empty}>
-            No receipts yet. Record receipts on the web app for now.
+            No receipts yet. Tap + New to record money received.
           </Text>
         }
         renderItem={({ item }) => (
