@@ -70,13 +70,13 @@ export function AppShell({
               <label className="relative block max-w-xl">
                 <span className="sr-only">Search</span>
                 <svg
-                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-                  width="18"
-                  height="18"
+                  className="pointer-events-none absolute left-3.5 top-1/2 z-10 -translate-y-1/2 text-slate-400"
+                  width="16"
+                  height="16"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
-                  strokeWidth="2"
+                  strokeWidth="2.25"
                   aria-hidden
                 >
                   <circle cx="11" cy="11" r="7" />
@@ -85,7 +85,7 @@ export function AppShell({
                 <input
                   type="search"
                   placeholder="Find customers, invoices, receipts…"
-                  className="input-modern pl-10"
+                  className="input-search"
                   disabled
                   title="Search coming soon"
                 />

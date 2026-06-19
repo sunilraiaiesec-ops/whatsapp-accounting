@@ -44,4 +44,8 @@ body {
   .input-modern {
     @apply w-full rounded-xl border border-[var(--border)] bg-white px-4 py-2.5 text-sm shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/20;
   }
+
+  .input-search {
+    @apply w-full rounded-xl border border-[var(--border)] bg-white py-2.5 pr-4 pl-11 text-sm shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/20;
+  }
 }
