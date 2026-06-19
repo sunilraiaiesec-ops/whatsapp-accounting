@@ -13,10 +13,13 @@ export default function SignupPage() {
   const [state, action, pending] = useActionState(signupAction, initial);
 
   return (
-    <main className="flex min-h-screen items-center justify-center p-6">
-      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-        <h1 className="text-xl font-semibold">Create your company</h1>
-        <p className="mt-1 text-sm text-slate-500">
+    <main className="flex min-h-screen items-center justify-center bg-[var(--background)] p-6">
+      <div className="w-full max-w-md card-surface p-8">
+        <p className="text-lg font-bold text-[var(--brand)]">
+          Bantoo<span className="text-slate-800">Books</span>
+        </p>
+        <h1 className="mt-3 text-2xl font-semibold tracking-tight">Create your company</h1>
+        <p className="mt-1 text-sm text-[var(--muted)]">
           A fresh set of books with a chart of accounts, ready in seconds.
         </p>
 
@@ -33,14 +36,8 @@ export default function SignupPage() {
           />
 
           <label className="block">
-            <span className="text-sm font-medium text-slate-700">
-              Base currency
-            </span>
-            <select
-              name="baseCurrency"
-              defaultValue="XAF"
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"
-            >
+            <span className="text-sm font-medium text-slate-700">Base currency</span>
+            <select name="baseCurrency" defaultValue="XAF" className="input-modern mt-1">
               {CURRENCIES.map((c) => (
                 <option key={c} value={c}>
                   {c}
@@ -53,18 +50,14 @@ export default function SignupPage() {
             <p className="text-sm text-red-600">{state.error}</p>
           ) : null}
 
-          <button
-            type="submit"
-            disabled={pending}
-            className="w-full rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-          >
+          <button type="submit" disabled={pending} className="btn-brand w-full disabled:opacity-50">
             {pending ? "Creating…" : "Create company"}
           </button>
         </form>
 
-        <p className="mt-6 text-center text-sm text-slate-500">
+        <p className="mt-6 text-center text-sm text-[var(--muted)]">
           Already have an account?{" "}
-          <Link href="/login" className="font-medium text-slate-900 underline">
+          <Link href="/login" className="font-semibold text-[var(--brand)] hover:underline">
             Sign in
           </Link>
         </p>
@@ -94,7 +87,7 @@ function Field({
         type={type}
         autoComplete={autoComplete}
         required
-        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"
+        className="input-modern mt-1"
       />
       {hint ? <span className="mt-1 block text-xs text-slate-400">{hint}</span> : null}
     </label>

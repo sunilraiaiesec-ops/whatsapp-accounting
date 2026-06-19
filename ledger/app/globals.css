@@ -1,13 +1,47 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
+  --background: #eceef1;
+  --foreground: #1a1a1a;
+  --brand: #2ca01c;
+  --brand-hover: #248517;
+  --card: #ffffff;
+  --border: #e2e4e9;
+  --muted: #6b7280;
 }
 
 body {
   font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
+    "Segoe UI",
+    -apple-system,
+    BlinkMacSystemFont,
+    Roboto,
+    Helvetica,
+    Arial,
     sans-serif;
   overflow-x: hidden;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+@layer utilities {
+  .card-surface {
+    @apply rounded-2xl border border-[var(--border)] bg-white shadow-sm;
+  }
+
+  .pill-action {
+    @apply inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-white px-4 py-2.5 text-sm font-medium text-slate-800 shadow-sm transition hover:border-slate-300 hover:shadow;
+  }
+
+  .pill-category {
+    @apply inline-flex shrink-0 items-center gap-2 rounded-full border border-[var(--border)] bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:border-[var(--brand)] hover:text-[var(--brand)];
+  }
+
+  .btn-brand {
+    @apply inline-flex items-center justify-center rounded-full bg-[var(--brand)] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[var(--brand-hover)];
+  }
+
+  .input-modern {
+    @apply w-full rounded-xl border border-[var(--border)] bg-white px-4 py-2.5 text-sm shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/20;
+  }
 }

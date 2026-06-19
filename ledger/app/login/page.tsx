@@ -11,13 +11,13 @@ export default function LoginPage() {
   const [state, action, pending] = useActionState(loginAction, initial);
 
   return (
-    <main className="flex min-h-screen items-center justify-center p-6">
-      <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-        <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-          Bantoo Books
+    <main className="flex min-h-screen items-center justify-center bg-[var(--background)] p-6">
+      <div className="w-full max-w-sm card-surface p-8">
+        <p className="text-lg font-bold text-[var(--brand)]">
+          Bantoo<span className="text-slate-800">Books</span>
         </p>
-        <h1 className="mt-2 text-xl font-semibold">Sign in</h1>
-        <p className="mt-1 text-sm text-slate-500">Welcome back to your books.</p>
+        <h1 className="mt-3 text-2xl font-semibold tracking-tight">Sign in</h1>
+        <p className="mt-1 text-sm text-[var(--muted)]">Welcome back to your books.</p>
 
         <form action={action} className="mt-6 space-y-4">
           <Field label="Email" name="email" type="email" autoComplete="email" />
@@ -32,18 +32,14 @@ export default function LoginPage() {
             <p className="text-sm text-red-600">{state.error}</p>
           ) : null}
 
-          <button
-            type="submit"
-            disabled={pending}
-            className="w-full rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-          >
+          <button type="submit" disabled={pending} className="btn-brand w-full disabled:opacity-50">
             {pending ? "Signing in…" : "Sign in"}
           </button>
         </form>
 
-        <p className="mt-6 text-center text-sm text-slate-500">
+        <p className="mt-6 text-center text-sm text-[var(--muted)]">
           No account?{" "}
-          <Link href="/signup" className="font-medium text-slate-900 underline">
+          <Link href="/signup" className="font-semibold text-[var(--brand)] hover:underline">
             Create one
           </Link>
         </p>
@@ -71,7 +67,7 @@ function Field({
         type={type}
         autoComplete={autoComplete}
         required
-        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"
+        className="input-modern mt-1"
       />
     </label>
   );
