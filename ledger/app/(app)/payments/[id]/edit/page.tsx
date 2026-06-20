@@ -55,6 +55,7 @@ export default async function EditPaymentPage({
           partyId: payment.partyId ?? "",
           reference: payment.reference ?? "",
           description: payment.description ?? "",
+          paymentMethod: payment.paymentMethod ?? "",
           lines: payment.lines.map((l) => ({
             accountId: l.accountId,
             amount: formatAmount(l.amount, ctx.baseCurrency),

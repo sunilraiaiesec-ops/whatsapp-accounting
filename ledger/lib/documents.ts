@@ -59,6 +59,7 @@ export async function createReceipt(
     partyId?: string | null;
     reference?: string | null;
     description?: string | null;
+    paymentMethod?: string | null;
     lines: LineInput[];
   },
 ) {
@@ -100,6 +101,7 @@ export async function createReceipt(
         date: input.date,
         reference: input.reference ?? null,
         description: input.description ?? null,
+        paymentMethod: input.paymentMethod ?? null,
         bankAccountId: input.bankAccountId,
         partyId: input.partyId ?? null,
         total,
@@ -134,6 +136,7 @@ export async function createPayment(
     partyId?: string | null;
     reference?: string | null;
     description?: string | null;
+    paymentMethod?: string | null;
     lines: LineInput[];
   },
 ) {
@@ -175,6 +178,7 @@ export async function createPayment(
         date: input.date,
         reference: input.reference ?? null,
         description: input.description ?? null,
+        paymentMethod: input.paymentMethod ?? null,
         bankAccountId: input.bankAccountId,
         partyId: input.partyId ?? null,
         total,

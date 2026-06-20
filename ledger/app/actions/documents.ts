@@ -71,7 +71,7 @@ export async function createReceiptAction(
   const bankAccountId = String(formData.get("bankAccountId") || "");
   if (!bankAccountId) return { error: "Choose where the money was received" };
 
-  let raw: { accountId?: string; amount?: string }[];
+  let raw: { accountId?: string; amount?: string; memo?: string }[];
   try {
     raw = JSON.parse(String(formData.get("lines") || "[]"));
   } catch {
@@ -81,6 +81,7 @@ export async function createReceiptAction(
     .map((l) => ({
       accountId: l.accountId ?? "",
       amount: parseAmount(l.amount ?? "0", ctx.baseCurrency),
+      memo: l.memo?.trim() || null,
     }))
     .filter((l) => l.accountId && l.amount > 0n);
 
@@ -91,6 +92,7 @@ export async function createReceiptAction(
       partyId: String(formData.get("partyId") || "") || null,
       reference: String(formData.get("reference") || "") || null,
       description: String(formData.get("description") || "") || null,
+      paymentMethod: String(formData.get("paymentMethod") || "") || null,
       lines,
     });
   } catch (err) {
@@ -129,6 +131,7 @@ export async function createPaymentAction(
       partyId: String(formData.get("partyId") || "") || null,
       reference: String(formData.get("reference") || "") || null,
       description: String(formData.get("description") || "") || null,
+      paymentMethod: String(formData.get("paymentMethod") || "") || null,
       lines,
     });
   } catch (err) {

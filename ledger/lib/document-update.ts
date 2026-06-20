@@ -114,6 +114,7 @@ export async function updateReceipt(
     partyId?: string | null;
     reference?: string | null;
     description?: string | null;
+    paymentMethod?: string | null;
     lines: LineInput[];
   },
 ) {
@@ -163,6 +164,7 @@ export async function updateReceipt(
         partyId: input.partyId ?? null,
         reference: input.reference ?? null,
         description: input.description ?? null,
+        paymentMethod: input.paymentMethod ?? null,
         total,
         journalEntryId: entry.id,
         lines: {
@@ -190,6 +192,7 @@ export async function updatePayment(
     partyId?: string | null;
     reference?: string | null;
     description?: string | null;
+    paymentMethod?: string | null;
     lines: LineInput[];
   },
 ) {
@@ -239,6 +242,7 @@ export async function updatePayment(
         partyId: input.partyId ?? null,
         reference: input.reference ?? null,
         description: input.description ?? null,
+        paymentMethod: input.paymentMethod ?? null,
         total,
         journalEntryId: entry.id,
         lines: {

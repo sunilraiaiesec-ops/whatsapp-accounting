@@ -206,6 +206,7 @@ model Receipt {
   date           DateTime @db.Date
   reference      String?
   description    String?
+  paymentMethod  String?
   bankAccountId  String
   partyId        String?
   total          BigInt   @default(0)
@@ -245,6 +246,7 @@ model Payment {
   date           DateTime @db.Date
   reference      String?
   description    String?
+  paymentMethod  String?
   bankAccountId  String
   partyId        String?
   total          BigInt   @default(0)

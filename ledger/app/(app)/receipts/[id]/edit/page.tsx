@@ -8,7 +8,7 @@ import { listParties } from "@/lib/parties";
 import { formatAmount } from "@/lib/money";
 import { CashDocForm } from "@/components/CashDocForm";
 import {
-  bankAndCashAccounts,
+  bankAndCashWithBalances,
   receiptCounterpartAccounts,
 } from "@/lib/accounts";
 
@@ -24,24 +24,29 @@ export default async function EditReceiptPage({
   const { receipt } = data;
 
   const [banks, accounts, parties] = await Promise.all([
-    bankAndCashAccounts(ctx.orgId),
+    bankAndCashWithBalances(ctx.orgId),
     receiptCounterpartAccounts(ctx.orgId),
     listParties(ctx.orgId),
   ]);
 
   return (
-    <div className="mx-auto max-w-3xl">
+    <div className="mx-auto max-w-5xl">
       <Link href={`/receipts/${id}`} className="text-sm text-slate-500 hover:text-slate-900">
         ← Back to receipt
       </Link>
-      <h1 className="mt-2 text-2xl font-semibold">Edit Receipt {receipt.number}</h1>
 
       <CashDocForm
         mode="receipt"
         action={updateReceiptAction}
         documentId={receipt.id}
         currency={ctx.baseCurrency}
-        bankAccounts={banks.map((a) => ({ id: a.id, label: `${a.code} — ${a.name}` }))}
+        formTitle={`Edit ${receipt.number}`}
+        cancelHref={`/receipts/${id}`}
+        bankAccounts={banks.map((a) => ({
+          id: a.id,
+          label: `${a.code} — ${a.name}`,
+          balanceLabel: `${formatAmount(a.balance, ctx.baseCurrency)} ${ctx.baseCurrency}`,
+        }))}
         parties={parties.map((p) => ({ id: p.id, label: p.name }))}
         accounts={accounts.map((a) => ({ id: a.id, label: `${a.code} — ${a.name}` }))}
         defaults={{
@@ -50,6 +55,7 @@ export default async function EditReceiptPage({
           partyId: receipt.partyId ?? "",
           reference: receipt.reference ?? "",
           description: receipt.description ?? "",
+          paymentMethod: receipt.paymentMethod ?? "",
           lines: receipt.lines.map((l) => ({
             accountId: l.accountId,
             amount: formatAmount(l.amount, ctx.baseCurrency),

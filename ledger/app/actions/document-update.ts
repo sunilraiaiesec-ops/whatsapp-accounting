@@ -92,6 +92,7 @@ export async function updateReceiptAction(
       partyId: String(formData.get("partyId") || "") || null,
       reference: String(formData.get("reference") || "") || null,
       description: String(formData.get("description") || "") || null,
+      paymentMethod: String(formData.get("paymentMethod") || "") || null,
       lines,
     });
   } catch (err) {
@@ -118,6 +119,7 @@ export async function updatePaymentAction(
       partyId: String(formData.get("partyId") || "") || null,
       reference: String(formData.get("reference") || "") || null,
       description: String(formData.get("description") || "") || null,
+      paymentMethod: String(formData.get("paymentMethod") || "") || null,
       lines,
     });
   } catch (err) {
