@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useTranslations } from "next-intl";
 
+import { BantooCommand } from "@/components/BantooCommand";
 import { BrandLogo } from "@/components/BrandLogo";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { Sidebar } from "@/components/Sidebar";
@@ -152,6 +153,8 @@ export function AppShell({
             </button>
 
             <BrandLogo href="/dashboard" />
+
+            <BantooCommand />
 
             <div className="hidden min-w-0 max-w-xl flex-1 md:block">
               <GlobalSearch />

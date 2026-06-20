@@ -94,6 +94,30 @@
       "bankAccount": "Bank or cash account"
     }
   },
+  "command": {
+    "open": "Ask Bantoo",
+    "title": "What would you like to do?",
+    "subtitle": "Describe a receipt, payment, or other action in plain language.",
+    "placeholder": "e.g. Received 25 million XAF from Elhaji Adoum",
+    "submit": "Suggest action",
+    "listening": "Listening…",
+    "voice": "Speak",
+    "voiceUnsupported": "Voice input is not supported in this browser.",
+    "close": "Close",
+    "cancel": "Cancel",
+    "confirm": "Confirm & save",
+    "confirming": "Saving…",
+    "suggestedAction": "Suggested action",
+    "amount": "Amount",
+    "party": "Customer / supplier",
+    "bankAccount": "Bank or cash account",
+    "date": "Date",
+    "createParty": "Create new contact on save",
+    "examples": "Try: “Received 2 million from Acme Corp” or “Paid 150,000 to Supplier Name”",
+    "successReceipt": "Receipt {number} saved.",
+    "successPayment": "Payment {number} saved.",
+    "viewDocument": "View"
+  },
   "auth": {
     "signIn": "Sign in",
     "signInSubtitle": "Welcome back to your books.",
