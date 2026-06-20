@@ -64,7 +64,7 @@ const SECTIONS: CreateSection[] = [
       { labelKey: "transfer", href: "/inter-account-transfers/new" },
       { labelKey: "journalEntry", href: "/journal/new" },
       { labelKey: "inventoryQtyAdjustment", soon: true },
-      { labelKey: "batchTransactions", soon: true },
+      { labelKey: "batchTransactions", href: "/import" },
       { labelKey: "payDownCreditCard", soon: true },
       { labelKey: "addProductService", href: "/inventory-items" },
       { labelKey: "writeOff", href: "/inventory-write-offs/new" },

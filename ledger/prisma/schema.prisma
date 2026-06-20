@@ -40,6 +40,7 @@ model Organization {
   inventoryItems   InventoryItem[]
   goodsReceipts    GoodsReceipt[]
   inventoryWriteOffs InventoryWriteOff[]
+  resetRequests      OrgResetRequest[]
 
   @@map("organizations")
 }
@@ -53,6 +54,7 @@ model User {
   createdAt    DateTime @default(now())
 
   memberships Membership[]
+  resetRequests OrgResetRequest[]
 
   @@map("users")
 }
@@ -561,4 +563,24 @@ model InventoryWriteOffLine {
 
   @@index([writeOffId])
   @@map("inventory_write_off_lines")
+}
+
+// Factory-reset workflow: email code → 2h cooldown → wipe org books.
+model OrgResetRequest {
+  id              String    @id @default(cuid())
+  orgId           String
+  userId          String
+  codeHash        String
+  codeExpiresAt   DateTime
+  verifiedAt      DateTime?
+  deleteAllowedAt DateTime?
+  completedAt     DateTime?
+  cancelledAt     DateTime?
+  createdAt       DateTime  @default(now())
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, completedAt, cancelledAt])
+  @@map("org_reset_requests")
 }

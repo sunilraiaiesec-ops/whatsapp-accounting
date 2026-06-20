@@ -2,10 +2,14 @@ import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 
 import { requireContext } from "@/lib/auth/current";
+import { getResetStatus } from "@/lib/org-reset";
+import { ResetBooksPanel } from "@/components/ResetBooksPanel";
 
 export default async function SettingsPage() {
   const ctx = await requireContext();
   const t = await getTranslations("settings");
+  const isOwner = ctx.role === "OWNER";
+  const resetStatus = isOwner ? await getResetStatus(ctx.orgId) : { step: "none" as const };
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -40,8 +44,21 @@ export default async function SettingsPage() {
                 {t("manualJournal")}
               </Link>
             </li>
+            <li>
+              <Link href="/import" className="text-slate-900 underline">
+                {t("importData")}
+              </Link>
+            </li>
           </ul>
         </section>
+
+        {isOwner ? (
+          <ResetBooksPanel orgName={ctx.orgName} status={resetStatus} />
+        ) : (
+          <section className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-sm text-slate-600">{t("resetOwnerOnly")}</p>
+          </section>
+        )}
       </div>
     </div>
   );
