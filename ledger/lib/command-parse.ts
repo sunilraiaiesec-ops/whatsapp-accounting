@@ -73,15 +73,68 @@ function extractAmount(text: string): string | null {
 function cleanLabel(text: string): string {
   return text
     .replace(/\b(xaf|fcfa|francs?|million|millions|today|hier|yesterday|aujourd'hui)\b/gi, "")
-    .replace(/[\d,.'\s]+(?:million|millions|m)?/gi, "")
+    .replace(/\b\d[\d\s,.'']*(?:\.\d+)?\s*(?:million|millions|mio|m)?\b/gi, "")
+    .replace(/\s+/g, " ")
     .replace(/^[\s,.-]+|[\s,.-]+$/g, "")
     .trim();
+}
+
+const SPLIT_WORDS = [
+  "renault",
+  "truck",
+  "tire",
+  "tyre",
+  "pneu",
+  "change",
+  "fuel",
+  "transport",
+  "vehicle",
+  "rent",
+  "salary",
+  "bank",
+  "charge",
+  "repair",
+  "maintenance",
+  "insurance",
+  "office",
+  "supplies",
+];
+
+function titleCase(text: string): string {
+  return text
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
+/** Fix voice/parse gluing like "renaulttrucktire" → "Renault Truck Tire". */
+export function humanizeDescription(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return trimmed;
+  if (/\s/.test(trimmed)) return titleCase(trimmed);
+
+  let lower = trimmed.toLowerCase();
+  for (const word of [...SPLIT_WORDS].sort((a, b) => b.length - a.length)) {
+    lower = lower.replace(new RegExp(word, "g"), ` ${word} `);
+  }
+  return titleCase(lower.replace(/\s+/g, " ").trim() || trimmed);
+}
+
+function cleanDescription(text: string): string {
+  const stripped = text
+    .replace(/\b(xaf|fcfa|francs?|million|millions|today|hier|yesterday|aujourd'hui)\b/gi, "")
+    .replace(/\b\d[\d\s,.'']*(?:\.\d+)?\s*(?:million|millions|mio|m)?\b/gi, "")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s,.-]+|[\s,.-]+$/g, "")
+    .trim();
+  return humanizeDescription(stripped);
 }
 
 function extractForReason(text: string): string | null {
   const match = text.match(FOR_REASON_PATTERN);
   if (!match?.[1]) return null;
-  const cleaned = cleanLabel(match[1]);
+  const cleaned = cleanDescription(match[1]);
   return cleaned.length >= 2 ? cleaned : null;
 }
 

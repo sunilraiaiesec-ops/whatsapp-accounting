@@ -10,10 +10,11 @@ import {
 } from "@/lib/accounts";
 import { pickExpenseAccount, pickSalesAccount } from "@/lib/command-accounts";
 import { rankParties } from "@/lib/command-match";
-import { parseCommandText } from "@/lib/command-parse";
+import { humanizeDescription, parseCommandText } from "@/lib/command-parse";
 import { createPayment, createReceipt, DocumentError } from "@/lib/documents";
 import { formatMoney, parseAmount } from "@/lib/money";
 import { createParty, listParties } from "@/lib/parties";
+import { prisma } from "@/lib/prisma";
 
 export type CommandProposalDto = {
   intent: "create_receipt" | "create_payment" | "unknown";
@@ -39,6 +40,8 @@ export type CommandProposalDto = {
   partyAlternatives: { id: string; name: string }[];
   bankAlternatives: { id: string; label: string }[];
   lineAccountAlternatives: { id: string; label: string }[];
+  suggestNewCategory: boolean;
+  suggestedCategoryName: string;
 };
 
 export type ExecuteCommandInput = {
@@ -122,12 +125,12 @@ export async function interpretCommand(
       : (lineAccounts.find((a) => a.subtype === "payable") ??
         (await payableAccount(ctx.orgId)));
 
-  const expenseDescription = parsed.expenseDescription ?? "";
+  const expenseDescription = humanizeDescription(parsed.expenseDescription ?? "");
 
   if (isExpensePayment) {
     lineAccount =
       pickExpenseAccount(lineAccounts, expenseDescription) ??
-      lineAccounts.find((a) => a.type === "EXPENSE") ??
+      lineAccounts.find((a) => a.type === "EXPENSE" && a.subtype !== "cogs") ??
       lineAccount;
   } else if (isSalesReceipt) {
     lineAccount = pickSalesAccount(lineAccounts) ?? lineAccount;
@@ -222,6 +225,13 @@ export async function interpretCommand(
       lineAccountAlternatives.length > 0
         ? lineAccountAlternatives
         : [{ id: lineAccount.id, label: `${lineAccount.code} — ${lineAccount.name}` }],
+    suggestNewCategory:
+      category === "expense" &&
+      expenseDescription.length >= 3 &&
+      !lineAccountAlternatives.some((a) =>
+        a.label.toLowerCase().includes(expenseDescription.toLowerCase()),
+      ),
+    suggestedCategoryName: expenseDescription,
   };
 
   return { proposal };
@@ -277,4 +287,49 @@ export async function executeCommand(
     }
     throw err;
   }
+}
+
+export async function createExpenseCategory(
+  name: string,
+): Promise<{ id: string; label: string } | { error: string }> {
+  const ctx = await requireContext();
+  const trimmed = name.trim();
+  if (trimmed.length < 2) {
+    return { error: "Category name is too short." };
+  }
+
+  const existing = await prisma.account.findMany({
+    where: { orgId: ctx.orgId, type: "EXPENSE" },
+    select: { code: true, name: true },
+  });
+
+  const duplicate = existing.find(
+    (a) => a.name.toLowerCase() === trimmed.toLowerCase(),
+  );
+  if (duplicate) {
+    return {
+      id: (
+        await prisma.account.findFirstOrThrow({
+          where: { orgId: ctx.orgId, code: duplicate.code },
+        })
+      ).id,
+      label: `${duplicate.code} — ${duplicate.name}`,
+    };
+  }
+
+  const used = new Set(existing.map((a) => a.code));
+  let code = 6400;
+  while (used.has(String(code))) code += 1;
+
+  const account = await prisma.account.create({
+    data: {
+      orgId: ctx.orgId,
+      code: String(code),
+      name: trimmed,
+      type: "EXPENSE",
+      currency: ctx.baseCurrency,
+    },
+  });
+
+  return { id: account.id, label: `${account.code} — ${account.name}` };
 }

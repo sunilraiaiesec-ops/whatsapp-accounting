@@ -5,11 +5,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 
 import {
+  createExpenseCategory,
   executeCommand,
   interpretCommand,
   type CommandProposalDto,
   type ExecuteCommandInput,
 } from "@/app/actions/command";
+import { humanizeDescription } from "@/lib/command-parse";
 
 type BrowserSpeechRecognition = {
   lang: string;
@@ -53,7 +55,13 @@ export function BantooCommand() {
   const [createParty, setCreateParty] = useState(false);
   const [bankAccountId, setBankAccountId] = useState("");
   const [lineAccountId, setLineAccountId] = useState("");
+  const [lineAccountOptions, setLineAccountOptions] = useState<{ id: string; label: string }[]>(
+    [],
+  );
   const [expenseDescription, setExpenseDescription] = useState("");
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [showNewCategory, setShowNewCategory] = useState(false);
+  const [creatingCategory, setCreatingCategory] = useState(false);
   const [date, setDate] = useState("");
 
   const openDialog = useCallback(() => {
@@ -100,7 +108,10 @@ export function BantooCommand() {
     setCreateParty(p.createParty);
     setBankAccountId(p.bankAccountId);
     setLineAccountId(p.lineAccountId);
+    setLineAccountOptions(p.lineAccountAlternatives);
     setExpenseDescription(p.expenseDescription);
+    setNewCategoryName(p.suggestedCategoryName);
+    setShowNewCategory(p.suggestNewCategory);
     setDate(p.date);
   }
 
@@ -146,6 +157,28 @@ export function BantooCommand() {
     };
 
     recognition.start();
+  }
+
+  async function handleCreateCategory() {
+    const name = newCategoryName.trim();
+    if (!name) return;
+
+    setCreatingCategory(true);
+    setError(null);
+    const result = await createExpenseCategory(name);
+    setCreatingCategory(false);
+
+    if ("error" in result) {
+      setError(result.error);
+      return;
+    }
+
+    setLineAccountOptions((prev) => {
+      if (prev.some((a) => a.id === result.id)) return prev;
+      return [...prev, result];
+    });
+    setLineAccountId(result.id);
+    setShowNewCategory(false);
   }
 
   async function handleConfirm() {
@@ -275,7 +308,7 @@ export function BantooCommand() {
                   <input
                     type="text"
                     value={expenseDescription}
-                    onChange={(e) => setExpenseDescription(e.target.value)}
+                    onChange={(e) => setExpenseDescription(humanizeDescription(e.target.value))}
                     className="input-modern mt-1"
                   />
                 </label>
@@ -296,13 +329,58 @@ export function BantooCommand() {
                   onChange={(e) => setLineAccountId(e.target.value)}
                   className="input-modern mt-1"
                 >
-                  {proposal.lineAccountAlternatives.map((a) => (
+                  {lineAccountOptions.map((a) => (
                     <option key={a.id} value={a.id}>
                       {a.label}
                     </option>
                   ))}
                 </select>
               </label>
+
+              {proposal.category === "expense" ? (
+                showNewCategory ? (
+                  <div className="rounded-xl border border-[var(--border)] bg-slate-50/80 p-3">
+                    <p className="text-sm font-medium text-slate-800">{t("addCategory")}</p>
+                    <div className="mt-2 flex gap-2">
+                      <input
+                        type="text"
+                        value={newCategoryName}
+                        onChange={(e) => setNewCategoryName(e.target.value)}
+                        placeholder={t("categoryNamePlaceholder")}
+                        className="input-modern flex-1"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleCreateCategory}
+                        disabled={creatingCategory || !newCategoryName.trim()}
+                        className="btn-brand shrink-0 px-4"
+                      >
+                        {creatingCategory ? "…" : t("addCategorySave")}
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowNewCategory(false)}
+                      className="mt-2 text-xs text-slate-500 hover:text-slate-800"
+                    >
+                      {t("cancel")}
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowNewCategory(true);
+                      if (!newCategoryName && expenseDescription) {
+                        setNewCategoryName(expenseDescription);
+                      }
+                    }}
+                    className="text-sm font-medium text-[var(--brand)] hover:underline"
+                  >
+                    + {t("addCategory")}
+                  </button>
+                )
+              ) : null}
 
               {!proposal.partyOptional ? (
                 <>
