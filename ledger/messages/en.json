@@ -104,6 +104,7 @@
     "voice": "Speak",
     "voiceUnsupported": "Voice input is not supported in this browser.",
     "close": "Close",
+    "back": "Back",
     "cancel": "Cancel",
     "confirm": "Confirm & save",
     "confirming": "Saving…",

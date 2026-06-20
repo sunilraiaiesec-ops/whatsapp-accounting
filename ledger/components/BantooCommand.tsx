@@ -70,7 +70,6 @@ function OpenButton({
 export function BantooCommand() {
   const t = useTranslations("command");
   const router = useRouter();
-  const dialogRef = useRef<HTMLDialogElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [prompt, setPrompt] = useState("");
@@ -120,19 +119,26 @@ export function BantooCommand() {
   }, []);
 
   useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    if (open) {
-      if (!dialog.open) dialog.showModal();
-      document.body.style.overflow = "hidden";
-    } else if (dialog.open) {
-      dialog.close();
+    if (!open) {
       document.body.style.overflow = "";
+      return;
     }
+
+    document.body.style.overflow = "hidden";
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeDialog();
+      }
+    }
+
+    document.addEventListener("keydown", onKeyDown);
     return () => {
       document.body.style.overflow = "";
+      document.removeEventListener("keydown", onKeyDown);
     };
-  }, [open]);
+  }, [open, closeDialog]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -295,15 +301,30 @@ export function BantooCommand() {
         ✨
       </button>
 
-      <dialog
-        ref={dialogRef}
-        onClose={closeDialog}
-        className="fixed inset-0 z-[200] m-0 flex h-[100dvh] max-h-[100dvh] w-full max-w-none flex-col border-0 bg-white p-0 shadow-none backdrop:bg-slate-900/50 open:flex md:inset-auto md:top-1/2 md:left-1/2 md:h-auto md:max-h-[min(90dvh,40rem)] md:w-[min(100vw-1.5rem,32rem)] md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-2xl md:border md:border-[var(--border)] md:shadow-2xl"
-      >
+      {open ? (
+        <div
+          className="fixed inset-0 z-[200] flex items-end justify-center md:items-center md:p-4"
+          role="presentation"
+        >
+          <button
+            type="button"
+            aria-label={t("close")}
+            onClick={closeDialog}
+            className="absolute inset-0 bg-slate-900/50"
+          />
+
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="bantoo-command-title"
+            className="relative flex max-h-[100dvh] w-full max-w-none flex-col rounded-t-2xl bg-white shadow-2xl md:max-h-[min(90dvh,40rem)] md:w-[min(100vw-1.5rem,32rem)] md:rounded-2xl md:border md:border-[var(--border)]"
+          >
         <div className="shrink-0 border-b border-[var(--border)] px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] md:px-5 md:py-4 md:pt-4">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 pr-2">
-              <h2 className="text-lg font-semibold text-slate-900">{t("title")}</h2>
+              <h2 id="bantoo-command-title" className="text-lg font-semibold text-slate-900">
+                {t("title")}
+              </h2>
               <p className="mt-0.5 text-sm text-[var(--muted)]">{t("subtitle")}</p>
             </div>
             <button
@@ -657,14 +678,23 @@ export function BantooCommand() {
 
         {showSuggestFooter ? (
           <div className="shrink-0 border-t border-[var(--border)] bg-white px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-5 md:py-4 md:pb-4">
-            <button
-              type="button"
-              disabled={loading || !prompt.trim()}
-              onClick={() => void handleSuggest()}
-              className="btn-brand w-full py-3.5 text-base"
-            >
-              {loading ? "…" : t("submit")}
-            </button>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={closeDialog}
+                className="flex-1 rounded-full border border-[var(--border)] px-4 py-3 text-sm font-medium text-slate-700"
+              >
+                {t("close")}
+              </button>
+              <button
+                type="button"
+                disabled={loading || !prompt.trim()}
+                onClick={() => void handleSuggest()}
+                className="btn-brand flex-1 py-3.5 text-base"
+              >
+                {loading ? "…" : t("submit")}
+              </button>
+            </div>
           </div>
         ) : null}
 
@@ -679,7 +709,7 @@ export function BantooCommand() {
                 }}
                 className="flex-1 rounded-full border border-[var(--border)] px-4 py-3 text-sm font-medium text-slate-700"
               >
-                {t("cancel")}
+                {proposal ? t("back") : t("cancel")}
               </button>
               <button
                 type="button"
@@ -692,7 +722,9 @@ export function BantooCommand() {
             </div>
           </div>
         ) : null}
-      </dialog>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }

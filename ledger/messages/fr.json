@@ -104,6 +104,7 @@
     "voice": "Parler",
     "voiceUnsupported": "La saisie vocale n'est pas prise en charge par ce navigateur.",
     "close": "Fermer",
+    "back": "Retour",
     "cancel": "Annuler",
     "confirm": "Confirmer et enregistrer",
     "confirming": "Enregistrement…",
