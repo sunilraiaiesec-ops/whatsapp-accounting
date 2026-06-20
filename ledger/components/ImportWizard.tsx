@@ -1,10 +1,9 @@
 "use client";
 
-import { useActionState, useMemo, useState } from "react";
+import { useActionState, useMemo, useState, type FormEvent } from "react";
 import { useTranslations } from "next-intl";
 
 import {
-  parseImportFileAction,
   confirmImportAction,
   type ImportActionState,
 } from "@/app/actions/import";
@@ -21,7 +20,8 @@ const kindLabel: Record<string, string> = {
 export function ImportWizard() {
   const t = useTranslations("import");
   const tc = useTranslations("common");
-  const [parseState, parseAction, parsePending] = useActionState(parseImportFileAction, initial);
+  const [parseState, setParseState] = useState<ImportActionState>(initial);
+  const [parsePending, setParsePending] = useState(false);
   const [confirmState, confirmAction, confirmPending] = useActionState(
     confirmImportAction,
     initial,
@@ -35,6 +35,28 @@ export function ImportWizard() {
     () => (preview?.resolvedRows ? JSON.stringify(preview.resolvedRows) : ""),
     [preview?.resolvedRows],
   );
+
+  async function handleAnalyze(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setParsePending(true);
+    setParseState(initial);
+
+    const formData = new FormData(event.currentTarget);
+    try {
+      const response = await fetch("/api/import/analyze", {
+        method: "POST",
+        body: formData,
+      });
+      const data = (await response.json()) as ImportActionState;
+      setParseState(data);
+    } catch {
+      setParseState({
+        error: "Could not read this file. Try Excel export from your previous software.",
+      });
+    } finally {
+      setParsePending(false);
+    }
+  }
 
   if (result) {
     return (
@@ -64,7 +86,7 @@ export function ImportWizard() {
           <li>{t("hintPdf")}</li>
         </ul>
 
-        <form action={parseAction} className="mt-5 space-y-4">
+        <form onSubmit={handleAnalyze} className="mt-5 space-y-4">
           <input
             type="file"
             name="file"

@@ -1,7 +1,4 @@
-declare module "pdf-parse" {
-  export class PDFParse {
-    constructor(options: { data: Buffer | Uint8Array });
-    getText(): Promise<{ text: string }>;
-    destroy(): Promise<void>;
-  }
+declare module "pdf-parse/lib/pdf-parse.js" {
+  function pdf(dataBuffer: Buffer): Promise<{ text: string; numpages: number }>;
+  export = pdf;
 }

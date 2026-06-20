@@ -1,6 +1,11 @@
+import { createRequire } from "node:module";
+
 import { buildPreview } from "@/lib/import/spreadsheet";
 import { classifyPdfLine } from "@/lib/import/classify";
 import type { ImportPreview, ParsedImportRow } from "@/lib/import/types";
+
+const require = createRequire(import.meta.url);
+type PdfParseFn = (buffer: Buffer) => Promise<{ text: string }>;
 
 const DATE_PATTERN =
   /(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}|\d{4}-\d{2}-\d{2})/;
@@ -57,14 +62,10 @@ function extractLines(text: string): ParsedImportRow[] {
 }
 
 async function extractPdfText(buffer: Buffer): Promise<string> {
-  const { PDFParse } = await import("pdf-parse");
-  const parser = new PDFParse({ data: buffer });
-  try {
-    const result = await parser.getText();
-    return result.text ?? "";
-  } finally {
-    await parser.destroy();
-  }
+  // Import the parser module directly — pdf-parse/index.js runs debug code on ESM import.
+  const pdfParse = require("pdf-parse/lib/pdf-parse.js") as PdfParseFn;
+  const parsed = await pdfParse(buffer);
+  return parsed.text ?? "";
 }
 
 export async function parsePdf(buffer: Buffer, fileName: string): Promise<ImportPreview> {
