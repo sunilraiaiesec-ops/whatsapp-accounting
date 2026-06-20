@@ -22,15 +22,26 @@ export type ParsedCommand = {
 
 const RECEIPT_PATTERNS = [
   /\b(received?|receive|reçu|recu|encaiss(?:é|e|ement)?|got)\b/i,
+  /\b(milli|mila|mile|mili|mil gayi|mil gaya|mil gaye|mil gya)\b/i,
+  /\b(aaya|aya|aayi|aaye)\b/i,
+  /\bpayment\s+(?:milli|mila|mili|received|aayi|aaya|mil gayi|mil gaya)\b/i,
+  /\b(humko|hame|humein|humne)\b.+\b(milli|mila|mili|aaya|aya)\b/i,
 ];
 
 const STOCK_RECEIPT_PATTERNS = [
   /\b(received?|receive|got|reçu|recu|entr(?:ée|e)|stock)\b/i,
+  /\b(mila|milli|aaya|aya)\b/i,
 ];
 
 const PAYMENT_PATTERNS = [
   /\b(paid?|pay|payé|paye|décaiss(?:é|e|ement)?|decaiss(?:é|e|ement)?|sent)\b/i,
+  /\b(diya|diye|di gayi|de diya|de diye|bheja|bheje|pay kiya|pay kar diya)\b/i,
+  /\bpaid\s+to\b/i,
+  /\bpay\s+(?:to|ko)\b/i,
 ];
+
+const HINDI_FROM_SUFFIX =
+  /\b([a-z][a-z\s.'-]{1,80}?)\s+(?:say|se|ki taraf se)\s*$/i;
 
 const QUANTITY_PATTERN =
   /(\d[\d\s,.'']*(?:\.\d+)?)\s*(bags?|units?|unités?|kg|kilos?|kilogrammes?|tons?|tonnes?|cartons?|pieces?|pièces?|sacks?|sacs?|boxes?|boîtes?|crates?|pallets?|liters?|litres?|pcs|sachets?)\b/i;
@@ -58,12 +69,21 @@ function detectIntent(text: string): CommandIntent {
     return "create_goods_receipt";
   }
 
+  if (/\bpayment\b/i.test(text) && isReceipt && !isPayment) {
+    return "create_receipt";
+  }
+
   if (isReceipt && !isPayment) return "create_receipt";
   if (isPayment && !isReceipt) return "create_payment";
   if (isReceipt && isPayment) {
-    if (/\b(from|de|client)\b/i.test(text)) return "create_receipt";
-    if (/\b(to|à|fournisseur|supplier|for|pour)\b/i.test(text)) return "create_payment";
+    if (/\b(from|de|client|say|se)\b/i.test(text)) return "create_receipt";
+    if (/\b(to|à|fournisseur|supplier|for|pour|ko)\b/i.test(text)) return "create_payment";
   }
+
+  if (extractAmount(text) && HINDI_FROM_SUFFIX.test(text) && !isPayment) {
+    return "create_receipt";
+  }
+
   return "unknown";
 }
 
@@ -121,7 +141,10 @@ function extractAmount(text: string): string | null {
 
 function cleanLabel(text: string): string {
   return text
-    .replace(/\b(xaf|fcfa|francs?|million|millions|today|hier|yesterday|aujourd'hui)\b/gi, "")
+    .replace(
+      /\b(xaf|fcfa|francs?|million|millions|today|hier|yesterday|aujourd'hui|boss|aj|aaj|humko|hame|humein|humne|hai|hain|milli|mila|mili|payment|ko|ka|ki|ke)\b/gi,
+      "",
+    )
     .replace(/\b\d[\d\s,.'']*(?:\.\d+)?\s*(?:million|millions|mio|m)?\b/gi, "")
     .replace(/\s+/g, " ")
     .replace(/^[\s,.-]+|[\s,.-]+$/g, "")
@@ -188,6 +211,12 @@ function extractForReason(text: string): string | null {
 }
 
 function extractPartyName(text: string, intent: CommandIntent): string | null {
+  const hindiFrom = text.match(HINDI_FROM_SUFFIX);
+  if (hindiFrom?.[1]) {
+    const cleaned = cleanLabel(hindiFrom[1]);
+    if (cleaned.length >= 2) return cleaned;
+  }
+
   const pattern = intent === "create_payment" ? TO_PARTY_PATTERN : FROM_PATTERN;
   const match = text.match(pattern);
   if (match?.[1]) {
@@ -196,7 +225,10 @@ function extractPartyName(text: string, intent: CommandIntent): string | null {
   }
 
   if (intent === "create_receipt") {
-    const fallback = text.match(/\bfrom\s+(.+)$/i) ?? text.match(/\bde\s+(.+)$/i);
+    const fallback =
+      text.match(/\bfrom\s+(.+)$/i) ??
+      text.match(/\bde\s+(.+)$/i) ??
+      text.match(HINDI_FROM_SUFFIX);
     if (fallback?.[1]) {
       const cleaned = cleanLabel(fallback[1]);
       if (cleaned.length >= 2) return cleaned;
