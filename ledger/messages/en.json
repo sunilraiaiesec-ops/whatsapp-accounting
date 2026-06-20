@@ -89,6 +89,12 @@
       "addSupplier": "Add supplier",
       "journalEntry": "Journal entry",
       "transfer": "Transfer",
+      "task": "Task",
+      "bankDeposit": "Bank deposit",
+      "inventoryQtyAdjustment": "Inventory qty adjustment",
+      "batchTransactions": "Batch transactions",
+      "payDownCreditCard": "Pay down credit card",
+      "addProductService": "Add product/service",
       "inventoryItem": "Inventory item",
       "writeOff": "Inventory write-off",
       "bankAccount": "Bank or cash account"

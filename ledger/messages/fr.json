@@ -89,6 +89,12 @@
       "addSupplier": "Ajouter un fournisseur",
       "journalEntry": "Écriture au journal",
       "transfer": "Virement",
+      "task": "Tâche",
+      "bankDeposit": "Dépôt bancaire",
+      "inventoryQtyAdjustment": "Ajustement quantité stock",
+      "batchTransactions": "Écritures groupées",
+      "payDownCreditCard": "Rembourser carte de crédit",
+      "addProductService": "Ajouter produit/service",
       "inventoryItem": "Article de stock",
       "writeOff": "Perte de stock",
       "bankAccount": "Compte banque ou caisse"
