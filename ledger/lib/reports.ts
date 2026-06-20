@@ -1,7 +1,10 @@
 import type { AccountType } from "@prisma/client";
 
+import { bankAndCashWithBalances, isDebitNormal, signedBalance } from "@/lib/accounts";
+import { listInventoryItems } from "@/lib/inventory";
+import { listParties } from "@/lib/parties";
+import { listPartyBalances } from "@/lib/party-ledger";
 import { prisma } from "@/lib/prisma";
-import { isDebitNormal, signedBalance } from "@/lib/accounts";
 
 export type AccountAmount = {
   id: string;
@@ -148,6 +151,251 @@ export async function balanceSheet(orgId: string, asOf?: Date) {
     totalEquity,
     balanced: totalAssets === totalLiabilities + totalEquity,
   };
+}
+
+export type PartyBalanceRow = {
+  id: string;
+  name: string;
+  balance: bigint;
+};
+
+export async function partyBalanceSummary(
+  orgId: string,
+  kind: "customer" | "supplier",
+): Promise<{ rows: PartyBalanceRow[]; total: bigint }> {
+  const [parties, balances] = await Promise.all([
+    listParties(orgId, kind),
+    listPartyBalances(orgId, kind),
+  ]);
+
+  const rows = parties
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      balance: balances.get(p.id) ?? 0n,
+    }))
+    .filter((p) => p.balance !== 0n)
+    .sort((a, b) => (a.balance > b.balance ? -1 : a.balance < b.balance ? 1 : 0));
+
+  const total = rows.reduce((s, r) => s + r.balance, 0n);
+  return { rows, total };
+}
+
+export type AgingBucketKey =
+  | "current"
+  | "days1_30"
+  | "days31_60"
+  | "days61_90"
+  | "over90";
+
+export type AgingRow = {
+  partyId: string;
+  partyName: string;
+  current: bigint;
+  days1_30: bigint;
+  days31_60: bigint;
+  days61_90: bigint;
+  over90: bigint;
+  total: bigint;
+};
+
+function agingBucket(asOf: Date, dueDate: Date): AgingBucketKey {
+  const ms = asOf.getTime() - dueDate.getTime();
+  const days = Math.floor(ms / 86_400_000);
+  if (days <= 0) return "current";
+  if (days <= 30) return "days1_30";
+  if (days <= 60) return "days31_60";
+  if (days <= 90) return "days61_90";
+  return "over90";
+}
+
+function emptyAgingRow(partyId: string, partyName: string): AgingRow {
+  return {
+    partyId,
+    partyName,
+    current: 0n,
+    days1_30: 0n,
+    days31_60: 0n,
+    days61_90: 0n,
+    over90: 0n,
+    total: 0n,
+  };
+}
+
+export async function receivablesAging(
+  orgId: string,
+  asOf = new Date(),
+): Promise<{ asOf: Date; rows: AgingRow[]; totals: AgingRow }> {
+  const invoices = await prisma.salesInvoice.findMany({
+    where: { orgId, status: "unpaid" },
+    include: { party: { select: { id: true, name: true } } },
+  });
+
+  const byParty = new Map<string, AgingRow>();
+  for (const inv of invoices) {
+    const due = inv.dueDate ?? inv.date;
+    const bucket = agingBucket(asOf, due);
+    let row = byParty.get(inv.partyId);
+    if (!row) {
+      row = emptyAgingRow(inv.partyId, inv.party.name);
+      byParty.set(inv.partyId, row);
+    }
+    row[bucket] += inv.total;
+    row.total += inv.total;
+  }
+
+  const rows = [...byParty.values()].sort((a, b) =>
+    a.partyName.localeCompare(b.partyName),
+  );
+  const totals = rows.reduce(
+    (acc, row) => ({
+      partyId: "",
+      partyName: "Total",
+      current: acc.current + row.current,
+      days1_30: acc.days1_30 + row.days1_30,
+      days31_60: acc.days31_60 + row.days31_60,
+      days61_90: acc.days61_90 + row.days61_90,
+      over90: acc.over90 + row.over90,
+      total: acc.total + row.total,
+    }),
+    emptyAgingRow("", "Total"),
+  );
+
+  return { asOf, rows, totals };
+}
+
+export async function payablesAging(
+  orgId: string,
+  asOf = new Date(),
+): Promise<{ asOf: Date; rows: AgingRow[]; totals: AgingRow }> {
+  const invoices = await prisma.purchaseInvoice.findMany({
+    where: { orgId, status: "unpaid" },
+    include: { party: { select: { id: true, name: true } } },
+  });
+
+  const byParty = new Map<string, AgingRow>();
+  for (const inv of invoices) {
+    const due = inv.dueDate ?? inv.date;
+    const bucket = agingBucket(asOf, due);
+    let row = byParty.get(inv.partyId);
+    if (!row) {
+      row = emptyAgingRow(inv.partyId, inv.party.name);
+      byParty.set(inv.partyId, row);
+    }
+    row[bucket] += inv.total;
+    row.total += inv.total;
+  }
+
+  const rows = [...byParty.values()].sort((a, b) =>
+    a.partyName.localeCompare(b.partyName),
+  );
+  const totals = rows.reduce(
+    (acc, row) => ({
+      partyId: "",
+      partyName: "Total",
+      current: acc.current + row.current,
+      days1_30: acc.days1_30 + row.days1_30,
+      days31_60: acc.days31_60 + row.days31_60,
+      days61_90: acc.days61_90 + row.days61_90,
+      over90: acc.over90 + row.over90,
+      total: acc.total + row.total,
+    }),
+    emptyAgingRow("", "Total"),
+  );
+
+  return { asOf, rows, totals };
+}
+
+export type GeneralLedgerLine = {
+  id: string;
+  date: Date;
+  description: string | null;
+  reference: string | null;
+  debit: bigint;
+  credit: bigint;
+  balance: bigint;
+  partyName: string | null;
+};
+
+export type GeneralLedgerAccount = {
+  id: string;
+  code: string;
+  name: string;
+  type: AccountType;
+  lines: GeneralLedgerLine[];
+  totalDebit: bigint;
+  totalCredit: bigint;
+  closingBalance: bigint;
+};
+
+export async function generalLedger(orgId: string): Promise<GeneralLedgerAccount[]> {
+  const accounts = await prisma.account.findMany({
+    where: { orgId },
+    orderBy: { code: "asc" },
+    include: {
+      lines: {
+        include: {
+          entry: { select: { entryDate: true, description: true, reference: true } },
+          party: { select: { name: true } },
+        },
+        orderBy: [{ entry: { entryDate: "asc" } }, { entry: { createdAt: "asc" } }],
+      },
+    },
+  });
+
+  return accounts
+    .map((account) => {
+      let balance = 0n;
+      const lines: GeneralLedgerLine[] = account.lines.map((line) => {
+        balance += line.debit - line.credit;
+        return {
+          id: line.id,
+          date: line.entry.entryDate,
+          description: line.entry.description,
+          reference: line.entry.reference,
+          debit: line.debit,
+          credit: line.credit,
+          balance,
+          partyName: line.party?.name ?? null,
+        };
+      });
+
+      const totalDebit = lines.reduce((s, l) => s + l.debit, 0n);
+      const totalCredit = lines.reduce((s, l) => s + l.credit, 0n);
+
+      return {
+        id: account.id,
+        code: account.code,
+        name: account.name,
+        type: account.type,
+        lines,
+        totalDebit,
+        totalCredit,
+        closingBalance: signedBalance(account.type, totalDebit, totalCredit),
+      };
+    })
+    .filter((a) => a.lines.length > 0);
+}
+
+export async function cashSummary(orgId: string) {
+  const accounts = await bankAndCashWithBalances(orgId);
+  const total = accounts.reduce((s, a) => s + a.balance, 0n);
+  return { accounts, total };
+}
+
+export async function inventoryValuation(orgId: string) {
+  const items = await listInventoryItems(orgId);
+  const rows = items
+    .filter((it) => it.qtyOnHand.gt(0))
+    .map((it) => ({
+      id: it.id,
+      code: it.code,
+      name: it.name,
+      qtyOnHand: it.qtyOnHand.toString(),
+      valueOnHand: it.valueOnHand,
+    }));
+  const total = rows.reduce((s, r) => s + r.valueOnHand, 0n);
+  return { rows, total };
 }
 
 export { isDebitNormal };
