@@ -186,7 +186,13 @@ function CreatePanel({
   );
 }
 
-export function CreateMenu({ onNavigate }: { onNavigate?: () => void }) {
+export function CreateMenu({
+  onNavigate,
+  onOpenChange,
+}: {
+  onNavigate?: () => void;
+  onOpenChange?: (open: boolean) => void;
+}) {
   const [open, setOpen] = useState(false);
   const [hoverCapable, setHoverCapable] = useState(
     () =>
@@ -250,6 +256,10 @@ export function CreateMenu({ onNavigate }: { onNavigate?: () => void }) {
     media.addEventListener("change", sync);
     return () => media.removeEventListener("change", sync);
   }, []);
+
+  useEffect(() => {
+    onOpenChange?.(open);
+  }, [open, onOpenChange]);
 
   useEffect(() => {
     return () => clearCloseTimer();

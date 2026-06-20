@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { forwardRef } from "react";
 import { useTranslations } from "next-intl";
 import { usePathname } from "next/navigation";
 
@@ -96,27 +97,42 @@ function NavLink({
   );
 }
 
-export function Sidebar({
-  orgName,
-  counts,
-  open = false,
-  onNavigate,
-  onClose,
-}: {
-  orgName: string;
-  counts: SidebarCounts;
-  open?: boolean;
-  onNavigate?: () => void;
-  onClose?: () => void;
-}) {
+export const Sidebar = forwardRef<
+  HTMLElement,
+  {
+    orgName: string;
+    counts: SidebarCounts;
+    open?: boolean;
+    onNavigate?: () => void;
+    onClose?: () => void;
+    onMouseEnter?: () => void;
+    onMouseLeave?: () => void;
+    onCreateMenuOpenChange?: (open: boolean) => void;
+  }
+>(function Sidebar(
+  {
+    orgName,
+    counts,
+    open = false,
+    onNavigate,
+    onClose,
+    onMouseEnter,
+    onMouseLeave,
+    onCreateMenuOpenChange,
+  },
+  ref,
+) {
   const pathname = usePathname();
   const t = useTranslations("nav");
   const tc = useTranslations("common");
 
   return (
     <aside
-      className={`fixed inset-y-0 left-0 z-50 flex w-[min(100vw-3rem,17rem)] flex-col border-r border-[var(--border)] bg-white shadow-xl transition-transform duration-200 ease-out print:hidden md:static md:z-auto md:w-56 md:shrink-0 md:shadow-none lg:w-60 ${
-        open ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+      ref={ref}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      className={`fixed inset-y-0 left-0 z-50 flex w-[min(100vw-3rem,17rem)] flex-col border-r border-[var(--border)] bg-white shadow-xl transition-transform duration-200 ease-out print:hidden md:w-56 lg:w-60 ${
+        open ? "translate-x-0" : "-translate-x-full"
       }`}
     >
       <div className="flex items-start justify-between px-4 py-4 md:hidden">
@@ -135,7 +151,7 @@ export function Sidebar({
       </div>
 
       <div className="overflow-visible px-3 pb-2">
-        <CreateMenu onNavigate={onNavigate} />
+        <CreateMenu onNavigate={onNavigate} onOpenChange={onCreateMenuOpenChange} />
       </div>
 
       <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2">
@@ -180,4 +196,4 @@ export function Sidebar({
       </form>
     </aside>
   );
-}
+});
