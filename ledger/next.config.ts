@@ -4,7 +4,12 @@ import createNextIntlPlugin from "next-intl/plugin";
 const withNextIntl = createNextIntlPlugin("./i18n/request.ts");
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["pdf-parse"],
+  serverExternalPackages: ["pdf-parse", "pdfjs-dist"],
+  experimental: {
+    serverActions: {
+      bodySizeLimit: "8mb",
+    },
+  },
 };
 
 export default withNextIntl(nextConfig);

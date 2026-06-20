@@ -4,7 +4,6 @@ import type { ImportPreview, ParsedImportRow } from "@/lib/import/types";
 
 const DATE_PATTERN =
   /(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}|\d{4}-\d{2}-\d{2})/;
-const AMOUNT_PATTERN = /(-?\d[\d\s,'']*(?:\.\d+)?)\s*(?:xaf|fcfa|cfa|usd|eur)?/i;
 
 function parseDateFromMatch(raw: string): string | null {
   const s = raw.trim();
@@ -57,10 +56,19 @@ function extractLines(text: string): ParsedImportRow[] {
   return rows;
 }
 
+async function extractPdfText(buffer: Buffer): Promise<string> {
+  const { PDFParse } = await import("pdf-parse");
+  const parser = new PDFParse({ data: buffer });
+  try {
+    const result = await parser.getText();
+    return result.text ?? "";
+  } finally {
+    await parser.destroy();
+  }
+}
+
 export async function parsePdf(buffer: Buffer, fileName: string): Promise<ImportPreview> {
-  const pdfParse = (await import("pdf-parse")).default;
-  const parsed = await pdfParse(buffer);
-  const text = parsed.text ?? "";
+  const text = await extractPdfText(buffer);
 
   if (!text.trim()) {
     return buildPreview(fileName, "pdf", "PDF (no extractable text — try Excel export)", []);

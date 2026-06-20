@@ -19,6 +19,12 @@ export type ImportActionState = {
 
 const MAX_BYTES = 8 * 1024 * 1024;
 
+function isNextNavigationError(err: unknown): boolean {
+  if (typeof err !== "object" || err === null || !("digest" in err)) return false;
+  const digest = String((err as { digest: unknown }).digest);
+  return digest.startsWith("NEXT_REDIRECT") || digest.startsWith("NEXT_NOT_FOUND");
+}
+
 function extension(name: string): string {
   const parts = name.toLowerCase().split(".");
   return parts.length > 1 ? parts[parts.length - 1]! : "";
@@ -75,7 +81,8 @@ export async function parseImportFileAction(
       },
     };
   } catch (err) {
-    console.error(err);
+    if (isNextNavigationError(err)) throw err;
+    console.error("[import] parse failed:", err);
     return { error: "Could not read this file. Try Excel export from your previous software." };
   }
 }
@@ -114,7 +121,8 @@ export async function confirmImportAction(
 
     return { result };
   } catch (err) {
-    console.error(err);
+    if (isNextNavigationError(err)) throw err;
+    console.error("[import] confirm failed:", err);
     return { error: "Import failed. Please try again with a smaller file." };
   }
 }
