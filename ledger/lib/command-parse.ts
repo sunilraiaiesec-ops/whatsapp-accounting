@@ -1,9 +1,15 @@
 export type CommandIntent = "create_receipt" | "create_payment" | "unknown";
 
+export type PaymentCategory = "supplier" | "expense";
+export type ReceiptCategory = "customer" | "sales";
+
 export type ParsedCommand = {
   intent: CommandIntent;
   amountText: string | null;
   partyName: string | null;
+  expenseDescription: string | null;
+  paymentCategory: PaymentCategory | null;
+  receiptCategory: ReceiptCategory | null;
   raw: string;
 };
 
@@ -18,8 +24,10 @@ const PAYMENT_PATTERNS = [
 const FROM_PATTERN =
   /\b(?:from|de|du|de la|des|customer|client|by)\s+(.+?)(?:\s+(?:for|pour|on|le|today|hier|yesterday)|$)/i;
 
-const TO_PATTERN =
-  /\b(?:to|à|a|au|pour|supplier|fournisseur|vendor)\s+(.+?)(?:\s+(?:for|pour|on|le|today|hier|yesterday)|$)/i;
+const TO_PARTY_PATTERN =
+  /\b(?:to|à|au|a|supplier|fournisseur|vendor)\s+(.+?)(?:\s+(?:for|pour|on|le|today|hier|yesterday)|$)/i;
+
+const FOR_REASON_PATTERN = /\b(?:for|pour)\s+(.+)$/i;
 
 function detectIntent(text: string): CommandIntent {
   const lower = text.toLowerCase();
@@ -30,7 +38,7 @@ function detectIntent(text: string): CommandIntent {
   if (isPayment && !isReceipt) return "create_payment";
   if (isReceipt && isPayment) {
     if (/\b(from|de|client)\b/i.test(text)) return "create_receipt";
-    if (/\b(to|à|fournisseur|supplier)\b/i.test(text)) return "create_payment";
+    if (/\b(to|à|fournisseur|supplier|for|pour)\b/i.test(text)) return "create_payment";
   }
   return "unknown";
 }
@@ -50,7 +58,8 @@ function extractAmount(text: string): string | null {
     const match = normalized.match(pattern);
     if (!match?.[1]) continue;
     let raw = match[1].replace(/[\s,.'']/g, "");
-    if (/million|millions|mio|\bm\b/i.test(normalized.slice(match.index ?? 0, (match.index ?? 0) + match[0].length + 10))) {
+    const slice = normalized.slice(match.index ?? 0, (match.index ?? 0) + match[0].length + 10);
+    if (/million|millions|mio|\bm\b/i.test(slice)) {
       const base = Number.parseFloat(raw);
       if (!Number.isNaN(base)) {
         raw = String(Math.round(base * 1_000_000));
@@ -61,26 +70,33 @@ function extractAmount(text: string): string | null {
   return null;
 }
 
-function cleanPartyName(name: string): string {
-  return name
+function cleanLabel(text: string): string {
+  return text
     .replace(/\b(xaf|fcfa|francs?|million|millions|today|hier|yesterday|aujourd'hui)\b/gi, "")
     .replace(/[\d,.'\s]+(?:million|millions|m)?/gi, "")
     .replace(/^[\s,.-]+|[\s,.-]+$/g, "")
     .trim();
 }
 
+function extractForReason(text: string): string | null {
+  const match = text.match(FOR_REASON_PATTERN);
+  if (!match?.[1]) return null;
+  const cleaned = cleanLabel(match[1]);
+  return cleaned.length >= 2 ? cleaned : null;
+}
+
 function extractPartyName(text: string, intent: CommandIntent): string | null {
-  const pattern = intent === "create_payment" ? TO_PATTERN : FROM_PATTERN;
+  const pattern = intent === "create_payment" ? TO_PARTY_PATTERN : FROM_PATTERN;
   const match = text.match(pattern);
   if (match?.[1]) {
-    const cleaned = cleanPartyName(match[1]);
+    const cleaned = cleanLabel(match[1]);
     if (cleaned.length >= 2) return cleaned;
   }
 
   if (intent === "create_receipt") {
     const fallback = text.match(/\bfrom\s+(.+)$/i) ?? text.match(/\bde\s+(.+)$/i);
     if (fallback?.[1]) {
-      const cleaned = cleanPartyName(fallback[1]);
+      const cleaned = cleanLabel(fallback[1]);
       if (cleaned.length >= 2) return cleaned;
     }
   }
@@ -88,7 +104,7 @@ function extractPartyName(text: string, intent: CommandIntent): string | null {
   if (intent === "create_payment") {
     const fallback = text.match(/\bto\s+(.+)$/i) ?? text.match(/\bà\s+(.+)$/i);
     if (fallback?.[1]) {
-      const cleaned = cleanPartyName(fallback[1]);
+      const cleaned = cleanLabel(fallback[1]);
       if (cleaned.length >= 2) return cleaned;
     }
   }
@@ -100,7 +116,45 @@ export function parseCommandText(text: string): ParsedCommand {
   const raw = text.trim();
   const intent = detectIntent(raw);
   const amountText = extractAmount(raw);
-  const partyName = intent === "unknown" ? null : extractPartyName(raw, intent);
 
-  return { intent, amountText, partyName, raw };
+  let partyName: string | null = null;
+  let expenseDescription: string | null = null;
+  let paymentCategory: PaymentCategory | null = null;
+  let receiptCategory: ReceiptCategory | null = null;
+
+  if (intent === "create_payment") {
+    partyName = extractPartyName(raw, intent);
+    const forReason = extractForReason(raw);
+
+    if (partyName) {
+      paymentCategory = "supplier";
+    } else if (forReason) {
+      expenseDescription = forReason;
+      paymentCategory = "expense";
+    } else {
+      paymentCategory = "expense";
+    }
+  } else if (intent === "create_receipt") {
+    partyName = extractPartyName(raw, intent);
+    const forReason = extractForReason(raw);
+
+    if (partyName) {
+      receiptCategory = "customer";
+    } else if (forReason) {
+      expenseDescription = forReason;
+      receiptCategory = "sales";
+    } else {
+      receiptCategory = "customer";
+    }
+  }
+
+  return {
+    intent,
+    amountText,
+    partyName,
+    expenseDescription,
+    paymentCategory,
+    receiptCategory,
+    raw,
+  };
 }

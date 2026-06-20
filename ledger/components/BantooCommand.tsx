@@ -52,6 +52,8 @@ export function BantooCommand() {
   const [partyName, setPartyName] = useState("");
   const [createParty, setCreateParty] = useState(false);
   const [bankAccountId, setBankAccountId] = useState("");
+  const [lineAccountId, setLineAccountId] = useState("");
+  const [expenseDescription, setExpenseDescription] = useState("");
   const [date, setDate] = useState("");
 
   const openDialog = useCallback(() => {
@@ -97,6 +99,8 @@ export function BantooCommand() {
     setPartyName(p.partyName);
     setCreateParty(p.createParty);
     setBankAccountId(p.bankAccountId);
+    setLineAccountId(p.lineAccountId);
+    setExpenseDescription(p.expenseDescription);
     setDate(p.date);
   }
 
@@ -158,9 +162,9 @@ export function BantooCommand() {
       createParty: createParty && !partyId,
       partyType: proposal.partyType,
       bankAccountId,
-      lineAccountId: proposal.lineAccountId,
+      lineAccountId,
       date,
-      description: proposal.description,
+      description: expenseDescription || proposal.description,
     };
 
     const result = await executeCommand(input);
@@ -265,41 +269,80 @@ export function BantooCommand() {
                 />
               </label>
 
-              <label className="block text-sm">
-                <span className="font-medium text-slate-700">{t("party")}</span>
-                {proposal.partyAlternatives.length > 0 ? (
-                  <select
-                    value={partyId ?? ""}
-                    onChange={(e) => handlePartySelect(e.target.value)}
-                    className="input-modern mt-1"
-                  >
-                    <option value="">— {partyName || "…"} —</option>
-                    {proposal.partyAlternatives.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
+              {(proposal.category === "expense" || proposal.category === "sales") && (
+                <label className="block text-sm">
+                  <span className="font-medium text-slate-700">{t("expenseDescription")}</span>
                   <input
                     type="text"
-                    value={partyName}
-                    onChange={(e) => setPartyName(e.target.value)}
+                    value={expenseDescription}
+                    onChange={(e) => setExpenseDescription(e.target.value)}
                     className="input-modern mt-1"
                   />
-                )}
+                </label>
+              )}
+
+              <label className="block text-sm">
+                <span className="font-medium text-slate-700">
+                  {proposal.category === "expense"
+                    ? t("expenseAccount")
+                    : proposal.category === "sales"
+                      ? t("incomeAccount")
+                      : proposal.intent === "create_receipt"
+                        ? t("incomeAccount")
+                        : t("expenseAccount")}
+                </span>
+                <select
+                  value={lineAccountId}
+                  onChange={(e) => setLineAccountId(e.target.value)}
+                  className="input-modern mt-1"
+                >
+                  {proposal.lineAccountAlternatives.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.label}
+                    </option>
+                  ))}
+                </select>
               </label>
 
-              {!partyId && partyName ? (
-                <label className="flex items-center gap-2 text-sm text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={createParty}
-                    onChange={(e) => setCreateParty(e.target.checked)}
-                    className="rounded border-slate-300"
-                  />
-                  {t("createParty")}
-                </label>
+              {!proposal.partyOptional ? (
+                <>
+                  <label className="block text-sm">
+                    <span className="font-medium text-slate-700">{t("party")}</span>
+                    {proposal.partyAlternatives.length > 0 ? (
+                      <select
+                        value={partyId ?? ""}
+                        onChange={(e) => handlePartySelect(e.target.value)}
+                        className="input-modern mt-1"
+                      >
+                        <option value="">— {partyName || "…"} —</option>
+                        {proposal.partyAlternatives.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={partyName}
+                        onChange={(e) => setPartyName(e.target.value)}
+                        className="input-modern mt-1"
+                      />
+                    )}
+                  </label>
+
+                  {!partyId && partyName ? (
+                    <label className="flex items-center gap-2 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={createParty}
+                        onChange={(e) => setCreateParty(e.target.checked)}
+                        className="rounded border-slate-300"
+                      />
+                      {t("createParty")}
+                    </label>
+                  ) : null}
+                </>
               ) : null}
 
               <label className="block text-sm">
