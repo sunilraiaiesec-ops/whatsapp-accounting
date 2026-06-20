@@ -45,7 +45,7 @@ export default async function EditPaymentPage({
         bankAccounts={banks.map((a) => ({
           id: a.id,
           label: `${a.code} — ${a.name}`,
-          balance: a.balance,
+          balanceLabel: `${formatAmount(a.balance, ctx.baseCurrency)} ${ctx.baseCurrency}`,
         }))}
         parties={parties.map((p) => ({ id: p.id, label: p.name }))}
         accounts={accounts.map((a) => ({ id: a.id, label: `${a.code} — ${a.name}` }))}

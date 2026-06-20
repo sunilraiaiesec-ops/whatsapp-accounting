@@ -9,6 +9,7 @@ import {
 import { listParties } from "@/lib/parties";
 import { createPaymentAction } from "@/app/actions/documents";
 import { CashDocForm } from "@/components/CashDocForm";
+import { formatAmount } from "@/lib/money";
 
 export default async function NewPaymentPage({
   searchParams,
@@ -51,7 +52,7 @@ export default async function NewPaymentPage({
         bankAccounts={banks.map((a) => ({
           id: a.id,
           label: `${a.code} — ${a.name}`,
-          balance: a.balance,
+          balanceLabel: `${formatAmount(a.balance, ctx.baseCurrency)} ${ctx.baseCurrency}`,
         }))}
         parties={parties.map((p) => ({ id: p.id, label: p.name }))}
         accounts={accounts.map((a) => ({

@@ -8,7 +8,7 @@ import type { DocState } from "@/app/actions/documents";
 import { parseAmount, formatAmount } from "@/lib/money";
 
 type Option = { id: string; label: string };
-type BankOption = Option & { balance?: bigint };
+type BankOption = Option & { balanceLabel?: string };
 type Row = { accountId: string; amount: string; memo: string };
 
 const initial: DocState = {};
@@ -163,11 +163,11 @@ export function CashDocForm({
                     </option>
                   ))}
                 </select>
-                {selectedBank?.balance !== undefined ? (
+                {selectedBank?.balanceLabel ? (
                   <p className="mt-1.5 text-xs text-[var(--muted)]">
                     {t("accountBalance")}:{" "}
                     <span className="font-semibold tabular-nums text-slate-700">
-                      {formatAmount(selectedBank.balance, currency)} {currency}
+                      {selectedBank.balanceLabel}
                     </span>
                   </p>
                 ) : null}
