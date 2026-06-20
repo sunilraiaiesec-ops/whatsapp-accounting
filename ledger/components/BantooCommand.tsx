@@ -35,6 +35,8 @@ function getSpeechRecognition(): SpeechRecognitionCtor | null {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
 
+const NEW_CATEGORY_VALUE = "__new_category__";
+
 export function BantooCommand() {
   const t = useTranslations("command");
   const router = useRouter();
@@ -111,7 +113,7 @@ export function BantooCommand() {
     setLineAccountOptions(p.lineAccountAlternatives);
     setExpenseDescription(p.expenseDescription);
     setNewCategoryName(p.suggestedCategoryName);
-    setShowNewCategory(p.suggestNewCategory);
+    setShowNewCategory(false);
     setDate(p.date);
   }
 
@@ -314,19 +316,45 @@ export function BantooCommand() {
                 </label>
               )}
 
-              <label className="block text-sm">
-                <span className="font-medium text-slate-700">
-                  {proposal.category === "expense"
-                    ? t("expenseAccount")
-                    : proposal.category === "sales"
-                      ? t("incomeAccount")
-                      : proposal.intent === "create_receipt"
+              <div className="block text-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-slate-700">
+                    {proposal.category === "expense"
+                      ? t("expenseAccount")
+                      : proposal.category === "sales"
                         ? t("incomeAccount")
-                        : t("expenseAccount")}
-                </span>
+                        : proposal.intent === "create_receipt"
+                          ? t("incomeAccount")
+                          : t("expenseAccount")}
+                  </span>
+                  {proposal.canAddExpenseCategory ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowNewCategory(true);
+                        if (!newCategoryName && expenseDescription) {
+                          setNewCategoryName(expenseDescription);
+                        }
+                      }}
+                      className="shrink-0 text-xs font-semibold text-[var(--brand)] hover:underline"
+                    >
+                      + {t("addCategoryShort")}
+                    </button>
+                  ) : null}
+                </div>
                 <select
-                  value={lineAccountId}
-                  onChange={(e) => setLineAccountId(e.target.value)}
+                  value={showNewCategory ? NEW_CATEGORY_VALUE : lineAccountId}
+                  onChange={(e) => {
+                    if (e.target.value === NEW_CATEGORY_VALUE) {
+                      setShowNewCategory(true);
+                      if (!newCategoryName && expenseDescription) {
+                        setNewCategoryName(expenseDescription);
+                      }
+                      return;
+                    }
+                    setShowNewCategory(false);
+                    setLineAccountId(e.target.value);
+                  }}
                   className="input-modern mt-1"
                 >
                   {lineAccountOptions.map((a) => (
@@ -334,52 +362,35 @@ export function BantooCommand() {
                       {a.label}
                     </option>
                   ))}
+                  {proposal.canAddExpenseCategory ? (
+                    <option value={NEW_CATEGORY_VALUE}>➕ {t("addCategoryOption")}</option>
+                  ) : null}
                 </select>
-              </label>
+              </div>
 
-              {proposal.category === "expense" ? (
-                showNewCategory ? (
-                  <div className="rounded-xl border border-[var(--border)] bg-slate-50/80 p-3">
-                    <p className="text-sm font-medium text-slate-800">{t("addCategory")}</p>
-                    <div className="mt-2 flex gap-2">
-                      <input
-                        type="text"
-                        value={newCategoryName}
-                        onChange={(e) => setNewCategoryName(e.target.value)}
-                        placeholder={t("categoryNamePlaceholder")}
-                        className="input-modern flex-1"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleCreateCategory}
-                        disabled={creatingCategory || !newCategoryName.trim()}
-                        className="btn-brand shrink-0 px-4"
-                      >
-                        {creatingCategory ? "…" : t("addCategorySave")}
-                      </button>
-                    </div>
+              {proposal.canAddExpenseCategory && showNewCategory ? (
+                <div className="rounded-xl border-2 border-[var(--brand)]/30 bg-[var(--brand)]/5 p-3">
+                  <p className="text-sm font-semibold text-slate-900">{t("addCategory")}</p>
+                  <p className="mt-0.5 text-xs text-[var(--muted)]">{t("addCategoryHint")}</p>
+                  <div className="mt-2 flex gap-2">
+                    <input
+                      type="text"
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      placeholder={t("categoryNamePlaceholder")}
+                      className="input-modern flex-1"
+                      autoFocus
+                    />
                     <button
                       type="button"
-                      onClick={() => setShowNewCategory(false)}
-                      className="mt-2 text-xs text-slate-500 hover:text-slate-800"
+                      onClick={handleCreateCategory}
+                      disabled={creatingCategory || !newCategoryName.trim()}
+                      className="btn-brand shrink-0 px-4"
                     >
-                      {t("cancel")}
+                      {creatingCategory ? "…" : t("addCategorySave")}
                     </button>
                   </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowNewCategory(true);
-                      if (!newCategoryName && expenseDescription) {
-                        setNewCategoryName(expenseDescription);
-                      }
-                    }}
-                    className="text-sm font-medium text-[var(--brand)] hover:underline"
-                  >
-                    + {t("addCategory")}
-                  </button>
-                )
+                </div>
               ) : null}
 
               {!proposal.partyOptional ? (

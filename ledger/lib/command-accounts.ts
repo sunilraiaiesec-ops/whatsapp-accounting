@@ -7,6 +7,7 @@ const EXPENSE_HINTS: { pattern: RegExp; accountPattern: RegExp }[] = [
   { pattern: /\b(rent|lease|loyer|bail)\b/i, accountPattern: /rent|loyer/i },
   { pattern: /\b(salary|salaries|wage|payroll|salaire)\b/i, accountPattern: /salary|wage|salaire/i },
   { pattern: /\b(bank|fee|charge|frais bancaire)\b/i, accountPattern: /bank charge|bank/i },
+  { pattern: /\b(facilitation|phytosanitary|certificate|certificat|customs|douane|fee|fees)\b/i, accountPattern: /general expense/i },
   { pattern: /\b(cogs|stock|inventory|marchandise)\b/i, accountPattern: /cost of goods|cogs/i },
 ];
 

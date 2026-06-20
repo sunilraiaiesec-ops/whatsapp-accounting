@@ -42,6 +42,7 @@ export type CommandProposalDto = {
   lineAccountAlternatives: { id: string; label: string }[];
   suggestNewCategory: boolean;
   suggestedCategoryName: string;
+  canAddExpenseCategory: boolean;
 };
 
 export type ExecuteCommandInput = {
@@ -139,11 +140,11 @@ export async function interpretCommand(
   const lineAccountAlternatives = lineAccounts
     .filter((a) =>
       category === "expense"
-        ? a.type === "EXPENSE"
+        ? a.type === "EXPENSE" && a.subtype !== "cogs"
         : category === "sales"
           ? a.type === "INCOME"
           : category === "supplier"
-            ? a.subtype === "payable" || a.type === "EXPENSE"
+            ? a.subtype === "payable" || (a.type === "EXPENSE" && a.subtype !== "cogs")
             : a.subtype === "receivable" || a.type === "INCOME",
     )
     .map((a) => ({ id: a.id, label: `${a.code} — ${a.name}` }));
@@ -232,6 +233,9 @@ export async function interpretCommand(
         a.label.toLowerCase().includes(expenseDescription.toLowerCase()),
       ),
     suggestedCategoryName: expenseDescription,
+    canAddExpenseCategory:
+      parsed.intent === "create_payment" &&
+      (category === "expense" || category === "supplier"),
   };
 
   return { proposal };
