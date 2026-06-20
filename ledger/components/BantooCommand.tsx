@@ -18,7 +18,7 @@ type BrowserSpeechRecognition = {
   interimResults: boolean;
   maxAlternatives: number;
   onstart: (() => void) | null;
-  onend: (() => void) | null;
+  onEnd: (() => void) | null;
   onerror: (() => void) | null;
   onresult: ((event: { results: { [index: number]: { [index: number]: { transcript: string } } } }) => void) | null;
   start: () => void;
@@ -37,10 +37,41 @@ function getSpeechRecognition(): SpeechRecognitionCtor | null {
 
 const NEW_CATEGORY_VALUE = "__new_category__";
 
+const inputClass =
+  "input-modern text-base md:text-sm";
+
+function OpenButton({
+  onClick,
+  className,
+  showLabel = true,
+}: {
+  onClick: () => void;
+  className?: string;
+  showLabel?: boolean;
+}) {
+  const t = useTranslations("command");
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={
+        className ??
+        "inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:border-[var(--brand)]/40 hover:text-[var(--brand)] md:px-4"
+      }
+    >
+      <span aria-hidden className="text-base">
+        ✨
+      </span>
+      {showLabel ? <span>{t("open")}</span> : null}
+    </button>
+  );
+}
+
 export function BantooCommand() {
   const t = useTranslations("command");
   const router = useRouter();
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
@@ -65,6 +96,12 @@ export function BantooCommand() {
   const [showNewCategory, setShowNewCategory] = useState(false);
   const [creatingCategory, setCreatingCategory] = useState(false);
   const [date, setDate] = useState("");
+  const [quantity, setQuantity] = useState("");
+  const [unitCost, setUnitCost] = useState("");
+  const [itemId, setItemId] = useState<string | null>(null);
+  const [itemOptions, setItemOptions] = useState<{ id: string; label: string }[]>([]);
+
+  const isInventory = proposal?.category === "inventory";
 
   const openDialog = useCallback(() => {
     setOpen(true);
@@ -87,9 +124,14 @@ export function BantooCommand() {
     if (!dialog) return;
     if (open) {
       if (!dialog.open) dialog.showModal();
+      document.body.style.overflow = "hidden";
     } else if (dialog.open) {
       dialog.close();
+      document.body.style.overflow = "";
     }
+    return () => {
+      document.body.style.overflow = "";
+    };
   }, [open]);
 
   useEffect(() => {
@@ -115,10 +157,15 @@ export function BantooCommand() {
     setNewCategoryName(p.suggestedCategoryName);
     setShowNewCategory(false);
     setDate(p.date);
+    setQuantity(p.quantity);
+    setUnitCost(p.unitCost);
+    setItemId(p.itemId);
+    setItemOptions(p.itemAlternatives);
+    scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  async function handleSuggest(event: React.FormEvent) {
-    event.preventDefault();
+  async function handleSuggest(event?: React.FormEvent) {
+    event?.preventDefault();
     const text = prompt.trim();
     if (!text) return;
 
@@ -151,7 +198,7 @@ export function BantooCommand() {
     recognition.maxAlternatives = 1;
 
     recognition.onstart = () => setListening(true);
-    recognition.onend = () => setListening(false);
+    recognition.onEnd = () => setListening(false);
     recognition.onerror = () => setListening(false);
     recognition.onresult = (event) => {
       const transcript = event.results[0]?.[0]?.transcript;
@@ -190,8 +237,11 @@ export function BantooCommand() {
     setError(null);
 
     const input: ExecuteCommandInput = {
-      intent: proposal.intent as "create_receipt" | "create_payment",
+      intent: proposal.intent as ExecuteCommandInput["intent"],
       amount: proposal.amount,
+      quantity,
+      unitCost,
+      itemId,
       partyId: partyId || null,
       partyName,
       createParty: createParty && !partyId,
@@ -199,7 +249,10 @@ export function BantooCommand() {
       bankAccountId,
       lineAccountId,
       date,
-      description: expenseDescription || proposal.description,
+      description:
+        proposal.category === "inventory"
+          ? proposal.description
+          : expenseDescription || proposal.description,
     };
 
     const result = await executeCommand(input);
@@ -226,27 +279,30 @@ export function BantooCommand() {
     }
   }
 
+  const showConfirmFooter = Boolean(proposal && !success);
+  const showSuggestFooter = Boolean(!proposal && !success);
+
   return (
     <>
+      <OpenButton onClick={openDialog} className="hidden md:inline-flex" />
+
       <button
         type="button"
         onClick={openDialog}
-        className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:border-[var(--brand)]/40 hover:text-[var(--brand)] md:px-4"
+        aria-label={t("open")}
+        className="fixed right-4 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-40 inline-flex h-14 w-14 items-center justify-center rounded-full bg-[var(--brand)] text-xl text-white shadow-lg ring-4 ring-white transition active:scale-95 md:hidden"
       >
-        <span aria-hidden className="text-base">
-          ✨
-        </span>
-        <span className="hidden sm:inline">{t("open")}</span>
+        ✨
       </button>
 
       <dialog
         ref={dialogRef}
         onClose={closeDialog}
-        className="fixed top-1/2 left-1/2 z-[200] m-0 w-[min(100vw-1.5rem,32rem)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-[var(--border)] bg-white p-0 shadow-2xl backdrop:bg-slate-900/40 open:flex open:flex-col"
+        className="fixed inset-0 z-[200] m-0 flex h-[100dvh] max-h-[100dvh] w-full max-w-none flex-col border-0 bg-white p-0 shadow-none backdrop:bg-slate-900/50 open:flex md:inset-auto md:top-1/2 md:left-1/2 md:h-auto md:max-h-[min(90dvh,40rem)] md:w-[min(100vw-1.5rem,32rem)] md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-2xl md:border md:border-[var(--border)] md:shadow-2xl"
       >
-        <div className="border-b border-[var(--border)] px-5 py-4">
+        <div className="shrink-0 border-b border-[var(--border)] px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] md:px-5 md:py-4 md:pt-4">
           <div className="flex items-start justify-between gap-3">
-            <div>
+            <div className="min-w-0 pr-2">
               <h2 className="text-lg font-semibold text-slate-900">{t("title")}</h2>
               <p className="mt-0.5 text-sm text-[var(--muted)]">{t("subtitle")}</p>
             </div>
@@ -254,20 +310,25 @@ export function BantooCommand() {
               type="button"
               aria-label={t("close")}
               onClick={closeDialog}
-              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-600"
             >
               ✕
             </button>
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-5 py-4">
+        <div
+          ref={scrollRef}
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 md:px-5"
+        >
           {success ? (
             <div className="rounded-xl border border-[var(--brand)]/20 bg-[var(--brand)]/5 p-4">
               <p className="font-medium text-slate-900">
-                {success.kind === "create_receipt"
-                  ? t("successReceipt", { number: success.number })
-                  : t("successPayment", { number: success.number })}
+                {success.kind === "create_goods_receipt"
+                  ? t("successGoodsReceipt", { number: success.number })
+                  : success.kind === "create_receipt"
+                    ? t("successReceipt", { number: success.number })
+                    : t("successPayment", { number: success.number })}
               </p>
               <button
                 type="button"
@@ -275,7 +336,7 @@ export function BantooCommand() {
                   router.push(success.href);
                   closeDialog();
                 }}
-                className="btn-brand mt-3"
+                className="btn-brand mt-3 w-full"
               >
                 {t("viewDocument")}
               </button>
@@ -294,13 +355,102 @@ export function BantooCommand() {
                 ))}
               </div>
 
+              {isInventory ? (
+                <>
+                  <label className="block text-sm">
+                    <span className="font-medium text-slate-700">{t("quantity")}</span>
+                    <input
+                      type="text"
+                      readOnly
+                      value={proposal.quantityDisplay}
+                      className={`${inputClass} mt-1 bg-slate-50`}
+                    />
+                  </label>
+
+                  <label className="block text-sm">
+                    <span className="font-medium text-slate-700">{t("inventoryItem")}</span>
+                    <select
+                      value={itemId ?? ""}
+                      onChange={(e) => setItemId(e.target.value || null)}
+                      className={`${inputClass} mt-1`}
+                    >
+                      <option value="">— {proposal.itemName || "…"} —</option>
+                      {itemOptions.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="block text-sm">
+                    <span className="font-medium text-slate-700">{t("unitCost")}</span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={unitCost}
+                      onChange={(e) => setUnitCost(e.target.value)}
+                      placeholder={t("unitCostPlaceholder")}
+                      className={`${inputClass} mt-1`}
+                    />
+                  </label>
+
+                  <label className="block text-sm">
+                    <span className="font-medium text-slate-700">{t("supplier")}</span>
+                    {proposal.partyAlternatives.length > 0 ? (
+                      <select
+                        value={partyId ?? ""}
+                        onChange={(e) => handlePartySelect(e.target.value)}
+                        className={`${inputClass} mt-1`}
+                      >
+                        <option value="">— {partyName || "…"} —</option>
+                        {proposal.partyAlternatives.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={partyName}
+                        onChange={(e) => setPartyName(e.target.value)}
+                        className={`${inputClass} mt-1`}
+                      />
+                    )}
+                  </label>
+
+                  {!partyId && partyName ? (
+                    <label className="flex items-center gap-2 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={createParty}
+                        onChange={(e) => setCreateParty(e.target.checked)}
+                        className="rounded border-slate-300"
+                      />
+                      {t("createSupplier")}
+                    </label>
+                  ) : null}
+
+                  <label className="block text-sm">
+                    <span className="font-medium text-slate-700">{t("date")}</span>
+                    <input
+                      type="date"
+                      value={date}
+                      onChange={(e) => setDate(e.target.value)}
+                      className={`${inputClass} mt-1`}
+                    />
+                  </label>
+                </>
+              ) : (
+                <>
               <label className="block text-sm">
                 <span className="font-medium text-slate-700">{t("amount")}</span>
                 <input
                   type="text"
                   readOnly
                   value={proposal.amountDisplay}
-                  className="input-modern mt-1 bg-slate-50"
+                  className={`${inputClass} mt-1 bg-slate-50`}
                 />
               </label>
 
@@ -311,7 +461,7 @@ export function BantooCommand() {
                     type="text"
                     value={expenseDescription}
                     onChange={(e) => setExpenseDescription(humanizeDescription(e.target.value))}
-                    className="input-modern mt-1"
+                    className={`${inputClass} mt-1`}
                   />
                 </label>
               )}
@@ -355,7 +505,7 @@ export function BantooCommand() {
                     setShowNewCategory(false);
                     setLineAccountId(e.target.value);
                   }}
-                  className="input-modern mt-1"
+                  className={`${inputClass} mt-1`}
                 >
                   {lineAccountOptions.map((a) => (
                     <option key={a.id} value={a.id}>
@@ -372,14 +522,13 @@ export function BantooCommand() {
                 <div className="rounded-xl border-2 border-[var(--brand)]/30 bg-[var(--brand)]/5 p-3">
                   <p className="text-sm font-semibold text-slate-900">{t("addCategory")}</p>
                   <p className="mt-0.5 text-xs text-[var(--muted)]">{t("addCategoryHint")}</p>
-                  <div className="mt-2 flex gap-2">
+                  <div className="mt-2 flex flex-col gap-2 sm:flex-row">
                     <input
                       type="text"
                       value={newCategoryName}
                       onChange={(e) => setNewCategoryName(e.target.value)}
                       placeholder={t("categoryNamePlaceholder")}
-                      className="input-modern flex-1"
-                      autoFocus
+                      className={`${inputClass} flex-1`}
                     />
                     <button
                       type="button"
@@ -393,7 +542,7 @@ export function BantooCommand() {
                 </div>
               ) : null}
 
-              {!proposal.partyOptional ? (
+              {!isInventory && !proposal.partyOptional ? (
                 <>
                   <label className="block text-sm">
                     <span className="font-medium text-slate-700">{t("party")}</span>
@@ -401,7 +550,7 @@ export function BantooCommand() {
                       <select
                         value={partyId ?? ""}
                         onChange={(e) => handlePartySelect(e.target.value)}
-                        className="input-modern mt-1"
+                        className={`${inputClass} mt-1`}
                       >
                         <option value="">— {partyName || "…"} —</option>
                         {proposal.partyAlternatives.map((p) => (
@@ -415,7 +564,7 @@ export function BantooCommand() {
                         type="text"
                         value={partyName}
                         onChange={(e) => setPartyName(e.target.value)}
-                        className="input-modern mt-1"
+                        className={`${inputClass} mt-1`}
                       />
                     )}
                   </label>
@@ -434,12 +583,13 @@ export function BantooCommand() {
                 </>
               ) : null}
 
+              {!isInventory ? (
               <label className="block text-sm">
                 <span className="font-medium text-slate-700">{t("bankAccount")}</span>
                 <select
                   value={bankAccountId}
                   onChange={(e) => setBankAccountId(e.target.value)}
-                  className="input-modern mt-1"
+                  className={`${inputClass} mt-1`}
                 >
                   {proposal.bankAlternatives.map((b) => (
                     <option key={b.id} value={b.id}>
@@ -448,6 +598,7 @@ export function BantooCommand() {
                   ))}
                 </select>
               </label>
+              ) : null}
 
               <label className="block text-sm">
                 <span className="font-medium text-slate-700">{t("date")}</span>
@@ -455,29 +606,38 @@ export function BantooCommand() {
                   type="date"
                   value={date}
                   onChange={(e) => setDate(e.target.value)}
-                  className="input-modern mt-1"
+                  className={`${inputClass} mt-1`}
                 />
               </label>
+                </>
+              )}
             </div>
           ) : (
-            <form onSubmit={handleSuggest} className="space-y-3">
+            <div className="space-y-3">
               <div className="relative">
                 <textarea
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
                   placeholder={t("placeholder")}
-                  rows={3}
-                  className="input-modern resize-none pr-12"
+                  rows={4}
+                  enterKeyHint="go"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      void handleSuggest();
+                    }
+                  }}
+                  className={`${inputClass} min-h-[7rem] resize-none pr-12`}
                   autoFocus
                 />
                 <button
                   type="button"
                   title={t("voice")}
                   onClick={startVoice}
-                  className={`absolute right-2 bottom-2 inline-flex h-9 w-9 items-center justify-center rounded-lg transition ${
+                  className={`absolute right-2 bottom-2 inline-flex h-10 w-10 items-center justify-center rounded-full transition ${
                     listening
                       ? "bg-red-100 text-red-600"
-                      : "text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                      : "bg-slate-100 text-slate-600"
                   }`}
                 >
                   🎤
@@ -487,10 +647,7 @@ export function BantooCommand() {
                 <p className="text-sm text-[var(--brand)]">{t("listening")}</p>
               ) : null}
               <p className="text-xs text-[var(--muted)]">{t("examples")}</p>
-              <button type="submit" disabled={loading || !prompt.trim()} className="btn-brand w-full">
-                {loading ? "…" : t("submit")}
-              </button>
-            </form>
+            </div>
           )}
 
           {error ? (
@@ -498,26 +655,41 @@ export function BantooCommand() {
           ) : null}
         </div>
 
-        {proposal && !success ? (
-          <div className="flex gap-2 border-t border-[var(--border)] px-5 py-4">
+        {showSuggestFooter ? (
+          <div className="shrink-0 border-t border-[var(--border)] bg-white px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-5 md:py-4 md:pb-4">
             <button
               type="button"
-              onClick={() => {
-                setProposal(null);
-                setError(null);
-              }}
-              className="flex-1 rounded-full border border-[var(--border)] px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              disabled={loading || !prompt.trim()}
+              onClick={() => void handleSuggest()}
+              className="btn-brand w-full py-3.5 text-base"
             >
-              {t("cancel")}
+              {loading ? "…" : t("submit")}
             </button>
-            <button
-              type="button"
-              onClick={handleConfirm}
-              disabled={executing}
-              className="btn-brand flex-1"
-            >
-              {executing ? t("confirming") : t("confirm")}
-            </button>
+          </div>
+        ) : null}
+
+        {showConfirmFooter ? (
+          <div className="shrink-0 border-t border-[var(--border)] bg-white px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-5 md:py-4 md:pb-4">
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setProposal(null);
+                  setError(null);
+                }}
+                className="flex-1 rounded-full border border-[var(--border)] px-4 py-3 text-sm font-medium text-slate-700"
+              >
+                {t("cancel")}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirm}
+                disabled={executing}
+                className="btn-brand flex-1 py-3"
+              >
+                {executing ? t("confirming") : t("confirm")}
+              </button>
+            </div>
           </div>
         ) : null}
       </dialog>

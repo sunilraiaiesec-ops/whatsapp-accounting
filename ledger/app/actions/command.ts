@@ -9,20 +9,28 @@ import {
   receivableAccount,
 } from "@/lib/accounts";
 import { pickExpenseAccount, pickSalesAccount } from "@/lib/command-accounts";
-import { rankParties } from "@/lib/command-match";
+import { rankInventoryItems, rankParties } from "@/lib/command-match";
 import { humanizeDescription, parseCommandText } from "@/lib/command-parse";
 import { createPayment, createReceipt, DocumentError } from "@/lib/documents";
+import { listInventoryItems, receiveGoods } from "@/lib/inventory";
 import { formatMoney, parseAmount } from "@/lib/money";
 import { createParty, listParties } from "@/lib/parties";
 import { prisma } from "@/lib/prisma";
 
 export type CommandProposalDto = {
-  intent: "create_receipt" | "create_payment" | "unknown";
-  category: "customer" | "supplier" | "expense" | "sales";
+  intent: "create_receipt" | "create_payment" | "create_goods_receipt" | "unknown";
+  category: "customer" | "supplier" | "expense" | "sales" | "inventory";
   summary: string;
   confidence: "high" | "medium" | "low";
   amount: string;
   amountDisplay: string;
+  quantity: string;
+  quantityUnit: string;
+  quantityDisplay: string;
+  itemId: string | null;
+  itemName: string;
+  itemMatch: "exact" | "fuzzy" | "none";
+  unitCost: string;
   partyId: string | null;
   partyName: string;
   partyOptional: boolean;
@@ -40,14 +48,18 @@ export type CommandProposalDto = {
   partyAlternatives: { id: string; name: string }[];
   bankAlternatives: { id: string; label: string }[];
   lineAccountAlternatives: { id: string; label: string }[];
+  itemAlternatives: { id: string; label: string }[];
   suggestNewCategory: boolean;
   suggestedCategoryName: string;
   canAddExpenseCategory: boolean;
 };
 
 export type ExecuteCommandInput = {
-  intent: "create_receipt" | "create_payment";
+  intent: "create_receipt" | "create_payment" | "create_goods_receipt";
   amount: string;
+  quantity: string;
+  unitCost: string;
+  itemId: string | null;
   partyId: string | null;
   partyName: string;
   createParty: boolean;
@@ -68,6 +80,109 @@ export async function interpretCommand(
     return {
       error:
         "I couldn't tell if this is money received or paid. Try: “Received 25 million XAF from Elhaji Adoum” or “Paid 45,000 for tire change”.",
+    };
+  }
+
+  if (parsed.intent === "create_goods_receipt") {
+    if (!parsed.quantityText) {
+      return {
+        error:
+          "Please include a quantity with a unit, e.g. “Received 150 bags of rice” or “Received 500 kg of flour”.",
+      };
+    }
+
+    const quantity = parsed.quantityText;
+    const quantityUnit = parsed.quantityUnit ?? "units";
+    const itemName = humanizeDescription(parsed.itemDescription ?? "");
+    const partyType = "supplier" as const;
+
+    const [parties, items] = await Promise.all([
+      listParties(ctx.orgId, partyType),
+      listInventoryItems(ctx.orgId),
+    ]);
+
+    const rankedParties = parsed.partyName ? rankParties(parsed.partyName, parties) : [];
+    const partyTop = rankedParties[0];
+    const partyId = partyTop && partyTop.score >= 0.85 ? partyTop.id : null;
+    const partyName = parsed.partyName ?? partyTop?.name ?? "";
+    const partyMatch: CommandProposalDto["partyMatch"] =
+      partyTop?.score === 1 ? "exact" : partyTop && partyTop.score >= 0.85 ? "fuzzy" : "none";
+
+    const rankedItems = itemName
+      ? rankInventoryItems(itemName, items)
+      : [];
+    const itemTop = rankedItems[0];
+    const itemId = itemTop && itemTop.score >= 0.85 ? itemTop.id : null;
+    const itemMatch: CommandProposalDto["itemMatch"] =
+      itemTop?.score === 1 ? "exact" : itemTop && itemTop.score >= 0.85 ? "fuzzy" : "none";
+
+    const itemAlternatives = items.map((item) => ({
+      id: item.id,
+      label: `${item.code} — ${item.name}`,
+    }));
+
+    const warnings: string[] = [];
+    if (!itemName) {
+      warnings.push("Pick which inventory item was received.");
+    } else if (itemMatch === "none") {
+      warnings.push(`“${itemName}” was not found — choose the matching item below.`);
+    } else if (itemMatch === "fuzzy") {
+      warnings.push(`Matched “${itemTop?.name}” — change below if that's not right.`);
+    }
+    if (!partyName) {
+      warnings.push("Choose the supplier this stock came from.");
+    } else if (partyMatch === "none") {
+      warnings.push(`“${partyName}” was not found — a new supplier can be created when you confirm.`);
+    } else if (partyMatch === "fuzzy") {
+      warnings.push(`Matched supplier “${partyTop?.name}” — change below if that's not right.`);
+    }
+    warnings.push("Enter the unit cost before confirming.");
+
+    const qtyDisplay = Number(quantity).toLocaleString("en-US");
+    const quantityDisplay = `${qtyDisplay} ${quantityUnit}`;
+    const summary = itemName
+      ? `Receive stock: ${quantityDisplay} of ${itemName}`
+      : `Receive stock: ${quantityDisplay}`;
+
+    const today = new Date().toISOString().slice(0, 10);
+
+    return {
+      proposal: {
+        intent: "create_goods_receipt",
+        category: "inventory",
+        summary,
+        confidence: itemMatch !== "none" && partyMatch !== "none" ? "high" : "medium",
+        amount: "0",
+        amountDisplay: "",
+        quantity,
+        quantityUnit,
+        quantityDisplay,
+        itemId,
+        itemName,
+        itemMatch,
+        unitCost: "",
+        partyId,
+        partyName,
+        partyOptional: false,
+        partyMatch,
+        createParty: partyMatch === "none" && partyName.length > 0,
+        partyType,
+        expenseDescription: "",
+        bankAccountId: "",
+        bankAccountLabel: "",
+        lineAccountId: "",
+        lineAccountLabel: "",
+        date: today,
+        description: itemName || text.trim(),
+        warnings,
+        partyAlternatives: rankedParties.map((p) => ({ id: p.id, name: p.name })),
+        bankAlternatives: [],
+        lineAccountAlternatives: [],
+        itemAlternatives,
+        suggestNewCategory: false,
+        suggestedCategoryName: "",
+        canAddExpenseCategory: false,
+      },
     };
   }
 
@@ -203,6 +318,13 @@ export async function interpretCommand(
             : "low",
     amount: amount.toString(),
     amountDisplay: money,
+    quantity: "",
+    quantityUnit: "",
+    quantityDisplay: "",
+    itemId: null,
+    itemName: "",
+    itemMatch: "none",
+    unitCost: "",
     partyId,
     partyName,
     partyOptional,
@@ -226,6 +348,7 @@ export async function interpretCommand(
       lineAccountAlternatives.length > 0
         ? lineAccountAlternatives
         : [{ id: lineAccount.id, label: `${lineAccount.code} — ${lineAccount.name}` }],
+    itemAlternatives: [],
     suggestNewCategory:
       category === "expense" &&
       expenseDescription.length >= 3 &&
@@ -247,6 +370,51 @@ export async function executeCommand(
   const ctx = await requireContext();
 
   try {
+    const date = new Date(input.date);
+    if (Number.isNaN(date.getTime())) {
+      return { ok: false, error: "Invalid date." };
+    }
+
+    if (input.intent === "create_goods_receipt") {
+      if (!input.itemId) {
+        return { ok: false, error: "Choose an inventory item." };
+      }
+      if (!input.quantity.trim()) {
+        return { ok: false, error: "Quantity is required." };
+      }
+
+      const unitCost = parseAmount(input.unitCost, ctx.baseCurrency);
+      if (unitCost <= 0n) {
+        return { ok: false, error: "Unit cost must be greater than zero." };
+      }
+
+      let partyId = input.partyId;
+      if (!partyId && input.createParty && input.partyName.trim()) {
+        const created = await createParty(ctx.orgId, {
+          name: input.partyName.trim(),
+          type: "supplier",
+        });
+        partyId = created.id;
+      }
+      if (!partyId) {
+        return { ok: false, error: "Choose a supplier." };
+      }
+
+      const receipt = await receiveGoods(ctx.orgId, {
+        partyId,
+        date,
+        notes: input.description || null,
+        lines: [
+          {
+            itemId: input.itemId,
+            quantity: input.quantity,
+            unitCost,
+          },
+        ],
+      });
+      return { ok: true, href: `/goods-receipts/${receipt.id}`, number: receipt.number };
+    }
+
     const amount = BigInt(input.amount);
     if (amount <= 0n) return { ok: false, error: "Amount must be greater than zero." };
 
@@ -257,11 +425,6 @@ export async function executeCommand(
         type: input.partyType,
       });
       partyId = created.id;
-    }
-
-    const date = new Date(input.date);
-    if (Number.isNaN(date.getTime())) {
-      return { ok: false, error: "Invalid date." };
     }
 
     if (input.intent === "create_receipt") {

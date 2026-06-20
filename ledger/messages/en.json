@@ -97,7 +97,7 @@
   "command": {
     "open": "Ask Bantoo",
     "title": "What would you like to do?",
-    "subtitle": "Describe a receipt, payment, or other action in plain language.",
+    "subtitle": "Describe a receipt, payment, stock received, or other action in plain language.",
     "placeholder": "e.g. Received 25 million XAF from Elhaji Adoum",
     "submit": "Suggest action",
     "listening": "Listening…",
@@ -109,6 +109,12 @@
     "confirming": "Saving…",
     "suggestedAction": "Suggested action",
     "amount": "Amount",
+    "quantity": "Quantity",
+    "inventoryItem": "Inventory item",
+    "unitCost": "Unit cost",
+    "unitCostPlaceholder": "e.g. 25,000",
+    "supplier": "Supplier",
+    "createSupplier": "Create new supplier on save",
     "party": "Customer / supplier (optional)",
     "expenseDescription": "What was this for?",
     "expenseAccount": "Expense account",
@@ -123,9 +129,10 @@
     "bankAccount": "Bank or cash account",
     "date": "Date",
     "createParty": "Create new contact on save",
-    "examples": "Try: “Received 2 million from Acme Corp”, “Paid 150,000 to Supplier Name”, or “Paid 45,000 for tire change”",
+    "examples": "Try: “Received 2 million from Acme Corp”, “Paid 45,000 for tire change”, or “Received 150 bags of rice from Supplier”",
     "successReceipt": "Receipt {number} saved.",
     "successPayment": "Payment {number} saved.",
+    "successGoodsReceipt": "Goods receipt {number} saved.",
     "viewDocument": "View"
   },
   "auth": {

@@ -25,6 +25,28 @@ function tokenOverlap(a: string, b: string): number {
   return shared / Math.max(ta.size, tb.size);
 }
 
+export function rankInventoryItems(
+  query: string,
+  items: { id: string; name: string; code: string }[],
+): PartyCandidate[] {
+  const nq = normalize(query);
+  if (!nq) return [];
+
+  return items
+    .map((item) => {
+      const label = `${item.code} ${item.name}`;
+      const nl = normalize(label);
+      let score = 0;
+      if (nl === nq || normalize(item.name) === nq) score = 1;
+      else if (nl.includes(nq) || nq.includes(normalize(item.name))) score = 0.85;
+      else score = tokenOverlap(query, label);
+      return { id: item.id, name: item.name, score };
+    })
+    .filter((item) => item.score >= 0.35)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5);
+}
+
 export function rankParties(
   query: string,
   parties: { id: string; name: string }[],

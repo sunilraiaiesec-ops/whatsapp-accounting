@@ -1,4 +1,8 @@
-export type CommandIntent = "create_receipt" | "create_payment" | "unknown";
+export type CommandIntent =
+  | "create_receipt"
+  | "create_payment"
+  | "create_goods_receipt"
+  | "unknown";
 
 export type PaymentCategory = "supplier" | "expense";
 export type ReceiptCategory = "customer" | "sales";
@@ -6,6 +10,9 @@ export type ReceiptCategory = "customer" | "sales";
 export type ParsedCommand = {
   intent: CommandIntent;
   amountText: string | null;
+  quantityText: string | null;
+  quantityUnit: string | null;
+  itemDescription: string | null;
   partyName: string | null;
   expenseDescription: string | null;
   paymentCategory: PaymentCategory | null;
@@ -17,9 +24,19 @@ const RECEIPT_PATTERNS = [
   /\b(received?|receive|reçu|recu|encaiss(?:é|e|ement)?|got)\b/i,
 ];
 
+const STOCK_RECEIPT_PATTERNS = [
+  /\b(received?|receive|got|reçu|recu|entr(?:ée|e)|stock)\b/i,
+];
+
 const PAYMENT_PATTERNS = [
   /\b(paid?|pay|payé|paye|décaiss(?:é|e|ement)?|decaiss(?:é|e|ement)?|sent)\b/i,
 ];
+
+const QUANTITY_PATTERN =
+  /(\d[\d\s,.'']*(?:\.\d+)?)\s*(bags?|units?|unités?|kg|kilos?|kilogrammes?|tons?|tonnes?|cartons?|pieces?|pièces?|sacks?|sacs?|boxes?|boîtes?|crates?|pallets?|liters?|litres?|pcs|sachets?)\b/i;
+
+const CURRENCY_PATTERN = /\b(xaf|fcfa|francs?|cfa)\b/i;
+const MONEY_MODIFIER_PATTERN = /\b(million|millions|mio|\bm\b)\b/i;
 
 const FROM_PATTERN =
   /\b(?:from|de|du|de la|des|customer|client|by)\s+(.+?)(?:\s+(?:for|pour|on|le|today|hier|yesterday)|$)/i;
@@ -33,6 +50,13 @@ function detectIntent(text: string): CommandIntent {
   const lower = text.toLowerCase();
   const isReceipt = RECEIPT_PATTERNS.some((p) => p.test(lower));
   const isPayment = PAYMENT_PATTERNS.some((p) => p.test(lower));
+  const isStockReceipt = STOCK_RECEIPT_PATTERNS.some((p) => p.test(lower));
+  const hasQuantity = QUANTITY_PATTERN.test(text);
+  const hasCurrency = CURRENCY_PATTERN.test(text);
+
+  if (isStockReceipt && hasQuantity && !hasCurrency) {
+    return "create_goods_receipt";
+  }
 
   if (isReceipt && !isPayment) return "create_receipt";
   if (isPayment && !isReceipt) return "create_payment";
@@ -41,6 +65,29 @@ function detectIntent(text: string): CommandIntent {
     if (/\b(to|à|fournisseur|supplier|for|pour)\b/i.test(text)) return "create_payment";
   }
   return "unknown";
+}
+
+function extractQuantity(text: string): { quantity: string; unit: string } | null {
+  const match = text.match(QUANTITY_PATTERN);
+  if (!match?.[1] || !match[2]) return null;
+  const quantity = match[1].replace(/[\s,.'']/g, "");
+  if (!quantity || quantity === "0") return null;
+  return { quantity, unit: match[2].toLowerCase() };
+}
+
+function extractItemDescription(text: string): string | null {
+  const match = text.match(/\bof\s+(.+)$/i) ?? text.match(/\bde\s+(.+)$/i);
+  if (!match?.[1]) return null;
+  let desc = match[1]
+    .replace(/\s+(?:from|de|du|de la|des|by|par)\s+.+$/i, "")
+    .trim();
+  desc = humanizeDescription(desc);
+  return desc.length >= 2 ? desc : null;
+}
+
+function isQuantityNumber(text: string, numberStart: number): boolean {
+  const tail = text.slice(numberStart, numberStart + 40);
+  return QUANTITY_PATTERN.test(tail) && !MONEY_MODIFIER_PATTERN.test(tail);
 }
 
 function extractAmount(text: string): string | null {
@@ -57,6 +104,8 @@ function extractAmount(text: string): string | null {
   for (const pattern of patterns) {
     const match = normalized.match(pattern);
     if (!match?.[1]) continue;
+    const matchIndex = match.index ?? 0;
+    if (isQuantityNumber(normalized, matchIndex)) continue;
     let raw = match[1].replace(/[\s,.'']/g, "");
     const slice = normalized.slice(match.index ?? 0, (match.index ?? 0) + match[0].length + 10);
     if (/million|millions|mio|\bm\b/i.test(slice)) {
@@ -168,14 +217,19 @@ function extractPartyName(text: string, intent: CommandIntent): string | null {
 export function parseCommandText(text: string): ParsedCommand {
   const raw = text.trim();
   const intent = detectIntent(raw);
-  const amountText = extractAmount(raw);
+  const quantityMatch = intent === "create_goods_receipt" ? extractQuantity(raw) : null;
+  const amountText = intent === "create_goods_receipt" ? null : extractAmount(raw);
 
   let partyName: string | null = null;
   let expenseDescription: string | null = null;
   let paymentCategory: PaymentCategory | null = null;
   let receiptCategory: ReceiptCategory | null = null;
+  let itemDescription: string | null = null;
 
-  if (intent === "create_payment") {
+  if (intent === "create_goods_receipt") {
+    itemDescription = extractItemDescription(raw);
+    partyName = extractPartyName(raw, "create_receipt");
+  } else if (intent === "create_payment") {
     partyName = extractPartyName(raw, intent);
     const forReason = extractForReason(raw);
 
@@ -204,6 +258,9 @@ export function parseCommandText(text: string): ParsedCommand {
   return {
     intent,
     amountText,
+    quantityText: quantityMatch?.quantity ?? null,
+    quantityUnit: quantityMatch?.unit ?? null,
+    itemDescription,
     partyName,
     expenseDescription,
     paymentCategory,

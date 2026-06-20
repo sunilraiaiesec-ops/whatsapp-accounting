@@ -97,7 +97,7 @@
   "command": {
     "open": "Demander à Bantoo",
     "title": "Que souhaitez-vous faire ?",
-    "subtitle": "Décrivez un encaissement, un décaissement ou une autre action en langage simple.",
+    "subtitle": "Décrivez un encaissement, un décaissement, une entrée de stock ou une autre action en langage simple.",
     "placeholder": "ex. Reçu 25 millions XAF de Elhaji Adoum",
     "submit": "Suggérer une action",
     "listening": "Écoute…",
@@ -109,6 +109,12 @@
     "confirming": "Enregistrement…",
     "suggestedAction": "Action suggérée",
     "amount": "Montant",
+    "quantity": "Quantité",
+    "inventoryItem": "Article de stock",
+    "unitCost": "Coût unitaire",
+    "unitCostPlaceholder": "ex. 25 000",
+    "supplier": "Fournisseur",
+    "createSupplier": "Créer un nouveau fournisseur à l'enregistrement",
     "party": "Client / fournisseur (facultatif)",
     "expenseDescription": "Motif",
     "expenseAccount": "Compte de charge",
@@ -122,9 +128,10 @@
     "bankAccount": "Compte banque ou caisse",
     "date": "Date",
     "createParty": "Créer un nouveau contact à l'enregistrement",
-    "examples": "Essayez : « Reçu 2 millions de Acme Corp », « Payé 150 000 à Fournisseur », ou « Payé 45 000 pour changement de pneu »",
+    "examples": "Essayez : « Reçu 2 millions de Acme Corp », « Payé 45 000 pour changement de pneu », ou « Reçu 150 sacs de riz de Fournisseur »",
     "successReceipt": "Encaissement {number} enregistré.",
     "successPayment": "Décaissement {number} enregistré.",
+    "successGoodsReceipt": "Entrée de stock {number} enregistrée.",
     "viewDocument": "Voir"
   },
   "auth": {
