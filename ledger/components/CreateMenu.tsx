@@ -44,7 +44,7 @@ const SECTIONS: CreateSection[] = [
   {
     titleKey: "suppliers",
     items: [
-      { labelKey: "expense", soon: true },
+      { labelKey: "expense", href: "/payments/new?kind=expense" },
       { labelKey: "cheque", soon: true },
       { labelKey: "bill", href: "/purchase-invoices/new" },
       { labelKey: "payBills", href: "/payments/new" },

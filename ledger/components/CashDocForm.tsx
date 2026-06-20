@@ -31,6 +31,7 @@ export function CashDocForm({
   documentId,
   defaults,
   defaultLineAccountId = "",
+  saveLabel,
 }: {
   mode: "receipt" | "payment";
   action: (prev: DocState, fd: FormData) => Promise<DocState>;
@@ -41,6 +42,7 @@ export function CashDocForm({
   documentId?: string;
   defaults?: CashDefaults;
   defaultLineAccountId?: string;
+  saveLabel?: string;
 }) {
   const [state, formAction, pending] = useActionState(action, initial);
   const tc = useTranslations("common");
@@ -250,7 +252,7 @@ export function CashDocForm({
             ? tc("saving")
             : documentId
               ? t("saveChanges")
-              : t("save")}
+              : saveLabel ?? t("save")}
         </button>
       </div>
     </form>
