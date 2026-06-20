@@ -53,6 +53,7 @@ export default async function EditReceiptPage({
           lines: receipt.lines.map((l) => ({
             accountId: l.accountId,
             amount: formatAmount(l.amount, ctx.baseCurrency),
+            memo: l.memo ?? "",
           })),
         }}
       />

@@ -59,7 +59,7 @@ function parseInvoiceLines(formData: FormData, currency: string) {
 }
 
 function parseCashLines(formData: FormData, currency: string) {
-  let raw: { accountId?: string; amount?: string }[];
+  let raw: { accountId?: string; amount?: string; memo?: string }[];
   try {
     raw = JSON.parse(String(formData.get("lines") || "[]"));
   } catch {
@@ -69,6 +69,7 @@ function parseCashLines(formData: FormData, currency: string) {
     .map((l) => ({
       accountId: l.accountId ?? "",
       amount: parseAmount(l.amount ?? "0", currency),
+      memo: l.memo?.trim() || null,
     }))
     .filter((l) => l.accountId && l.amount > 0n);
 }
