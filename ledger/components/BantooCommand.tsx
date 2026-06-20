@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslations } from "next-intl";
 
 import {
@@ -62,7 +63,7 @@ function OpenButton({
       <span aria-hidden className="text-base">
         ✨
       </span>
-      {showLabel ? <span>{t("open")}</span> : null}
+      {showLabel ? <span className="hidden sm:inline">{t("open")}</span> : null}
     </button>
   );
 }
@@ -71,6 +72,7 @@ export function BantooCommand() {
   const t = useTranslations("command");
   const router = useRouter();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
@@ -116,6 +118,10 @@ export function BantooCommand() {
     setProposal(null);
     setError(null);
     setSuccess(null);
+  }, []);
+
+  useEffect(() => {
+    setMounted(true);
   }, []);
 
   useEffect(() => {
@@ -288,38 +294,25 @@ export function BantooCommand() {
   const showConfirmFooter = Boolean(proposal && !success);
   const showSuggestFooter = Boolean(!proposal && !success);
 
-  return (
-    <>
-      <OpenButton onClick={openDialog} className="hidden md:inline-flex" />
-
+  const modal = open ? (
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center p-3 max-md:items-end max-md:p-0"
+      role="presentation"
+    >
       <button
         type="button"
-        onClick={openDialog}
-        aria-label={t("open")}
-        className="fixed right-4 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-40 inline-flex h-14 w-14 items-center justify-center rounded-full bg-[var(--brand)] text-xl text-white shadow-lg ring-4 ring-white transition active:scale-95 md:hidden"
+        aria-label={t("close")}
+        onClick={closeDialog}
+        className="absolute inset-0 bg-slate-900/50"
+      />
+
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="bantoo-command-title"
+        className="relative flex max-h-[min(90dvh,40rem)] w-[min(100vw-1.5rem,32rem)] flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-white shadow-2xl max-md:max-h-[100dvh] max-md:w-full max-md:rounded-b-none max-md:rounded-t-2xl"
       >
-        ✨
-      </button>
-
-      {open ? (
-        <div
-          className="fixed inset-0 z-[200] flex items-end justify-center md:items-center md:p-4"
-          role="presentation"
-        >
-          <button
-            type="button"
-            aria-label={t("close")}
-            onClick={closeDialog}
-            className="absolute inset-0 bg-slate-900/50"
-          />
-
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="bantoo-command-title"
-            className="relative flex max-h-[100dvh] w-full max-w-none flex-col rounded-t-2xl bg-white shadow-2xl md:max-h-[min(90dvh,40rem)] md:w-[min(100vw-1.5rem,32rem)] md:rounded-2xl md:border md:border-[var(--border)]"
-          >
-        <div className="shrink-0 border-b border-[var(--border)] px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] md:px-5 md:py-4 md:pt-4">
+        <div className="shrink-0 border-b border-[var(--border)] px-5 py-4 max-md:px-4 max-md:py-3 max-md:pt-[max(0.75rem,env(safe-area-inset-top))]">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 pr-2">
               <h2 id="bantoo-command-title" className="text-lg font-semibold text-slate-900">
@@ -331,7 +324,7 @@ export function BantooCommand() {
               type="button"
               aria-label={t("close")}
               onClick={closeDialog}
-              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-600"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
             >
               ✕
             </button>
@@ -340,7 +333,7 @@ export function BantooCommand() {
 
         <div
           ref={scrollRef}
-          className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 md:px-5"
+          className="min-h-0 flex-1 overflow-y-auto px-5 py-4 max-md:px-4"
         >
           {success ? (
             <div className="rounded-xl border border-[var(--brand)]/20 bg-[var(--brand)]/5 p-4">
@@ -668,6 +661,14 @@ export function BantooCommand() {
                 <p className="text-sm text-[var(--brand)]">{t("listening")}</p>
               ) : null}
               <p className="text-xs text-[var(--muted)]">{t("examples")}</p>
+              <button
+                type="button"
+                disabled={loading || !prompt.trim()}
+                onClick={() => void handleSuggest()}
+                className="btn-brand mt-4 hidden w-full md:inline-flex"
+              >
+                {loading ? "…" : t("submit")}
+              </button>
             </div>
           )}
 
@@ -677,7 +678,7 @@ export function BantooCommand() {
         </div>
 
         {showSuggestFooter ? (
-          <div className="shrink-0 border-t border-[var(--border)] bg-white px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-5 md:py-4 md:pb-4">
+          <div className="shrink-0 border-t border-[var(--border)] bg-white px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:hidden">
             <div className="flex gap-2">
               <button
                 type="button"
@@ -722,9 +723,15 @@ export function BantooCommand() {
             </div>
           </div>
         ) : null}
-          </div>
-        </div>
-      ) : null}
+      </div>
+    </div>
+  ) : null;
+
+  return (
+    <>
+      <OpenButton onClick={openDialog} />
+
+      {mounted && modal ? createPortal(modal, document.body) : null}
     </>
   );
 }
