@@ -110,18 +110,54 @@ export function classifyPdfLine(
   date: string | null,
   amount: string,
   description: string,
+  context?: { section?: "receipt" | "payment" | "skip" | null; fileName?: string },
 ): ParsedImportRow {
+  let typeLabel = "";
+  if (context?.section === "receipt") typeLabel = "receipt";
+  if (context?.section === "payment") typeLabel = "payment";
+
+  const normalizedAmount = amount.replace(/\s+/g, "");
+  const amountNum = parseAmountNumber(normalizedAmount);
+  if (!typeLabel && amountNum !== null) {
+    if (amountNum < 0) typeLabel = "payment";
+    else if (amountNum > 0) typeLabel = "receipt";
+  }
+
   return classifySpreadsheetRow({
     rowNumber,
     date,
     description,
     reference: "",
-    partyName: "",
-    amount,
+    partyName: extractPartyName(description),
+    amount: normalizedAmount,
     debit: "",
     credit: "",
     accountLabel: "",
     bankAccountLabel: "",
-    typeLabel: "",
+    typeLabel,
   });
+}
+
+function parseAmountNumber(raw: string): number | null {
+  if (!raw.trim()) return null;
+  const negative = raw.trim().startsWith("-");
+  const digits = raw.replace(/[^\d.]/g, "");
+  if (!digits) return null;
+  const value = Number.parseFloat(digits);
+  if (Number.isNaN(value)) return null;
+  return negative ? -value : value;
+}
+
+function extractPartyName(description: string): string {
+  const cleaned = description
+    .replace(/\b(invoice|inv|facture|ref|reference)\s*#?\s*\S+/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (cleaned.length < 3) return "";
+  if (looksLikeGenericDescription(cleaned)) return "";
+  return cleaned.slice(0, 120);
+}
+
+function looksLikeGenericDescription(text: string): boolean {
+  return /^-{2,}$/.test(text) || /^\d+([,\s]\d+)*-?$/.test(text);
 }

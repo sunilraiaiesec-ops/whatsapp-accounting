@@ -39,9 +39,13 @@ export async function analyzeImportFile(
   }
 
   if (preview.rows.length === 0) {
+    const stockReport =
+      preview.detectedFormat.includes("stock report") ||
+      /stock report/i.test(file.name);
     return {
-      error:
-        preview.source === "pdf"
+      error: stockReport
+        ? "This looks like a stock/inventory report, not receipts or payments. Upload your Receipts & Payments Summary PDF or an Excel export instead."
+        : preview.source === "pdf"
           ? "No transactions found in this PDF. Try exporting from your old system as Excel."
           : "No recognizable rows found. Check column headers (Date, Amount, Account, Debit, Credit).",
     };
