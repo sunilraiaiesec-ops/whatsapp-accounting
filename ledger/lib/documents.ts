@@ -7,6 +7,8 @@ import {
   payableAccount,
   inventoryAccount,
   cogsAccount,
+  ensureTaxRecoverableAccount,
+  ensureTaxPayableAccount,
 } from "@/lib/accounts";
 
 export class DocumentError extends Error {}
@@ -15,12 +17,47 @@ function formatNumber(prefix: string, count: number) {
   return `${prefix}-${String(count + 1).padStart(5, "0")}`;
 }
 
+// A category line: a plain expense/income account and a net amount (base
+// currency minor units). Optional per-line sales tax rate (percent).
 type LineInput = {
   accountId: string;
   amount: bigint;
   memo?: string | null;
   className?: string | null;
+  taxRate?: number | null;
 };
+
+// An inventory item line on a payment — buys stock at a unit cost. Posts to
+// the Inventory control account and increases the item's quantity/value.
+export type CashItemLineInput = {
+  itemId: string;
+  quantity: string; // decimal string
+  unitCost: bigint; // base currency minor units
+  memo?: string | null;
+  className?: string | null;
+  taxRate?: number | null;
+};
+
+// Tax on a net amount at a percentage rate, rounded to whole minor units.
+export function computeTax(net: bigint, rate?: number | null): bigint {
+  if (!rate || rate <= 0 || net <= 0n) return 0n;
+  return BigInt(
+    new Prisma.Decimal(net.toString()).times(rate).div(100).toFixed(0),
+  );
+}
+
+export function normalizeCurrency(
+  currency?: string | null,
+  exchangeRate?: number | string | null,
+): { currency: string | null; exchangeRate: Prisma.Decimal | null } {
+  const code = (currency ?? "").trim().toUpperCase();
+  if (!code) return { currency: null, exchangeRate: null };
+  const rate = exchangeRate != null ? new Prisma.Decimal(exchangeRate) : null;
+  return {
+    currency: code,
+    exchangeRate: rate && rate.gt(0) ? rate : null,
+  };
+}
 
 export async function assertCashDocLines(
   tx: Prisma.TransactionClient,
@@ -66,12 +103,19 @@ export async function createReceipt(
     description?: string | null;
     paymentMethod?: string | null;
     tags?: string[];
+    currency?: string | null;
+    exchangeRate?: number | string | null;
     lines: LineInput[];
   },
 ) {
-  const lines = input.lines.filter((l) => l.accountId && l.amount > 0n);
+  const lines = input.lines
+    .filter((l) => l.accountId && l.amount > 0n)
+    .map((l) => ({ ...l, tax: computeTax(l.amount, l.taxRate) }));
   if (lines.length === 0) throw new DocumentError("Add at least one line");
-  const total = lines.reduce((s, l) => s + l.amount, 0n);
+  const subtotal = lines.reduce((s, l) => s + l.amount, 0n);
+  const taxTotal = lines.reduce((s, l) => s + l.tax, 0n);
+  const total = subtotal + taxTotal;
+  const fx = normalizeCurrency(input.currency, input.exchangeRate);
 
   return prisma.$transaction(async (tx) => {
     await assertCashDocLines(tx, orgId, input.bankAccountId, lines, "receipt");
@@ -82,21 +126,33 @@ export async function createReceipt(
     });
     const controlIds = new Set(accounts.filter((a) => a.isControl).map((a) => a.id));
 
+    const entryLines: {
+      accountId: string;
+      debit?: bigint;
+      credit?: bigint;
+      partyId?: string | null;
+      memo?: string | null;
+    }[] = [
+      { accountId: input.bankAccountId, debit: total },
+      ...lines.map((l) => ({
+        accountId: l.accountId,
+        credit: l.amount,
+        partyId: controlIds.has(l.accountId) ? input.partyId ?? null : null,
+        memo: l.memo ?? null,
+      })),
+    ];
+    if (taxTotal > 0n) {
+      const tax = await ensureTaxPayableAccount(tx, orgId);
+      entryLines.push({ accountId: tax.id, credit: taxTotal });
+    }
+
     const entry = await postEntryWithin(tx, {
       orgId,
       entryDate: input.date,
       description: input.description ?? null,
       reference: input.reference ?? null,
       sourceType: "receipt",
-      lines: [
-        { accountId: input.bankAccountId, debit: total },
-        ...lines.map((l) => ({
-          accountId: l.accountId,
-          credit: l.amount,
-          partyId: controlIds.has(l.accountId) ? input.partyId ?? null : null,
-          memo: l.memo ?? null,
-        })),
-      ],
+      lines: entryLines,
     });
 
     const number = formatNumber("REC", await tx.receipt.count({ where: { orgId } }));
@@ -109,6 +165,8 @@ export async function createReceipt(
         description: input.description ?? null,
         paymentMethod: input.paymentMethod ?? null,
         tags: input.tags ?? [],
+        currency: fx.currency,
+        exchangeRate: fx.exchangeRate,
         bankAccountId: input.bankAccountId,
         partyId: input.partyId ?? null,
         total,
@@ -119,6 +177,8 @@ export async function createReceipt(
             amount: l.amount,
             memo: l.memo ?? null,
             className: l.className ?? null,
+            taxRate: l.taxRate != null ? new Prisma.Decimal(l.taxRate) : null,
+            taxAmount: l.tax,
           })),
         },
       },
@@ -146,15 +206,42 @@ export async function createPayment(
     description?: string | null;
     paymentMethod?: string | null;
     tags?: string[];
+    currency?: string | null;
+    exchangeRate?: number | string | null;
     lines: LineInput[];
+    itemLines?: CashItemLineInput[];
   },
 ) {
-  const lines = input.lines.filter((l) => l.accountId && l.amount > 0n);
-  if (lines.length === 0) throw new DocumentError("Add at least one line");
-  const total = lines.reduce((s, l) => s + l.amount, 0n);
+  const lines = input.lines
+    .filter((l) => l.accountId && l.amount > 0n)
+    .map((l) => ({ ...l, tax: computeTax(l.amount, l.taxRate) }));
+
+  const itemLines = (input.itemLines ?? [])
+    .filter((l) => l.itemId && new Prisma.Decimal(l.quantity || "0").gt(0))
+    .map((l) => {
+      const qty = new Prisma.Decimal(l.quantity);
+      const net = BigInt(qty.times(l.unitCost.toString()).toFixed(0));
+      return { ...l, qty, net, tax: computeTax(net, l.taxRate) };
+    })
+    .filter((l) => l.net > 0n);
+
+  if (lines.length === 0 && itemLines.length === 0) {
+    throw new DocumentError("Add at least one line");
+  }
+
+  const subtotal =
+    lines.reduce((s, l) => s + l.amount, 0n) +
+    itemLines.reduce((s, l) => s + l.net, 0n);
+  const taxTotal =
+    lines.reduce((s, l) => s + l.tax, 0n) +
+    itemLines.reduce((s, l) => s + l.tax, 0n);
+  const total = subtotal + taxTotal;
+  const fx = normalizeCurrency(input.currency, input.exchangeRate);
 
   return prisma.$transaction(async (tx) => {
-    await assertCashDocLines(tx, orgId, input.bankAccountId, lines, "payment");
+    if (lines.length > 0) {
+      await assertCashDocLines(tx, orgId, input.bankAccountId, lines, "payment");
+    }
 
     const accounts = await tx.account.findMany({
       where: { orgId, id: { in: lines.map((l) => l.accountId) } },
@@ -162,21 +249,40 @@ export async function createPayment(
     });
     const controlIds = new Set(accounts.filter((a) => a.isControl).map((a) => a.id));
 
+    const inv = itemLines.length > 0 ? await inventoryAccount(orgId) : null;
+
+    const entryLines: {
+      accountId: string;
+      debit?: bigint;
+      credit?: bigint;
+      partyId?: string | null;
+      memo?: string | null;
+    }[] = [
+      { accountId: input.bankAccountId, credit: total },
+      ...lines.map((l) => ({
+        accountId: l.accountId,
+        debit: l.amount,
+        partyId: controlIds.has(l.accountId) ? input.partyId ?? null : null,
+        memo: l.memo ?? null,
+      })),
+    ];
+    if (inv) {
+      for (const l of itemLines) {
+        entryLines.push({ accountId: inv.id, debit: l.net, memo: l.memo ?? null });
+      }
+    }
+    if (taxTotal > 0n) {
+      const tax = await ensureTaxRecoverableAccount(tx, orgId);
+      entryLines.push({ accountId: tax.id, debit: taxTotal });
+    }
+
     const entry = await postEntryWithin(tx, {
       orgId,
       entryDate: input.date,
       description: input.description ?? null,
       reference: input.reference ?? null,
       sourceType: "payment",
-      lines: [
-        { accountId: input.bankAccountId, credit: total },
-        ...lines.map((l) => ({
-          accountId: l.accountId,
-          debit: l.amount,
-          partyId: controlIds.has(l.accountId) ? input.partyId ?? null : null,
-          memo: l.memo ?? null,
-        })),
-      ],
+      lines: entryLines,
     });
 
     const number = formatNumber("PAY", await tx.payment.count({ where: { orgId } }));
@@ -189,20 +295,50 @@ export async function createPayment(
         description: input.description ?? null,
         paymentMethod: input.paymentMethod ?? null,
         tags: input.tags ?? [],
+        currency: fx.currency,
+        exchangeRate: fx.exchangeRate,
         bankAccountId: input.bankAccountId,
         partyId: input.partyId ?? null,
         total,
         journalEntryId: entry.id,
         lines: {
-          create: lines.map((l) => ({
-            accountId: l.accountId,
-            amount: l.amount,
-            memo: l.memo ?? null,
-            className: l.className ?? null,
-          })),
+          create: [
+            ...lines.map((l) => ({
+              accountId: l.accountId,
+              amount: l.amount,
+              memo: l.memo ?? null,
+              className: l.className ?? null,
+              taxRate: l.taxRate != null ? new Prisma.Decimal(l.taxRate) : null,
+              taxAmount: l.tax,
+            })),
+            ...itemLines.map((l) => ({
+              accountId: inv!.id,
+              amount: l.net,
+              memo: l.memo ?? null,
+              className: l.className ?? null,
+              taxRate: l.taxRate != null ? new Prisma.Decimal(l.taxRate) : null,
+              taxAmount: l.tax,
+              itemId: l.itemId,
+              quantity: l.qty,
+              unitCost: l.unitCost,
+            })),
+          ],
         },
       },
     });
+
+    for (const l of itemLines) {
+      const item = await tx.inventoryItem.findFirstOrThrow({
+        where: { id: l.itemId, orgId },
+      });
+      await tx.inventoryItem.update({
+        where: { id: l.itemId },
+        data: {
+          qtyOnHand: new Prisma.Decimal(item.qtyOnHand).plus(l.qty),
+          valueOnHand: item.valueOnHand + l.net,
+        },
+      });
+    }
 
     await tx.journalEntry.update({
       where: { id: entry.id },
@@ -705,7 +841,11 @@ export async function getReceipt(orgId: string, id: string) {
 export async function getPayment(orgId: string, id: string) {
   const payment = await prisma.payment.findFirst({
     where: { orgId, id },
-    include: { lines: { include: { account: true } }, party: true, bankAccount: true },
+    include: {
+      lines: { include: { account: true, item: true } },
+      party: true,
+      bankAccount: true,
+    },
   });
   if (!payment) return null;
   const [entry, total, before, prev, next] = await Promise.all([
@@ -926,11 +1066,14 @@ export async function cloneReceipt(orgId: string, id: string) {
     description: r.description,
     paymentMethod: r.paymentMethod,
     tags: r.tags,
+    currency: r.currency,
+    exchangeRate: r.exchangeRate ? r.exchangeRate.toString() : null,
     lines: r.lines.map((l) => ({
       accountId: l.accountId,
       amount: l.amount,
       memo: l.memo,
       className: l.className,
+      taxRate: l.taxRate ? Number(l.taxRate) : null,
     })),
   });
 }
@@ -949,12 +1092,27 @@ export async function clonePayment(orgId: string, id: string) {
     description: p.description,
     paymentMethod: p.paymentMethod,
     tags: p.tags,
-    lines: p.lines.map((l) => ({
-      accountId: l.accountId,
-      amount: l.amount,
-      memo: l.memo,
-      className: l.className,
-    })),
+    currency: p.currency,
+    exchangeRate: p.exchangeRate ? p.exchangeRate.toString() : null,
+    lines: p.lines
+      .filter((l) => !l.itemId)
+      .map((l) => ({
+        accountId: l.accountId,
+        amount: l.amount,
+        memo: l.memo,
+        className: l.className,
+        taxRate: l.taxRate ? Number(l.taxRate) : null,
+      })),
+    itemLines: p.lines
+      .filter((l) => l.itemId)
+      .map((l) => ({
+        itemId: l.itemId as string,
+        quantity: (l.quantity ?? new Prisma.Decimal(0)).toString(),
+        unitCost: l.unitCost ?? 0n,
+        memo: l.memo,
+        className: l.className,
+        taxRate: l.taxRate ? Number(l.taxRate) : null,
+      })),
   });
 }
 

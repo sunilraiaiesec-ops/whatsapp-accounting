@@ -210,6 +210,8 @@ model Receipt {
   description    String?
   paymentMethod  String?
   tags           String[] @default([])
+  currency       String?
+  exchangeRate   Decimal? @db.Decimal(18, 6)
   bankAccountId  String
   partyId        String?
   total          BigInt   @default(0)
@@ -227,12 +229,14 @@ model Receipt {
 }
 
 model ReceiptLine {
-  id        String  @id @default(cuid())
+  id        String   @id @default(cuid())
   receiptId String
   accountId String
   amount    BigInt
   memo      String?
   className String?
+  taxRate   Decimal? @db.Decimal(7, 4)
+  taxAmount BigInt   @default(0)
 
   receipt Receipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
   account Account @relation(fields: [accountId], references: [id])
@@ -252,6 +256,8 @@ model Payment {
   description    String?
   paymentMethod  String?
   tags           String[] @default([])
+  currency       String?
+  exchangeRate   Decimal? @db.Decimal(18, 6)
   bankAccountId  String
   partyId        String?
   total          BigInt   @default(0)
@@ -269,15 +275,21 @@ model Payment {
 }
 
 model PaymentLine {
-  id        String  @id @default(cuid())
+  id        String   @id @default(cuid())
   paymentId String
   accountId String
   amount    BigInt
   memo      String?
   className String?
+  taxRate   Decimal? @db.Decimal(7, 4)
+  taxAmount BigInt   @default(0)
+  itemId    String?
+  quantity  Decimal? @db.Decimal(18, 3)
+  unitCost  BigInt?
 
-  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
-  account Account @relation(fields: [accountId], references: [id])
+  payment Payment        @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  account Account        @relation(fields: [accountId], references: [id])
+  item    InventoryItem? @relation(fields: [itemId], references: [id])
 
   @@index([paymentId])
   @@map("payment_lines")
@@ -489,6 +501,7 @@ model InventoryItem {
   receiptLines     GoodsReceiptLine[]
   writeOffLines    InventoryWriteOffLine[]
   salesInvoiceLines SalesInvoiceLine[]
+  paymentLines     PaymentLine[]
 
   @@unique([orgId, code])
   @@index([orgId])

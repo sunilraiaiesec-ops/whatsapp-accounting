@@ -59,11 +59,14 @@ export default async function EditReceiptPage({
           description: receipt.description ?? "",
           paymentMethod: receipt.paymentMethod ?? "",
           tags: receipt.tags,
+          currency: receipt.currency,
+          exchangeRate: receipt.exchangeRate ? receipt.exchangeRate.toString() : null,
           lines: receipt.lines.map((l) => ({
             accountId: l.accountId,
             amount: formatAmount(l.amount, ctx.baseCurrency),
             memo: l.memo ?? "",
             className: l.className ?? "",
+            taxRate: l.taxRate ? l.taxRate.toString() : "",
           })),
         }}
       />

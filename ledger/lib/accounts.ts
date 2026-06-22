@@ -1,4 +1,4 @@
-import type { AccountType } from "@prisma/client";
+import type { AccountType, Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 
@@ -100,6 +100,47 @@ export async function cogsAccount(orgId: string) {
     throw new Error(`Missing cost-of-goods-sold account for org ${orgId}`);
   }
   return account;
+}
+
+// Input VAT paid on purchases — a recoverable asset. Created on demand so
+// organizations that pre-date the tax feature get the account automatically.
+export async function ensureTaxRecoverableAccount(
+  tx: Prisma.TransactionClient,
+  orgId: string,
+) {
+  const existing = await tx.account.findFirst({
+    where: { orgId, subtype: "tax_recoverable" },
+  });
+  if (existing) return existing;
+  return tx.account.create({
+    data: {
+      orgId,
+      code: "1300",
+      name: "VAT recoverable",
+      type: "ASSET",
+      subtype: "tax_recoverable",
+    },
+  });
+}
+
+// Output VAT collected on sales — a payable liability (seeded as 2100).
+export async function ensureTaxPayableAccount(
+  tx: Prisma.TransactionClient,
+  orgId: string,
+) {
+  const existing = await tx.account.findFirst({
+    where: { orgId, subtype: "tax" },
+  });
+  if (existing) return existing;
+  return tx.account.create({
+    data: {
+      orgId,
+      code: "2100",
+      name: "Tax payable",
+      type: "LIABILITY",
+      subtype: "tax",
+    },
+  });
 }
 
 export function isDebitNormal(type: AccountType): boolean {

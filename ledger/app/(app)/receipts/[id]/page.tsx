@@ -77,45 +77,88 @@ export default async function ReceiptViewPage({
           <span className="text-slate-900">{receipt.bankAccount.name}</span>
         </p>
 
-        <table className="mt-4 w-full border border-slate-300 text-sm">
-          <thead>
-            <tr className="border-b border-slate-300 bg-slate-50 text-left">
-              <th className="px-4 py-2 font-semibold">Account</th>
-              <th className="w-48 px-4 py-2 text-right font-semibold">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {receipt.lines.map((l) => (
-              <tr key={l.id} className="border-b border-slate-200">
-                <td className="px-4 py-2">
-                  {l.account.name}
-                  {receipt.party && l.account.isControl
-                    ? ` — ${receipt.party.name}`
-                    : ""}
-                  {l.memo ? (
-                    <span className="ml-2 text-xs text-slate-400">{l.memo}</span>
-                  ) : null}
-                  {l.className ? (
-                    <span className="ml-2 inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">
-                      {l.className}
-                    </span>
-                  ) : null}
-                </td>
-                <td className="px-4 py-2 text-right tabular-nums">
-                  {formatAmount(l.amount, cur)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr className="font-semibold">
-              <td className="px-4 py-2 text-right">Total</td>
-              <td className="px-4 py-2 text-right tabular-nums">
-                {formatAmount(receipt.total, cur)}
-              </td>
-            </tr>
-          </tfoot>
-        </table>
+        {receipt.currency && receipt.exchangeRate ? (
+          <p className="mt-1 text-sm text-slate-500">
+            Currency:{" "}
+            <span className="text-slate-900">
+              1 {receipt.currency} = {receipt.exchangeRate.toString()} {cur}
+            </span>
+          </p>
+        ) : null}
+
+        {(() => {
+          const taxTotal = receipt.lines.reduce((s, l) => s + l.taxAmount, 0n);
+          const subtotal = receipt.lines.reduce((s, l) => s + l.amount, 0n);
+          return (
+            <table className="mt-4 w-full border border-slate-300 text-sm">
+              <thead>
+                <tr className="border-b border-slate-300 bg-slate-50 text-left">
+                  <th className="px-4 py-2 font-semibold">Account</th>
+                  <th className="w-24 px-4 py-2 text-right font-semibold">Tax</th>
+                  <th className="w-40 px-4 py-2 text-right font-semibold">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {receipt.lines.map((l) => (
+                  <tr key={l.id} className="border-b border-slate-200">
+                    <td className="px-4 py-2">
+                      {l.account.name}
+                      {receipt.party && l.account.isControl
+                        ? ` — ${receipt.party.name}`
+                        : ""}
+                      {l.memo ? (
+                        <span className="ml-2 text-xs text-slate-400">{l.memo}</span>
+                      ) : null}
+                      {l.className ? (
+                        <span className="ml-2 inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">
+                          {l.className}
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums text-slate-500">
+                      {l.taxAmount > 0n
+                        ? `${formatAmount(l.taxAmount, cur)}${l.taxRate ? ` (${l.taxRate.toString()}%)` : ""}`
+                        : "—"}
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums">
+                      {formatAmount(l.amount, cur)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                {taxTotal > 0n ? (
+                  <>
+                    <tr>
+                      <td className="px-4 py-1.5 text-right text-slate-500" colSpan={2}>
+                        Subtotal
+                      </td>
+                      <td className="px-4 py-1.5 text-right tabular-nums text-slate-600">
+                        {formatAmount(subtotal, cur)}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-1.5 text-right text-slate-500" colSpan={2}>
+                        Tax
+                      </td>
+                      <td className="px-4 py-1.5 text-right tabular-nums text-slate-600">
+                        {formatAmount(taxTotal, cur)}
+                      </td>
+                    </tr>
+                  </>
+                ) : null}
+                <tr className="font-semibold">
+                  <td className="px-4 py-2 text-right" colSpan={2}>
+                    Total
+                  </td>
+                  <td className="px-4 py-2 text-right tabular-nums">
+                    {formatAmount(receipt.total, cur)}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          );
+        })()}
       </div>
 
       {entry ? <TransactionJournal lines={entry.lines} currency={cur} /> : null}

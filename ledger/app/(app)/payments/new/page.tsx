@@ -9,6 +9,7 @@ import {
 import { listParties } from "@/lib/parties";
 import { createPaymentAction } from "@/app/actions/documents";
 import { listClassNames } from "@/lib/documents";
+import { listInventoryItems } from "@/lib/inventory";
 import { CashDocForm } from "@/components/CashDocForm";
 import { formatAmount } from "@/lib/money";
 
@@ -24,11 +25,12 @@ export default async function NewPaymentPage({
   const tn = await getTranslations("nav");
   const today = new Date().toISOString().slice(0, 10);
 
-  const [banks, accounts, parties, classOptions] = await Promise.all([
+  const [banks, accounts, parties, classOptions, items] = await Promise.all([
     bankAndCashWithBalances(ctx.orgId),
     paymentCounterpartAccounts(ctx.orgId),
     listParties(ctx.orgId),
     listClassNames(ctx.orgId),
+    listInventoryItems(ctx.orgId),
   ]);
 
   const defaultLine = isExpense
@@ -63,6 +65,11 @@ export default async function NewPaymentPage({
         }))}
         defaultLineAccountId={defaultLine?.id ?? ""}
         classOptions={classOptions}
+        items={items.map((it) => ({
+          id: it.id,
+          label: `${it.code} — ${it.name}`,
+          unitCost: formatAmount(it.avgCost, ctx.baseCurrency),
+        }))}
         saveLabel={isExpense ? t("expenseSave") : undefined}
         defaults={
           partyId

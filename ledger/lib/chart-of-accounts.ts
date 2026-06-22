@@ -29,6 +29,12 @@ export const DEFAULT_CHART_OF_ACCOUNTS: SeedAccount[] = [
     subtype: "inventory",
     isControl: true,
   },
+  {
+    code: "1300",
+    name: "VAT recoverable",
+    type: "ASSET",
+    subtype: "tax_recoverable",
+  },
   { code: "1500", name: "Fixed assets", type: "ASSET", subtype: "fixed_asset" },
 
   // Liabilities

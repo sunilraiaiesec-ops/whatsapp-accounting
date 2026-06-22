@@ -58,8 +58,28 @@ function parseInvoiceLines(formData: FormData, currency: string) {
     }));
 }
 
+function parseTaxRate(value: unknown): number | null {
+  const n = Number(String(value ?? "").trim());
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function parseCurrency(formData: FormData): {
+  currency: string | null;
+  exchangeRate: string | null;
+} {
+  const currency = String(formData.get("currency") || "").trim() || null;
+  const rate = String(formData.get("exchangeRate") || "").trim() || null;
+  return { currency, exchangeRate: rate };
+}
+
 function parseCashLines(formData: FormData, currency: string) {
-  let raw: { accountId?: string; amount?: string; memo?: string; className?: string }[];
+  let raw: {
+    accountId?: string;
+    amount?: string;
+    memo?: string;
+    className?: string;
+    taxRate?: string;
+  }[];
   try {
     raw = JSON.parse(String(formData.get("lines") || "[]"));
   } catch {
@@ -71,8 +91,35 @@ function parseCashLines(formData: FormData, currency: string) {
       amount: parseAmount(l.amount ?? "0", currency),
       memo: l.memo?.trim() || null,
       className: l.className?.trim() || null,
+      taxRate: parseTaxRate(l.taxRate),
     }))
     .filter((l) => l.accountId && l.amount > 0n);
+}
+
+function parseItemLines(formData: FormData, currency: string) {
+  let raw: {
+    itemId?: string;
+    quantity?: string;
+    unitCost?: string;
+    memo?: string;
+    className?: string;
+    taxRate?: string;
+  }[];
+  try {
+    raw = JSON.parse(String(formData.get("itemLines") || "[]"));
+  } catch {
+    return [];
+  }
+  return raw
+    .filter((l) => l.itemId)
+    .map((l) => ({
+      itemId: l.itemId as string,
+      quantity: (l.quantity ?? "0").trim() || "0",
+      unitCost: parseAmount(l.unitCost ?? "0", currency),
+      memo: l.memo?.trim() || null,
+      className: l.className?.trim() || null,
+      taxRate: parseTaxRate(l.taxRate),
+    }));
 }
 
 function parseTags(formData: FormData): string[] {
@@ -98,6 +145,7 @@ export async function updateReceiptAction(
   if (!bankAccountId) return { error: "Choose where the money was received" };
   const lines = parseCashLines(formData, ctx.baseCurrency);
   if (lines === null) return { error: "Could not read line items" };
+  const fx = parseCurrency(formData);
 
   try {
     await updateReceipt(ctx.orgId, id, {
@@ -108,6 +156,8 @@ export async function updateReceiptAction(
       description: String(formData.get("description") || "") || null,
       paymentMethod: String(formData.get("paymentMethod") || "") || null,
       tags: parseTags(formData),
+      currency: fx.currency,
+      exchangeRate: fx.exchangeRate,
       lines,
     });
   } catch (err) {
@@ -126,6 +176,8 @@ export async function updatePaymentAction(
   if (!bankAccountId) return { error: "Choose where the money was paid from" };
   const lines = parseCashLines(formData, ctx.baseCurrency);
   if (lines === null) return { error: "Could not read line items" };
+  const itemLines = parseItemLines(formData, ctx.baseCurrency);
+  const fx = parseCurrency(formData);
 
   try {
     await updatePayment(ctx.orgId, id, {
@@ -136,7 +188,10 @@ export async function updatePaymentAction(
       description: String(formData.get("description") || "") || null,
       paymentMethod: String(formData.get("paymentMethod") || "") || null,
       tags: parseTags(formData),
+      currency: fx.currency,
+      exchangeRate: fx.exchangeRate,
       lines,
+      itemLines,
     });
   } catch (err) {
     return fail(err);

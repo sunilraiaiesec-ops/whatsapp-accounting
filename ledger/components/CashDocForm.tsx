@@ -9,11 +9,48 @@ import { parseAmount, formatAmount } from "@/lib/money";
 
 type Option = { id: string; label: string };
 type BankOption = Option & { balanceLabel?: string };
-type Row = { accountId: string; amount: string; memo: string; className: string };
+type ItemOption = { id: string; label: string; unitCost: string };
+type Row = {
+  accountId: string;
+  amount: string;
+  memo: string;
+  className: string;
+  taxRate: string;
+};
+type ItemRow = {
+  itemId: string;
+  quantity: string;
+  unitCost: string;
+  memo: string;
+  className: string;
+  taxRate: string;
+};
 
 const initial: DocState = {};
-const emptyRow = (accountId = ""): Row => ({ accountId, amount: "", memo: "", className: "" });
+const emptyRow = (accountId = ""): Row => ({
+  accountId,
+  amount: "",
+  memo: "",
+  className: "",
+  taxRate: "",
+});
+const emptyItemRow = (): ItemRow => ({
+  itemId: "",
+  quantity: "1",
+  unitCost: "",
+  memo: "",
+  className: "",
+  taxRate: "",
+});
 const labelClass = "mb-1.5 block text-sm font-medium text-slate-700";
+
+// Fixed/indicative conversion rates (units of base currency per 1 foreign).
+// XAF is pegged to the euro at 655.957; the others are editable defaults.
+const FX_DEFAULTS: Record<string, number> = {
+  EUR: 655.957,
+  USD: 600,
+  GBP: 760,
+};
 
 const PAYMENT_METHODS = [
   { value: "cash", key: "methodCash" },
@@ -32,8 +69,30 @@ type CashDefaults = {
   description: string;
   paymentMethod?: string;
   tags?: string[];
+  currency?: string | null;
+  exchangeRate?: string | null;
   lines: Row[];
+  itemLines?: ItemRow[];
 };
+
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={`transition-transform ${open ? "rotate-90" : ""}`}
+      aria-hidden="true"
+    >
+      <polyline points="9 18 15 12 9 6" />
+    </svg>
+  );
+}
 
 export function CashDocForm({
   mode,
@@ -46,6 +105,8 @@ export function CashDocForm({
   defaults,
   defaultLineAccountId = "",
   classOptions = [],
+  items = [],
+  currencyOptions = ["EUR", "USD"],
   saveLabel,
   formTitle,
   formSubtitle,
@@ -61,6 +122,8 @@ export function CashDocForm({
   defaults?: CashDefaults;
   defaultLineAccountId?: string;
   classOptions?: string[];
+  items?: ItemOption[];
+  currencyOptions?: string[];
   saveLabel?: string;
   formTitle?: string;
   formSubtitle?: string;
@@ -70,17 +133,30 @@ export function CashDocForm({
   const tc = useTranslations("common");
   const t = useTranslations(mode === "receipt" ? "receipts" : "payments");
   const today = new Date().toISOString().slice(0, 10);
+
   const [bankAccountId, setBankAccountId] = useState(defaults?.bankAccountId ?? "");
   const [rows, setRows] = useState<Row[]>(
     defaults?.lines?.length ? defaults.lines : [emptyRow(defaultLineAccountId)],
   );
+  const [itemRows, setItemRows] = useState<ItemRow[]>(defaults?.itemLines ?? []);
   const [tags, setTags] = useState<string[]>(defaults?.tags ?? []);
   const [tagDraft, setTagDraft] = useState("");
+  const [docCurrency, setDocCurrency] = useState(defaults?.currency || currency);
+  const [rate, setRate] = useState(defaults?.exchangeRate ?? "");
+  const [catOpen, setCatOpen] = useState(true);
+  const [itemOpen, setItemOpen] = useState((defaults?.itemLines?.length ?? 0) > 0);
+
+  const isReceipt = mode === "receipt";
+  const showItems = !isReceipt;
+  const isForeign = docCurrency !== currency;
+  const rateNum = parseFloat(rate) || 0;
 
   const addTag = (value: string) => {
-    const t = value.trim().replace(/,$/, "").trim();
-    if (!t) return;
-    setTags((prev) => (prev.includes(t) || prev.length >= 20 ? prev : [...prev, t]));
+    const next = value.trim().replace(/,$/, "").trim();
+    if (!next) return;
+    setTags((prev) =>
+      prev.includes(next) || prev.length >= 20 ? prev : [...prev, next],
+    );
     setTagDraft("");
   };
 
@@ -89,11 +165,34 @@ export function CashDocForm({
     [accounts, bankAccountId],
   );
 
-  const total = useMemo(
+  const taxOf = (net: bigint, taxRate: string): bigint => {
+    const r = parseFloat(taxRate);
+    if (!r || r <= 0 || net <= 0n) return 0n;
+    return BigInt(Math.round((Number(net) * r) / 100));
+  };
+
+  const catNetOf = (r: Row) => (r.amount ? parseAmount(r.amount, currency) : 0n);
+  const itemNetOf = (r: ItemRow) => {
+    const qty = parseFloat(r.quantity);
+    if (!qty || qty <= 0 || !r.unitCost) return 0n;
+    return BigInt(Math.round(Number(parseAmount(r.unitCost, currency)) * qty));
+  };
+
+  const subtotal = useMemo(
     () =>
-      rows.reduce((s, r) => (r.amount ? s + parseAmount(r.amount, currency) : s), 0n),
-    [rows, currency],
+      rows.reduce((s, r) => s + catNetOf(r), 0n) +
+      itemRows.reduce((s, r) => s + itemNetOf(r), 0n),
+    [rows, itemRows, currency],
   );
+
+  const taxTotal = useMemo(
+    () =>
+      rows.reduce((s, r) => s + taxOf(catNetOf(r), r.taxRate), 0n) +
+      itemRows.reduce((s, r) => s + taxOf(itemNetOf(r), r.taxRate), 0n),
+    [rows, itemRows, currency],
+  );
+
+  const total = subtotal + taxTotal;
 
   const linesPayload = useMemo(
     () =>
@@ -104,15 +203,30 @@ export function CashDocForm({
           amount: r.amount,
           memo: r.memo.trim() || undefined,
           className: r.className.trim() || undefined,
+          taxRate: r.taxRate.trim() || undefined,
         })),
     [rows],
+  );
+
+  const itemLinesPayload = useMemo(
+    () =>
+      itemRows
+        .filter((r) => r.itemId && r.quantity && r.unitCost)
+        .map((r) => ({
+          itemId: r.itemId,
+          quantity: r.quantity,
+          unitCost: r.unitCost,
+          memo: r.memo.trim() || undefined,
+          className: r.className.trim() || undefined,
+          taxRate: r.taxRate.trim() || undefined,
+        })),
+    [itemRows],
   );
 
   const selectedBank = bankAccounts.find((b) => b.id === bankAccountId);
 
   const update = (i: number, patch: Partial<Row>) =>
     setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
-
   const duplicate = (i: number) =>
     setRows((prev) => {
       const next = [...prev];
@@ -120,12 +234,24 @@ export function CashDocForm({
       return next;
     });
 
-  const isReceipt = mode === "receipt";
+  const updateItem = (i: number, patch: Partial<ItemRow>) =>
+    setItemRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  const onItemPick = (i: number, itemId: string) => {
+    const picked = items.find((it) => it.id === itemId);
+    updateItem(i, {
+      itemId,
+      unitCost: picked && picked.unitCost !== "0" ? picked.unitCost : itemRows[i]?.unitCost ?? "",
+    });
+  };
+
   const canSubmit = !pending && total > 0n && !!bankAccountId;
 
   const partyLabel = isReceipt ? t("receivedFrom") : t("paidTo");
   const bankLabel = isReceipt ? t("depositTo") : t("paidFrom");
   const accountColumnLabel = isReceipt ? t("creditAccount") : t("category");
+
+  const foreignEquivalent =
+    isForeign && rateNum > 0 ? (Number(total) / rateNum).toFixed(2) : null;
 
   return (
     <form action={formAction} className="mt-6">
@@ -149,6 +275,11 @@ export function CashDocForm({
               {formatAmount(total, currency)}
             </p>
             <p className="text-sm text-slate-400">{currency}</p>
+            {foreignEquivalent ? (
+              <p className="mt-1 text-sm font-medium text-[var(--brand)]">
+                ≈ {foreignEquivalent} {docCurrency}
+              </p>
+            ) : null}
           </div>
         </div>
 
@@ -200,6 +331,48 @@ export function CashDocForm({
                 </p>
               ) : null}
             </label>
+            <label className="block">
+              <span className={labelClass}>{tc("currency")}</span>
+              <select
+                value={docCurrency}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setDocCurrency(next);
+                  setRate(
+                    next !== currency && FX_DEFAULTS[next]
+                      ? String(FX_DEFAULTS[next])
+                      : "",
+                  );
+                }}
+                className="input-modern"
+              >
+                <option value={currency}>{currency}</option>
+                {currencyOptions
+                  .filter((c) => c !== currency)
+                  .map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+              </select>
+              {isForeign ? (
+                <p className="mt-1.5 text-xs text-[var(--muted)]">
+                  1 {docCurrency} = {rate || "?"} {currency}
+                </p>
+              ) : null}
+            </label>
+            {isForeign ? (
+              <label className="block">
+                <span className={labelClass}>{tc("exchangeRate")}</span>
+                <input
+                  inputMode="decimal"
+                  value={rate}
+                  onChange={(e) => setRate(e.target.value)}
+                  className="input-modern tabular-nums"
+                  placeholder="655.957"
+                />
+              </label>
+            ) : null}
             <label className="block">
               <span className={labelClass}>{t("paymentDate")}</span>
               <input
@@ -275,153 +448,334 @@ export function CashDocForm({
           </div>
         </div>
 
-        <div className="border-b border-[var(--border)] px-5 py-3 sm:px-6">
+        {/* Category details (collapsible) */}
+        <button
+          type="button"
+          onClick={() => setCatOpen((v) => !v)}
+          className="flex w-full items-center gap-2 border-b border-[var(--border)] px-5 py-3 text-left sm:px-6"
+        >
+          <Chevron open={catOpen} />
           <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
             {t("categoryDetails")}
           </h2>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[840px] text-sm">
-            <thead>
-              <tr className="border-b border-[var(--border)] bg-slate-50/80 text-left text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
-                <th className="w-10 px-4 py-3">#</th>
-                <th className="px-4 py-3">{accountColumnLabel}</th>
-                <th className="px-4 py-3">{t("lineDescription")}</th>
-                <th className="w-44 px-4 py-3">{tc("class")}</th>
-                <th className="w-36 px-4 py-3 text-right">
-                  {t("amount")} ({currency})
-                </th>
-                <th className="w-20" />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row, i) => (
-                <tr key={i} className="border-b border-slate-100 last:border-0">
-                  <td className="px-4 py-2.5 text-center text-xs text-slate-400">{i + 1}</td>
-                  <td className="px-4 py-2.5">
-                    <select
-                      value={row.accountId}
-                      onChange={(e) => update(i, { accountId: e.target.value })}
-                      className="input-modern py-2"
-                      required
-                    >
-                      <option value="">{tc("selectAccount")}</option>
-                      {lineAccounts.map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {a.label}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <input
-                      value={row.memo}
-                      onChange={(e) => update(i, { memo: e.target.value })}
-                      className="input-modern py-2"
-                      placeholder={t("lineDescriptionPlaceholder")}
-                    />
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <input
-                      value={row.className}
-                      onChange={(e) => update(i, { className: e.target.value })}
-                      list="cashdoc-class-options"
-                      className="input-modern py-2"
-                      placeholder={tc("classPlaceholder")}
-                    />
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <input
-                      inputMode="decimal"
-                      value={row.amount}
-                      onChange={(e) => update(i, { amount: e.target.value })}
-                      className="input-modern py-2 text-right tabular-nums"
-                      required
-                    />
-                  </td>
-                  <td className="px-2 py-2.5">
-                    <div className="flex items-center justify-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => duplicate(i)}
-                        className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
-                        aria-label={t("duplicateLine")}
-                        title={t("duplicateLine")}
-                      >
-                        <svg
-                          width="15"
-                          height="15"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          aria-hidden="true"
+        </button>
+        {catOpen ? (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[920px] text-sm">
+                <thead>
+                  <tr className="border-b border-[var(--border)] bg-slate-50/80 text-left text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+                    <th className="w-10 px-4 py-3">#</th>
+                    <th className="px-4 py-3">{accountColumnLabel}</th>
+                    <th className="px-4 py-3">{t("lineDescription")}</th>
+                    <th className="w-40 px-4 py-3">{tc("class")}</th>
+                    <th className="w-24 px-4 py-3 text-right">{tc("taxRate")}</th>
+                    <th className="w-36 px-4 py-3 text-right">
+                      {t("amount")} ({currency})
+                    </th>
+                    <th className="w-20" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row, i) => (
+                    <tr key={i} className="border-b border-slate-100 last:border-0">
+                      <td className="px-4 py-2.5 text-center text-xs text-slate-400">
+                        {i + 1}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <select
+                          value={row.accountId}
+                          onChange={(e) => update(i, { accountId: e.target.value })}
+                          className="input-modern py-2"
+                          required
                         >
-                          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                        </svg>
-                      </button>
-                      {rows.length > 1 ? (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setRows((prev) => prev.filter((_, idx) => idx !== i))
-                          }
-                          className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition hover:bg-red-50 hover:text-red-600"
-                          aria-label={t("removeLine")}
-                          title={t("removeLine")}
-                        >
-                          <svg
-                            width="15"
-                            height="15"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            aria-hidden="true"
+                          <option value="">{tc("selectAccount")}</option>
+                          {lineAccounts.map((a) => (
+                            <option key={a.id} value={a.id}>
+                              {a.label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <input
+                          value={row.memo}
+                          onChange={(e) => update(i, { memo: e.target.value })}
+                          className="input-modern py-2"
+                          placeholder={t("lineDescriptionPlaceholder")}
+                        />
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <input
+                          value={row.className}
+                          onChange={(e) => update(i, { className: e.target.value })}
+                          list="cashdoc-class-options"
+                          className="input-modern py-2"
+                          placeholder={tc("classPlaceholder")}
+                        />
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <input
+                          inputMode="decimal"
+                          value={row.taxRate}
+                          onChange={(e) => update(i, { taxRate: e.target.value })}
+                          className="input-modern py-2 text-right tabular-nums"
+                          placeholder="0"
+                        />
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <input
+                          inputMode="decimal"
+                          value={row.amount}
+                          onChange={(e) => update(i, { amount: e.target.value })}
+                          className="input-modern py-2 text-right tabular-nums"
+                          required
+                        />
+                      </td>
+                      <td className="px-2 py-2.5">
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => duplicate(i)}
+                            className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                            aria-label={t("duplicateLine")}
+                            title={t("duplicateLine")}
                           >
-                            <path d="M3 6h18" />
-                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                            <line x1="10" y1="11" x2="10" y2="17" />
-                            <line x1="14" y1="11" x2="14" y2="17" />
-                          </svg>
-                        </button>
-                      ) : null}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="flex flex-col gap-3 border-b border-[var(--border)] bg-slate-50/50 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-          <div className="flex flex-wrap gap-4">
-            <button
-              type="button"
-              onClick={() => setRows((prev) => [...prev, emptyRow(defaultLineAccountId)])}
-              className="text-sm font-semibold text-[var(--brand)] hover:underline"
-            >
-              {t("addLine")}
-            </button>
-            {rows.length > 1 ? (
+                            <svg
+                              width="15"
+                              height="15"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden="true"
+                            >
+                              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                            </svg>
+                          </button>
+                          {rows.length > 1 ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setRows((prev) => prev.filter((_, idx) => idx !== i))
+                              }
+                              className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition hover:bg-red-50 hover:text-red-600"
+                              aria-label={t("removeLine")}
+                              title={t("removeLine")}
+                            >
+                              <svg
+                                width="15"
+                                height="15"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                aria-hidden="true"
+                              >
+                                <path d="M3 6h18" />
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                <line x1="10" y1="11" x2="10" y2="17" />
+                                <line x1="14" y1="11" x2="14" y2="17" />
+                              </svg>
+                            </button>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="border-b border-[var(--border)] px-5 py-3 sm:px-6">
               <button
                 type="button"
-                onClick={() => setRows([emptyRow(defaultLineAccountId)])}
-                className="text-sm text-slate-500 hover:text-slate-800"
+                onClick={() => setRows((prev) => [...prev, emptyRow(defaultLineAccountId)])}
+                className="text-sm font-semibold text-[var(--brand)] hover:underline"
               >
-                {t("clearAllLines")}
+                {t("addLine")}
               </button>
+            </div>
+          </>
+        ) : null}
+
+        {/* Item details (collapsible, payment only) */}
+        {showItems ? (
+          <>
+            <button
+              type="button"
+              onClick={() => setItemOpen((v) => !v)}
+              className="flex w-full items-center gap-2 border-b border-[var(--border)] px-5 py-3 text-left sm:px-6"
+            >
+              <Chevron open={itemOpen} />
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
+                {tc("itemDetails")}
+              </h2>
+            </button>
+            {itemOpen ? (
+              items.length === 0 ? (
+                <div className="border-b border-[var(--border)] px-5 py-4 text-sm text-[var(--muted)] sm:px-6">
+                  {tc("noItemsHint")}{" "}
+                  <Link href="/inventory-items" className="text-[var(--brand)] hover:underline">
+                    {tc("inventoryItems")}
+                  </Link>
+                </div>
+              ) : (
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[980px] text-sm">
+                      <thead>
+                        <tr className="border-b border-[var(--border)] bg-slate-50/80 text-left text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+                          <th className="w-10 px-4 py-3">#</th>
+                          <th className="px-4 py-3">{tc("item")}</th>
+                          <th className="w-20 px-4 py-3 text-right">{tc("quantity")}</th>
+                          <th className="w-36 px-4 py-3 text-right">
+                            {tc("unitCost")} ({currency})
+                          </th>
+                          <th className="w-36 px-4 py-3">{tc("class")}</th>
+                          <th className="w-24 px-4 py-3 text-right">{tc("taxRate")}</th>
+                          <th className="w-36 px-4 py-3 text-right">
+                            {t("amount")} ({currency})
+                          </th>
+                          <th className="w-12" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {itemRows.map((row, i) => (
+                          <tr key={i} className="border-b border-slate-100 last:border-0">
+                            <td className="px-4 py-2.5 text-center text-xs text-slate-400">
+                              {i + 1}
+                            </td>
+                            <td className="px-4 py-2.5">
+                              <select
+                                value={row.itemId}
+                                onChange={(e) => onItemPick(i, e.target.value)}
+                                className="input-modern py-2"
+                              >
+                                <option value="">{tc("selectItem")}</option>
+                                {items.map((it) => (
+                                  <option key={it.id} value={it.id}>
+                                    {it.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                            <td className="px-4 py-2.5">
+                              <input
+                                inputMode="decimal"
+                                value={row.quantity}
+                                onChange={(e) => updateItem(i, { quantity: e.target.value })}
+                                className="input-modern py-2 text-right tabular-nums"
+                              />
+                            </td>
+                            <td className="px-4 py-2.5">
+                              <input
+                                inputMode="decimal"
+                                value={row.unitCost}
+                                onChange={(e) => updateItem(i, { unitCost: e.target.value })}
+                                className="input-modern py-2 text-right tabular-nums"
+                              />
+                            </td>
+                            <td className="px-4 py-2.5">
+                              <input
+                                value={row.className}
+                                onChange={(e) => updateItem(i, { className: e.target.value })}
+                                list="cashdoc-class-options"
+                                className="input-modern py-2"
+                                placeholder={tc("classPlaceholder")}
+                              />
+                            </td>
+                            <td className="px-4 py-2.5">
+                              <input
+                                inputMode="decimal"
+                                value={row.taxRate}
+                                onChange={(e) => updateItem(i, { taxRate: e.target.value })}
+                                className="input-modern py-2 text-right tabular-nums"
+                                placeholder="0"
+                              />
+                            </td>
+                            <td className="px-4 py-2.5 text-right tabular-nums text-slate-600">
+                              {formatAmount(itemNetOf(row), currency)}
+                            </td>
+                            <td className="px-2 py-2.5 text-center">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setItemRows((prev) => prev.filter((_, idx) => idx !== i))
+                                }
+                                className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition hover:bg-red-50 hover:text-red-600"
+                                aria-label={t("removeLine")}
+                                title={t("removeLine")}
+                              >
+                                <svg
+                                  width="15"
+                                  height="15"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  aria-hidden="true"
+                                >
+                                  <path d="M3 6h18" />
+                                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                </svg>
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="border-b border-[var(--border)] px-5 py-3 sm:px-6">
+                    <button
+                      type="button"
+                      onClick={() => setItemRows((prev) => [...prev, emptyItemRow()])}
+                      className="text-sm font-semibold text-[var(--brand)] hover:underline"
+                    >
+                      {tc("addItemLine")}
+                    </button>
+                  </div>
+                </>
+              )
             ) : null}
-          </div>
-          <div className="text-right">
-            <span className="text-sm text-[var(--muted)]">{t("subtotal")}</span>
-            <p className="text-lg font-semibold tabular-nums text-slate-900">
-              {formatAmount(total, currency)} {currency}
-            </p>
+          </>
+        ) : null}
+
+        {/* Totals */}
+        <div className="flex flex-col gap-2 border-b border-[var(--border)] bg-slate-50/50 px-5 py-4 sm:items-end sm:px-6">
+          <div className="w-full max-w-xs space-y-1.5 text-sm">
+            <div className="flex justify-between">
+              <span className="text-[var(--muted)]">{t("subtotal")}</span>
+              <span className="tabular-nums text-slate-700">
+                {formatAmount(subtotal, currency)}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-[var(--muted)]">{tc("taxTotal")}</span>
+              <span className="tabular-nums text-slate-700">
+                {formatAmount(taxTotal, currency)}
+              </span>
+            </div>
+            <div className="flex justify-between border-t border-[var(--border)] pt-1.5 text-base font-semibold">
+              <span className="text-slate-900">{tc("total")}</span>
+              <span className="tabular-nums text-slate-900">
+                {formatAmount(total, currency)} {currency}
+              </span>
+            </div>
+            {foreignEquivalent ? (
+              <div className="flex justify-between text-xs text-[var(--muted)]">
+                <span>{docCurrency}</span>
+                <span className="tabular-nums">
+                  ≈ {foreignEquivalent} {docCurrency}
+                </span>
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -439,6 +793,9 @@ export function CashDocForm({
         </div>
 
         <input type="hidden" name="lines" value={JSON.stringify(linesPayload)} />
+        <input type="hidden" name="itemLines" value={JSON.stringify(itemLinesPayload)} />
+        <input type="hidden" name="currency" value={isForeign ? docCurrency : ""} />
+        <input type="hidden" name="exchangeRate" value={isForeign ? rate : ""} />
         {classOptions.length > 0 ? (
           <datalist id="cashdoc-class-options">
             {classOptions.map((c) => (

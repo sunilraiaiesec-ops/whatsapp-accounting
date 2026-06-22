@@ -9,6 +9,7 @@ import {
   paymentCounterpartAccounts,
 } from "@/lib/accounts";
 import { listParties } from "@/lib/parties";
+import { listInventoryItems } from "@/lib/inventory";
 import { formatAmount } from "@/lib/money";
 import { CashDocForm } from "@/components/CashDocForm";
 
@@ -23,11 +24,12 @@ export default async function EditPaymentPage({
   if (!data) notFound();
   const { payment } = data;
 
-  const [banks, accounts, parties, classOptions] = await Promise.all([
+  const [banks, accounts, parties, classOptions, items] = await Promise.all([
     bankAndCashWithBalances(ctx.orgId),
     paymentCounterpartAccounts(ctx.orgId),
     listParties(ctx.orgId),
     listClassNames(ctx.orgId),
+    listInventoryItems(ctx.orgId),
   ]);
 
   return (
@@ -51,6 +53,11 @@ export default async function EditPaymentPage({
         parties={parties.map((p) => ({ id: p.id, label: p.name }))}
         accounts={accounts.map((a) => ({ id: a.id, label: `${a.code} — ${a.name}` }))}
         classOptions={classOptions}
+        items={items.map((it) => ({
+          id: it.id,
+          label: `${it.code} — ${it.name}`,
+          unitCost: formatAmount(it.avgCost, ctx.baseCurrency),
+        }))}
         defaults={{
           date: payment.date.toISOString().slice(0, 10),
           bankAccountId: payment.bankAccountId,
@@ -59,12 +66,27 @@ export default async function EditPaymentPage({
           description: payment.description ?? "",
           paymentMethod: payment.paymentMethod ?? "",
           tags: payment.tags,
-          lines: payment.lines.map((l) => ({
-            accountId: l.accountId,
-            amount: formatAmount(l.amount, ctx.baseCurrency),
-            memo: l.memo ?? "",
-            className: l.className ?? "",
-          })),
+          currency: payment.currency,
+          exchangeRate: payment.exchangeRate ? payment.exchangeRate.toString() : null,
+          lines: payment.lines
+            .filter((l) => !l.itemId)
+            .map((l) => ({
+              accountId: l.accountId,
+              amount: formatAmount(l.amount, ctx.baseCurrency),
+              memo: l.memo ?? "",
+              className: l.className ?? "",
+              taxRate: l.taxRate ? l.taxRate.toString() : "",
+            })),
+          itemLines: payment.lines
+            .filter((l) => l.itemId)
+            .map((l) => ({
+              itemId: l.itemId as string,
+              quantity: (l.quantity ?? "1").toString(),
+              unitCost: formatAmount(l.unitCost ?? 0n, ctx.baseCurrency),
+              memo: l.memo ?? "",
+              className: l.className ?? "",
+              taxRate: l.taxRate ? l.taxRate.toString() : "",
+            })),
         }}
       />
     </div>
