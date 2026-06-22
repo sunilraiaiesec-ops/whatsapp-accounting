@@ -9,10 +9,10 @@ import { parseAmount, formatAmount } from "@/lib/money";
 
 type Option = { id: string; label: string };
 type BankOption = Option & { balanceLabel?: string };
-type Row = { accountId: string; amount: string; memo: string };
+type Row = { accountId: string; amount: string; memo: string; className: string };
 
 const initial: DocState = {};
-const emptyRow = (accountId = ""): Row => ({ accountId, amount: "", memo: "" });
+const emptyRow = (accountId = ""): Row => ({ accountId, amount: "", memo: "", className: "" });
 const labelClass = "mb-1.5 block text-sm font-medium text-slate-700";
 
 const PAYMENT_METHODS = [
@@ -31,6 +31,7 @@ type CashDefaults = {
   reference: string;
   description: string;
   paymentMethod?: string;
+  tags?: string[];
   lines: Row[];
 };
 
@@ -44,6 +45,7 @@ export function CashDocForm({
   documentId,
   defaults,
   defaultLineAccountId = "",
+  classOptions = [],
   saveLabel,
   formTitle,
   formSubtitle,
@@ -58,6 +60,7 @@ export function CashDocForm({
   documentId?: string;
   defaults?: CashDefaults;
   defaultLineAccountId?: string;
+  classOptions?: string[];
   saveLabel?: string;
   formTitle?: string;
   formSubtitle?: string;
@@ -71,6 +74,15 @@ export function CashDocForm({
   const [rows, setRows] = useState<Row[]>(
     defaults?.lines?.length ? defaults.lines : [emptyRow(defaultLineAccountId)],
   );
+  const [tags, setTags] = useState<string[]>(defaults?.tags ?? []);
+  const [tagDraft, setTagDraft] = useState("");
+
+  const addTag = (value: string) => {
+    const t = value.trim().replace(/,$/, "").trim();
+    if (!t) return;
+    setTags((prev) => (prev.includes(t) || prev.length >= 20 ? prev : [...prev, t]));
+    setTagDraft("");
+  };
 
   const lineAccounts = useMemo(
     () => accounts.filter((a) => a.id !== bankAccountId),
@@ -91,6 +103,7 @@ export function CashDocForm({
           accountId: r.accountId,
           amount: r.amount,
           memo: r.memo.trim() || undefined,
+          className: r.className.trim() || undefined,
         })),
     [rows],
   );
@@ -222,6 +235,44 @@ export function CashDocForm({
               />
             </label>
           </div>
+
+          <div className="mt-4">
+            <span className={labelClass}>{tc("tags")}</span>
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--border)] bg-white px-3 py-2">
+              {tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="inline-flex items-center gap-1 rounded-full bg-[var(--brand)]/10 px-2.5 py-1 text-xs font-medium text-[var(--brand)]"
+                >
+                  {tag}
+                  <button
+                    type="button"
+                    onClick={() => setTags((prev) => prev.filter((x) => x !== tag))}
+                    className="text-[var(--brand)]/70 hover:text-[var(--brand)]"
+                    aria-label={tc("removeTag")}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+              <input
+                value={tagDraft}
+                onChange={(e) => setTagDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === ",") {
+                    e.preventDefault();
+                    addTag(tagDraft);
+                  } else if (e.key === "Backspace" && !tagDraft && tags.length) {
+                    setTags((prev) => prev.slice(0, -1));
+                  }
+                }}
+                onBlur={() => addTag(tagDraft)}
+                className="min-w-[120px] flex-1 border-0 bg-transparent p-0 text-sm outline-none focus:ring-0"
+                placeholder={tc("tagsPlaceholder")}
+              />
+            </div>
+            <input type="hidden" name="tags" value={JSON.stringify(tags)} />
+          </div>
         </div>
 
         <div className="border-b border-[var(--border)] px-5 py-3 sm:px-6">
@@ -230,12 +281,13 @@ export function CashDocForm({
           </h2>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-sm">
+          <table className="w-full min-w-[840px] text-sm">
             <thead>
               <tr className="border-b border-[var(--border)] bg-slate-50/80 text-left text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
                 <th className="w-10 px-4 py-3">#</th>
                 <th className="px-4 py-3">{accountColumnLabel}</th>
                 <th className="px-4 py-3">{t("lineDescription")}</th>
+                <th className="w-44 px-4 py-3">{tc("class")}</th>
                 <th className="w-36 px-4 py-3 text-right">
                   {t("amount")} ({currency})
                 </th>
@@ -267,6 +319,15 @@ export function CashDocForm({
                       onChange={(e) => update(i, { memo: e.target.value })}
                       className="input-modern py-2"
                       placeholder={t("lineDescriptionPlaceholder")}
+                    />
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <input
+                      value={row.className}
+                      onChange={(e) => update(i, { className: e.target.value })}
+                      list="cashdoc-class-options"
+                      className="input-modern py-2"
+                      placeholder={tc("classPlaceholder")}
                     />
                   </td>
                   <td className="px-4 py-2.5">
@@ -378,6 +439,13 @@ export function CashDocForm({
         </div>
 
         <input type="hidden" name="lines" value={JSON.stringify(linesPayload)} />
+        {classOptions.length > 0 ? (
+          <datalist id="cashdoc-class-options">
+            {classOptions.map((c) => (
+              <option key={c} value={c} />
+            ))}
+          </datalist>
+        ) : null}
 
         <div className="flex flex-col-reverse gap-3 border-t border-[var(--border)] bg-slate-50/80 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <Link

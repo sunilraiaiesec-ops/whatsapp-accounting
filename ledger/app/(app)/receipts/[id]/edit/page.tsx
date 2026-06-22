@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { requireContext } from "@/lib/auth/current";
-import { getReceipt } from "@/lib/documents";
+import { getReceipt, listClassNames } from "@/lib/documents";
 import { updateReceiptAction } from "@/app/actions/document-update";
 import { listParties } from "@/lib/parties";
 import { formatAmount } from "@/lib/money";
@@ -23,10 +23,11 @@ export default async function EditReceiptPage({
   if (!data) notFound();
   const { receipt } = data;
 
-  const [banks, accounts, parties] = await Promise.all([
+  const [banks, accounts, parties, classOptions] = await Promise.all([
     bankAndCashWithBalances(ctx.orgId),
     receiptCounterpartAccounts(ctx.orgId),
     listParties(ctx.orgId),
+    listClassNames(ctx.orgId),
   ]);
 
   return (
@@ -49,6 +50,7 @@ export default async function EditReceiptPage({
         }))}
         parties={parties.map((p) => ({ id: p.id, label: p.name }))}
         accounts={accounts.map((a) => ({ id: a.id, label: `${a.code} — ${a.name}` }))}
+        classOptions={classOptions}
         defaults={{
           date: receipt.date.toISOString().slice(0, 10),
           bankAccountId: receipt.bankAccountId,
@@ -56,10 +58,12 @@ export default async function EditReceiptPage({
           reference: receipt.reference ?? "",
           description: receipt.description ?? "",
           paymentMethod: receipt.paymentMethod ?? "",
+          tags: receipt.tags,
           lines: receipt.lines.map((l) => ({
             accountId: l.accountId,
             amount: formatAmount(l.amount, ctx.baseCurrency),
             memo: l.memo ?? "",
+            className: l.className ?? "",
           })),
         }}
       />

@@ -59,7 +59,7 @@ function parseInvoiceLines(formData: FormData, currency: string) {
 }
 
 function parseCashLines(formData: FormData, currency: string) {
-  let raw: { accountId?: string; amount?: string; memo?: string }[];
+  let raw: { accountId?: string; amount?: string; memo?: string; className?: string }[];
   try {
     raw = JSON.parse(String(formData.get("lines") || "[]"));
   } catch {
@@ -70,8 +70,22 @@ function parseCashLines(formData: FormData, currency: string) {
       accountId: l.accountId ?? "",
       amount: parseAmount(l.amount ?? "0", currency),
       memo: l.memo?.trim() || null,
+      className: l.className?.trim() || null,
     }))
     .filter((l) => l.accountId && l.amount > 0n);
+}
+
+function parseTags(formData: FormData): string[] {
+  try {
+    const raw = JSON.parse(String(formData.get("tags") || "[]"));
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .map((t) => String(t).trim())
+      .filter(Boolean)
+      .slice(0, 20);
+  } catch {
+    return [];
+  }
 }
 
 export async function updateReceiptAction(
@@ -93,6 +107,7 @@ export async function updateReceiptAction(
       reference: String(formData.get("reference") || "") || null,
       description: String(formData.get("description") || "") || null,
       paymentMethod: String(formData.get("paymentMethod") || "") || null,
+      tags: parseTags(formData),
       lines,
     });
   } catch (err) {
@@ -120,6 +135,7 @@ export async function updatePaymentAction(
       reference: String(formData.get("reference") || "") || null,
       description: String(formData.get("description") || "") || null,
       paymentMethod: String(formData.get("paymentMethod") || "") || null,
+      tags: parseTags(formData),
       lines,
     });
   } catch (err) {

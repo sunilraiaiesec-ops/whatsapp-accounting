@@ -8,6 +8,7 @@ import {
 } from "@/lib/accounts";
 import { listParties } from "@/lib/parties";
 import { createPaymentAction } from "@/app/actions/documents";
+import { listClassNames } from "@/lib/documents";
 import { CashDocForm } from "@/components/CashDocForm";
 import { formatAmount } from "@/lib/money";
 
@@ -23,10 +24,11 @@ export default async function NewPaymentPage({
   const tn = await getTranslations("nav");
   const today = new Date().toISOString().slice(0, 10);
 
-  const [banks, accounts, parties] = await Promise.all([
+  const [banks, accounts, parties, classOptions] = await Promise.all([
     bankAndCashWithBalances(ctx.orgId),
     paymentCounterpartAccounts(ctx.orgId),
     listParties(ctx.orgId),
+    listClassNames(ctx.orgId),
   ]);
 
   const defaultLine = isExpense
@@ -60,6 +62,7 @@ export default async function NewPaymentPage({
           label: `${a.code} — ${a.name}`,
         }))}
         defaultLineAccountId={defaultLine?.id ?? ""}
+        classOptions={classOptions}
         saveLabel={isExpense ? t("expenseSave") : undefined}
         defaults={
           partyId

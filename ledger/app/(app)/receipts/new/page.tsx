@@ -8,6 +8,7 @@ import {
 } from "@/lib/accounts";
 import { listParties } from "@/lib/parties";
 import { createReceiptAction } from "@/app/actions/documents";
+import { listClassNames } from "@/lib/documents";
 import { CashDocForm } from "@/components/CashDocForm";
 import { formatAmount } from "@/lib/money";
 
@@ -22,10 +23,11 @@ export default async function NewReceiptPage({
   const tn = await getTranslations("nav");
   const today = new Date().toISOString().slice(0, 10);
 
-  const [banks, accounts, parties] = await Promise.all([
+  const [banks, accounts, parties, classOptions] = await Promise.all([
     bankAndCashWithBalances(ctx.orgId),
     receiptCounterpartAccounts(ctx.orgId),
     listParties(ctx.orgId, "customer"),
+    listClassNames(ctx.orgId),
   ]);
 
   const defaultLine =
@@ -56,6 +58,7 @@ export default async function NewReceiptPage({
           label: `${a.code} — ${a.name}`,
         }))}
         defaultLineAccountId={defaultLine?.id ?? ""}
+        classOptions={classOptions}
         defaults={
           partyId
             ? {

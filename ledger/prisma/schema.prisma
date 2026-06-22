@@ -209,6 +209,7 @@ model Receipt {
   reference      String?
   description    String?
   paymentMethod  String?
+  tags           String[] @default([])
   bankAccountId  String
   partyId        String?
   total          BigInt   @default(0)
@@ -231,6 +232,7 @@ model ReceiptLine {
   accountId String
   amount    BigInt
   memo      String?
+  className String?
 
   receipt Receipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
   account Account @relation(fields: [accountId], references: [id])
@@ -249,6 +251,7 @@ model Payment {
   reference      String?
   description    String?
   paymentMethod  String?
+  tags           String[] @default([])
   bankAccountId  String
   partyId        String?
   total          BigInt   @default(0)
@@ -271,6 +274,7 @@ model PaymentLine {
   accountId String
   amount    BigInt
   memo      String?
+  className String?
 
   payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
   account Account @relation(fields: [accountId], references: [id])

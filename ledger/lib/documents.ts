@@ -15,7 +15,12 @@ function formatNumber(prefix: string, count: number) {
   return `${prefix}-${String(count + 1).padStart(5, "0")}`;
 }
 
-type LineInput = { accountId: string; amount: bigint; memo?: string | null };
+type LineInput = {
+  accountId: string;
+  amount: bigint;
+  memo?: string | null;
+  className?: string | null;
+};
 
 export async function assertCashDocLines(
   tx: Prisma.TransactionClient,
@@ -60,6 +65,7 @@ export async function createReceipt(
     reference?: string | null;
     description?: string | null;
     paymentMethod?: string | null;
+    tags?: string[];
     lines: LineInput[];
   },
 ) {
@@ -102,6 +108,7 @@ export async function createReceipt(
         reference: input.reference ?? null,
         description: input.description ?? null,
         paymentMethod: input.paymentMethod ?? null,
+        tags: input.tags ?? [],
         bankAccountId: input.bankAccountId,
         partyId: input.partyId ?? null,
         total,
@@ -111,6 +118,7 @@ export async function createReceipt(
             accountId: l.accountId,
             amount: l.amount,
             memo: l.memo ?? null,
+            className: l.className ?? null,
           })),
         },
       },
@@ -137,6 +145,7 @@ export async function createPayment(
     reference?: string | null;
     description?: string | null;
     paymentMethod?: string | null;
+    tags?: string[];
     lines: LineInput[];
   },
 ) {
@@ -179,6 +188,7 @@ export async function createPayment(
         reference: input.reference ?? null,
         description: input.description ?? null,
         paymentMethod: input.paymentMethod ?? null,
+        tags: input.tags ?? [],
         bankAccountId: input.bankAccountId,
         partyId: input.partyId ?? null,
         total,
@@ -188,6 +198,7 @@ export async function createPayment(
             accountId: l.accountId,
             amount: l.amount,
             memo: l.memo ?? null,
+            className: l.className ?? null,
           })),
         },
       },
@@ -721,6 +732,30 @@ export async function getPayment(orgId: string, id: string) {
   return { payment, entry, nav };
 }
 
+// Distinct class/department labels used on existing cash-document lines.
+// Powers the autocomplete datalist on the receipt/payment forms.
+export async function listClassNames(orgId: string): Promise<string[]> {
+  const [paymentClasses, receiptClasses] = await Promise.all([
+    prisma.paymentLine.findMany({
+      where: { payment: { orgId }, className: { not: null } },
+      select: { className: true },
+      distinct: ["className"],
+      take: 200,
+    }),
+    prisma.receiptLine.findMany({
+      where: { receipt: { orgId }, className: { not: null } },
+      select: { className: true },
+      distinct: ["className"],
+      take: 200,
+    }),
+  ]);
+  const set = new Set<string>();
+  for (const row of [...paymentClasses, ...receiptClasses]) {
+    if (row.className) set.add(row.className);
+  }
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
+
 export async function getSalesInvoice(orgId: string, id: string) {
   const invoice = await prisma.salesInvoice.findFirst({
     where: { orgId, id },
@@ -889,10 +924,13 @@ export async function cloneReceipt(orgId: string, id: string) {
     partyId: r.partyId,
     reference: r.reference,
     description: r.description,
+    paymentMethod: r.paymentMethod,
+    tags: r.tags,
     lines: r.lines.map((l) => ({
       accountId: l.accountId,
       amount: l.amount,
       memo: l.memo,
+      className: l.className,
     })),
   });
 }
@@ -909,10 +947,13 @@ export async function clonePayment(orgId: string, id: string) {
     partyId: p.partyId,
     reference: p.reference,
     description: p.description,
+    paymentMethod: p.paymentMethod,
+    tags: p.tags,
     lines: p.lines.map((l) => ({
       accountId: l.accountId,
       amount: l.amount,
       memo: l.memo,
+      className: l.className,
     })),
   });
 }

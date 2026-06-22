@@ -10,7 +10,12 @@ import {
 } from "@/lib/accounts";
 import { DocumentError, assertCashDocLines } from "@/lib/documents";
 
-type LineInput = { accountId: string; amount: bigint; memo?: string | null };
+type LineInput = {
+  accountId: string;
+  amount: bigint;
+  memo?: string | null;
+  className?: string | null;
+};
 
 type InvoiceLineInput = {
   description: string;
@@ -115,6 +120,7 @@ export async function updateReceipt(
     reference?: string | null;
     description?: string | null;
     paymentMethod?: string | null;
+    tags?: string[];
     lines: LineInput[];
   },
 ) {
@@ -165,6 +171,7 @@ export async function updateReceipt(
         reference: input.reference ?? null,
         description: input.description ?? null,
         paymentMethod: input.paymentMethod ?? null,
+        tags: input.tags ?? [],
         total,
         journalEntryId: entry.id,
         lines: {
@@ -172,6 +179,7 @@ export async function updateReceipt(
             accountId: l.accountId,
             amount: l.amount,
             memo: l.memo ?? null,
+            className: l.className ?? null,
           })),
         },
       },
@@ -193,6 +201,7 @@ export async function updatePayment(
     reference?: string | null;
     description?: string | null;
     paymentMethod?: string | null;
+    tags?: string[];
     lines: LineInput[];
   },
 ) {
@@ -243,6 +252,7 @@ export async function updatePayment(
         reference: input.reference ?? null,
         description: input.description ?? null,
         paymentMethod: input.paymentMethod ?? null,
+        tags: input.tags ?? [],
         total,
         journalEntryId: entry.id,
         lines: {
@@ -250,6 +260,7 @@ export async function updatePayment(
             accountId: l.accountId,
             amount: l.amount,
             memo: l.memo ?? null,
+            className: l.className ?? null,
           })),
         },
       },

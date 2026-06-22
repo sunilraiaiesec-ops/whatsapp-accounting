@@ -59,6 +59,19 @@ export default async function PaymentViewPage({
           </p>
         ) : null}
 
+        {payment.tags.length > 0 ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {payment.tags.map((tag) => (
+              <span
+                key={tag}
+                className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600"
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        ) : null}
+
         <p className="mt-4 text-sm text-slate-500">
           Paid from:{" "}
           <span className="text-slate-900">{payment.bankAccount.name}</span>
@@ -81,6 +94,11 @@ export default async function PaymentViewPage({
                     : ""}
                   {l.memo ? (
                     <span className="ml-2 text-xs text-slate-400">{l.memo}</span>
+                  ) : null}
+                  {l.className ? (
+                    <span className="ml-2 inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">
+                      {l.className}
+                    </span>
                   ) : null}
                 </td>
                 <td className="px-4 py-2 text-right tabular-nums">

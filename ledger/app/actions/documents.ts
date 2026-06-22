@@ -32,6 +32,19 @@ function parseDate(value: FormDataEntryValue | null, fallback = new Date()): Dat
   return Number.isNaN(d.getTime()) ? fallback : d;
 }
 
+function parseTags(formData: FormData): string[] {
+  try {
+    const raw = JSON.parse(String(formData.get("tags") || "[]"));
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .map((t) => String(t).trim())
+      .filter(Boolean)
+      .slice(0, 20);
+  } catch {
+    return [];
+  }
+}
+
 function parseInvoiceLines(formData: FormData, currency: string) {
   let raw: {
     description?: string;
@@ -71,7 +84,7 @@ export async function createReceiptAction(
   const bankAccountId = String(formData.get("bankAccountId") || "");
   if (!bankAccountId) return { error: "Choose where the money was received" };
 
-  let raw: { accountId?: string; amount?: string; memo?: string }[];
+  let raw: { accountId?: string; amount?: string; memo?: string; className?: string }[];
   try {
     raw = JSON.parse(String(formData.get("lines") || "[]"));
   } catch {
@@ -82,6 +95,7 @@ export async function createReceiptAction(
       accountId: l.accountId ?? "",
       amount: parseAmount(l.amount ?? "0", ctx.baseCurrency),
       memo: l.memo?.trim() || null,
+      className: l.className?.trim() || null,
     }))
     .filter((l) => l.accountId && l.amount > 0n);
 
@@ -93,6 +107,7 @@ export async function createReceiptAction(
       reference: String(formData.get("reference") || "") || null,
       description: String(formData.get("description") || "") || null,
       paymentMethod: String(formData.get("paymentMethod") || "") || null,
+      tags: parseTags(formData),
       lines,
     });
   } catch (err) {
@@ -110,7 +125,7 @@ export async function createPaymentAction(
   const bankAccountId = String(formData.get("bankAccountId") || "");
   if (!bankAccountId) return { error: "Choose where the money was paid from" };
 
-  let raw: { accountId?: string; amount?: string; memo?: string }[];
+  let raw: { accountId?: string; amount?: string; memo?: string; className?: string }[];
   try {
     raw = JSON.parse(String(formData.get("lines") || "[]"));
   } catch {
@@ -121,6 +136,7 @@ export async function createPaymentAction(
       accountId: l.accountId ?? "",
       amount: parseAmount(l.amount ?? "0", ctx.baseCurrency),
       memo: l.memo?.trim() || null,
+      className: l.className?.trim() || null,
     }))
     .filter((l) => l.accountId && l.amount > 0n);
 
@@ -132,6 +148,7 @@ export async function createPaymentAction(
       reference: String(formData.get("reference") || "") || null,
       description: String(formData.get("description") || "") || null,
       paymentMethod: String(formData.get("paymentMethod") || "") || null,
+      tags: parseTags(formData),
       lines,
     });
   } catch (err) {

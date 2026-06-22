@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { requireContext } from "@/lib/auth/current";
-import { getPayment } from "@/lib/documents";
+import { getPayment, listClassNames } from "@/lib/documents";
 import { updatePaymentAction } from "@/app/actions/document-update";
 import {
   bankAndCashWithBalances,
@@ -23,10 +23,11 @@ export default async function EditPaymentPage({
   if (!data) notFound();
   const { payment } = data;
 
-  const [banks, accounts, parties] = await Promise.all([
+  const [banks, accounts, parties, classOptions] = await Promise.all([
     bankAndCashWithBalances(ctx.orgId),
     paymentCounterpartAccounts(ctx.orgId),
     listParties(ctx.orgId),
+    listClassNames(ctx.orgId),
   ]);
 
   return (
@@ -49,6 +50,7 @@ export default async function EditPaymentPage({
         }))}
         parties={parties.map((p) => ({ id: p.id, label: p.name }))}
         accounts={accounts.map((a) => ({ id: a.id, label: `${a.code} — ${a.name}` }))}
+        classOptions={classOptions}
         defaults={{
           date: payment.date.toISOString().slice(0, 10),
           bankAccountId: payment.bankAccountId,
@@ -56,10 +58,12 @@ export default async function EditPaymentPage({
           reference: payment.reference ?? "",
           description: payment.description ?? "",
           paymentMethod: payment.paymentMethod ?? "",
+          tags: payment.tags,
           lines: payment.lines.map((l) => ({
             accountId: l.accountId,
             amount: formatAmount(l.amount, ctx.baseCurrency),
             memo: l.memo ?? "",
+            className: l.className ?? "",
           })),
         }}
       />
