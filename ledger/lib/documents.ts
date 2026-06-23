@@ -1264,6 +1264,37 @@ export function listPayments(orgId: string) {
   });
 }
 
+export async function paymentStats(orgId: string) {
+  const now = new Date();
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+
+  const [monthAgg, latest] = await Promise.all([
+    prisma.payment.aggregate({
+      where: { orgId, date: { gte: monthStart, lt: monthEnd } },
+      _count: true,
+      _sum: { total: true },
+    }),
+    prisma.payment.findFirst({
+      where: { orgId },
+      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+      select: { date: true, createdAt: true },
+    }),
+  ]);
+
+  const monthCount = monthAgg._count;
+  const monthSum = monthAgg._sum.total ?? 0n;
+  const monthAvg = monthCount > 0 ? monthSum / BigInt(monthCount) : 0n;
+
+  return {
+    monthCount,
+    monthSum,
+    monthAvg,
+    latestDate: latest?.date ?? null,
+    latestCreatedAt: latest?.createdAt ?? null,
+  };
+}
+
 export function listSalesInvoices(orgId: string) {
   return prisma.salesInvoice.findMany({
     where: { orgId },

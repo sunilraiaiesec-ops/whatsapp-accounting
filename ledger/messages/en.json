@@ -43,6 +43,7 @@
     "soon": "soon",
     "showAll": "Show all",
     "thisMonth": "This month",
+    "showing": "Showing {count} of {total}",
     "noResults": "Nothing here yet.",
     "loading": "Searching…",
     "paid": "paid",
@@ -334,7 +335,19 @@
     "number": "Number",
     "from": "From",
     "customer": "Customer",
-    "dateColumn": "Date"
+    "dateColumn": "Date",
+    "totalPayments": "Total Payments",
+    "totalAmountStat": "Total Amount",
+    "averagePayment": "Average Payment",
+    "latestPayment": "Latest Payment",
+    "noPaymentsYet": "No payments yet",
+    "filters": "Filters",
+    "searchPlaceholder": "Search number, payee, or account…",
+    "periodLabel": "Date range",
+    "periodAll": "All dates",
+    "periodMonth": "This month",
+    "period30d": "Last 30 days",
+    "periodYear": "This year"
   },
   "bank": {
     "title": "Bank and Cash Accounts",

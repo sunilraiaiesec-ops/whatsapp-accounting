@@ -43,6 +43,7 @@
     "soon": "bientôt",
     "showAll": "Tout afficher",
     "thisMonth": "Ce mois",
+    "showing": "Affichage de {count} sur {total}",
     "noResults": "Rien pour le moment.",
     "loading": "Recherche…",
     "paid": "payé",
@@ -333,7 +334,19 @@
     "number": "Numéro",
     "from": "Depuis",
     "customer": "Client",
-    "dateColumn": "Date"
+    "dateColumn": "Date",
+    "totalPayments": "Total des paiements",
+    "totalAmountStat": "Montant total",
+    "averagePayment": "Paiement moyen",
+    "latestPayment": "Dernier paiement",
+    "noPaymentsYet": "Aucun paiement",
+    "filters": "Filtres",
+    "searchPlaceholder": "Rechercher numéro, bénéficiaire ou compte…",
+    "periodLabel": "Période",
+    "periodAll": "Toutes les dates",
+    "periodMonth": "Ce mois",
+    "period30d": "30 derniers jours",
+    "periodYear": "Cette année"
   },
   "bank": {
     "title": "Banque et Caisse",
