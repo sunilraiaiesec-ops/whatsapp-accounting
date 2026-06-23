@@ -13,10 +13,16 @@ export type PaymentRow = {
   amount: string; // pre-formatted, no currency suffix
 };
 
-type Period = "all" | "month" | "30d" | "year";
+type Period = "all" | "month" | "30d" | "year" | "custom";
 
-function inPeriod(dateStr: string, period: Period): boolean {
+function inPeriod(dateStr: string, period: Period, from: string, to: string): boolean {
   if (period === "all") return true;
+  if (period === "custom") {
+    // date strings are YYYY-MM-DD, so lexical comparison is chronological
+    if (from && dateStr < from) return false;
+    if (to && dateStr > to) return false;
+    return true;
+  }
   const d = new Date(dateStr + "T00:00:00Z");
   const now = new Date();
   if (period === "month") {
@@ -43,18 +49,21 @@ export default function PaymentsTable({
   const [period, setPeriod] = useState<Period>("all");
   const [showFilters, setShowFilters] = useState(false);
   const [query, setQuery] = useState("");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
 
   const periodLabels: Record<Period, string> = {
     all: t("periodAll"),
     month: t("periodMonth"),
     "30d": t("period30d"),
     year: t("periodYear"),
+    custom: t("periodCustom"),
   };
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return rows.filter((r) => {
-      if (!inPeriod(r.date, period)) return false;
+      if (!inPeriod(r.date, period, customFrom, customTo)) return false;
       if (!q) return true;
       return (
         r.number.toLowerCase().includes(q) ||
@@ -62,11 +71,32 @@ export default function PaymentsTable({
         r.from.toLowerCase().includes(q)
       );
     });
-  }, [rows, period, query]);
+  }, [rows, period, query, customFrom, customTo]);
 
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
+        {period === "custom" && (
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={customFrom}
+              max={customTo || undefined}
+              onChange={(e) => setCustomFrom(e.target.value)}
+              aria-label={t("customFrom")}
+              className="rounded-full border border-[var(--border)] bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-[var(--brand)]"
+            />
+            <span className="text-sm text-[var(--muted)]">{t("customTo")}</span>
+            <input
+              type="date"
+              value={customTo}
+              min={customFrom || undefined}
+              onChange={(e) => setCustomTo(e.target.value)}
+              aria-label={t("customTo")}
+              className="rounded-full border border-[var(--border)] bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-[var(--brand)]"
+            />
+          </div>
+        )}
         <div className="relative">
           <select
             value={period}
@@ -74,7 +104,7 @@ export default function PaymentsTable({
             className="appearance-none rounded-full border border-[var(--border)] bg-white py-2 pr-9 pl-4 text-sm font-medium text-slate-700 shadow-sm outline-none transition hover:border-slate-300 focus:border-[var(--brand)]"
             aria-label={t("periodLabel")}
           >
-            {(["all", "month", "30d", "year"] as Period[]).map((p) => (
+            {(["all", "month", "30d", "year", "custom"] as Period[]).map((p) => (
               <option key={p} value={p}>
                 {periodLabels[p]}
               </option>

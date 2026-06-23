@@ -346,7 +346,10 @@
     "periodAll": "Toutes les dates",
     "periodMonth": "Ce mois",
     "period30d": "30 derniers jours",
-    "periodYear": "Cette année"
+    "periodYear": "Cette année",
+    "periodCustom": "Période personnalisée",
+    "customFrom": "Du",
+    "customTo": "au"
   },
   "bank": {
     "title": "Banque et Caisse",

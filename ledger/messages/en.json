@@ -347,7 +347,10 @@
     "periodAll": "All dates",
     "periodMonth": "This month",
     "period30d": "Last 30 days",
-    "periodYear": "This year"
+    "periodYear": "This year",
+    "periodCustom": "Custom range",
+    "customFrom": "From",
+    "customTo": "to"
   },
   "bank": {
     "title": "Bank and Cash Accounts",
