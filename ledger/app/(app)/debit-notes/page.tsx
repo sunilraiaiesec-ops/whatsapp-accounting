@@ -1,68 +1,64 @@
-import Link from "next/link";
+import { getLocale } from "next-intl/server";
 
 import { requireContext } from "@/lib/auth/current";
-import { listDebitNotes } from "@/lib/documents";
+import { listDebitNotes, docMonthStats } from "@/lib/documents";
 import { formatAmount } from "@/lib/money";
+import { relativeDays, isoDate } from "@/lib/format";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { StatGrid, StatCard } from "@/components/ui/StatCards";
+import { ListView, type ListRow } from "@/components/ui/ListView";
 
 export default async function DebitNotesPage() {
   const ctx = await requireContext();
+  const locale = await getLocale();
   const cur = ctx.baseCurrency;
-  const notes = await listDebitNotes(ctx.orgId);
+
+  const [notes, stats] = await Promise.all([
+    listDebitNotes(ctx.orgId),
+    docMonthStats(ctx.orgId, "debitNote"),
+  ]);
+
+  const rows: ListRow[] = notes.map((n) => ({
+    id: n.id,
+    href: `/debit-notes/${n.id}`,
+    _date: isoDate(n.date),
+    number: n.number,
+    date: isoDate(n.date),
+    supplier: n.party.name,
+    amount: formatAmount(n.total, cur),
+  }));
 
   return (
-    <div>
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Debit Notes</h1>
-          <p className="text-sm text-slate-500">
-            Returns to suppliers — reduce Accounts payable.
-          </p>
-        </div>
-        <Link
-          href="/debit-notes/new"
-          className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
-        >
-          New debit note
-        </Link>
-      </div>
+    <div className="mx-auto max-w-6xl">
+      <PageHeader
+        title="Debit notes"
+        subtitle="Returns to suppliers — reduce Accounts payable."
+        actionHref="/debit-notes/new"
+        actionLabel="New debit note"
+      />
 
-      <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white">
-        {notes.length === 0 ? (
-          <p className="p-8 text-center text-sm text-slate-500">No debit notes yet.</p>
-        ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-                <th className="px-4 py-2 font-medium">Number</th>
-                <th className="px-4 py-2 font-medium">Date</th>
-                <th className="px-4 py-2 font-medium">Supplier</th>
-                <th className="px-4 py-2 text-right font-medium">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {notes.map((n) => (
-                <tr
-                  key={n.id}
-                  className="border-b border-slate-100 last:border-0 hover:bg-slate-50"
-                >
-                  <td className="px-4 py-2 font-mono text-xs">
-                    <Link
-                      href={`/debit-notes/${n.id}`}
-                      className="text-blue-600 hover:underline"
-                    >
-                      {n.number}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-2">{n.date.toISOString().slice(0, 10)}</td>
-                  <td className="px-4 py-2 text-slate-700">{n.party.name}</td>
-                  <td className="px-4 py-2 text-right tabular-nums">
-                    {formatAmount(n.total, cur)} {cur}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+      <StatGrid>
+        <StatCard icon="doc" tone="rose" label="Debit notes" value={String(stats.count)} sub="This month" />
+        <StatCard icon="sum" tone="blue" label="Total amount" value={formatAmount(stats.sum, cur)} unit={cur} sub="This month" />
+        <StatCard icon="avg" tone="violet" label="Average" value={formatAmount(stats.avg, cur)} unit={cur} sub="This month" />
+        <StatCard icon="calendar" tone="amber" label="Latest" value={stats.latest ? isoDate(stats.latest) : "—"} sub={stats.latest ? relativeDays(stats.latest, locale) : undefined} />
+      </StatGrid>
+
+      <div className="mt-8">
+        <ListView
+          rows={rows}
+          currency={cur}
+          hasDateFilter
+          searchKeys={["number", "supplier"]}
+          emptyText="No debit notes yet."
+          mobile={{ title: "supplier", subtitle: "number", amount: "amount" }}
+          columns={[
+            { key: "number", header: "Number", kind: "link" },
+            { key: "date", header: "Date", kind: "muted" },
+            { key: "supplier", header: "Supplier" },
+            { key: "amount", header: "Amount", kind: "amount", align: "right" },
+          ]}
+        />
       </div>
     </div>
   );

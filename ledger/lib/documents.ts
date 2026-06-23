@@ -1264,34 +1264,49 @@ export function listPayments(orgId: string) {
   });
 }
 
-export async function paymentStats(orgId: string) {
-  const now = new Date();
-  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+export type MonthStats = { count: number; sum: bigint; avg: bigint; latest: Date | null };
 
-  const [monthAgg, latest] = await Promise.all([
-    prisma.payment.aggregate({
-      where: { orgId, date: { gte: monthStart, lt: monthEnd } },
+type DocModelName =
+  | "payment"
+  | "receipt"
+  | "salesInvoice"
+  | "purchaseInvoice"
+  | "interAccountTransfer"
+  | "creditNote"
+  | "debitNote"
+  | "goodsReceipt"
+  | "inventoryWriteOff";
+
+// Current-month KPI aggregate (count + sum + average) plus the latest doc date.
+// Aggregates over ALL rows, not just the capped list shown in the table.
+export async function docMonthStats(orgId: string, model: DocModelName): Promise<MonthStats> {
+  const now = new Date();
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+  const amountField = model === "interAccountTransfer" ? "amount" : "total";
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const delegate = (prisma as any)[model];
+  const [agg, latest] = await Promise.all([
+    delegate.aggregate({
+      where: { orgId, date: { gte: start, lt: end } },
       _count: true,
-      _sum: { total: true },
+      _sum: { [amountField]: true },
     }),
-    prisma.payment.findFirst({
+    delegate.findFirst({
       where: { orgId },
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
-      select: { date: true, createdAt: true },
+      select: { date: true },
     }),
   ]);
 
-  const monthCount = monthAgg._count;
-  const monthSum = monthAgg._sum.total ?? 0n;
-  const monthAvg = monthCount > 0 ? monthSum / BigInt(monthCount) : 0n;
-
+  const count: number = agg._count;
+  const sum: bigint = agg._sum[amountField] ?? 0n;
   return {
-    monthCount,
-    monthSum,
-    monthAvg,
-    latestDate: latest?.date ?? null,
-    latestCreatedAt: latest?.createdAt ?? null,
+    count,
+    sum,
+    avg: count > 0 ? sum / BigInt(count) : 0n,
+    latest: (latest?.date as Date | undefined) ?? null,
   };
 }
 

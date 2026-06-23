@@ -1,74 +1,68 @@
-import Link from "next/link";
+import { getLocale } from "next-intl/server";
 
 import { requireContext } from "@/lib/auth/current";
-import { listPurchaseInvoices } from "@/lib/documents";
+import { listPurchaseInvoices, docMonthStats } from "@/lib/documents";
 import { formatAmount } from "@/lib/money";
+import { relativeDays, isoDate } from "@/lib/format";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { StatGrid, StatCard } from "@/components/ui/StatCards";
+import { ListView, type ListRow } from "@/components/ui/ListView";
 
 export default async function PurchaseInvoicesPage() {
   const ctx = await requireContext();
+  const locale = await getLocale();
   const cur = ctx.baseCurrency;
-  const invoices = await listPurchaseInvoices(ctx.orgId);
+
+  const [invoices, stats] = await Promise.all([
+    listPurchaseInvoices(ctx.orgId),
+    docMonthStats(ctx.orgId, "purchaseInvoice"),
+  ]);
+
+  const rows: ListRow[] = invoices.map((inv) => ({
+    id: inv.id,
+    href: `/purchase-invoices/${inv.id}`,
+    _date: isoDate(inv.date),
+    number: inv.number,
+    date: isoDate(inv.date),
+    supplier: inv.party.name,
+    due: inv.dueDate ? isoDate(inv.dueDate) : "—",
+    status: inv.status,
+    amount: formatAmount(inv.total, cur),
+  }));
 
   return (
-    <div>
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Purchase Invoices</h1>
-          <p className="text-sm text-slate-500">
-            Bills from suppliers, on credit (Accounts payable).
-          </p>
-        </div>
-        <Link
-          href="/purchase-invoices/new"
-          className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
-        >
-          New purchase invoice
-        </Link>
-      </div>
+    <div className="mx-auto max-w-6xl">
+      <PageHeader
+        title="Purchase invoices"
+        subtitle="Bills from suppliers, on credit (Accounts payable)."
+        actionHref="/purchase-invoices/new"
+        actionLabel="New purchase invoice"
+      />
 
-      <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white">
-        {invoices.length === 0 ? (
-          <p className="p-8 text-center text-sm text-slate-500">
-            No purchase invoices yet.
-          </p>
-        ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-                <th className="px-4 py-2 font-medium">Number</th>
-                <th className="px-4 py-2 font-medium">Date</th>
-                <th className="px-4 py-2 font-medium">Supplier</th>
-                <th className="px-4 py-2 font-medium">Due</th>
-                <th className="px-4 py-2 text-right font-medium">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {invoices.map((inv) => (
-                <tr
-                  key={inv.id}
-                  className="border-b border-slate-100 last:border-0 hover:bg-slate-50"
-                >
-                  <td className="px-4 py-2 font-mono text-xs">
-                    <Link
-                      href={`/purchase-invoices/${inv.id}`}
-                      className="text-blue-600 hover:underline"
-                    >
-                      {inv.number}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-2">{inv.date.toISOString().slice(0, 10)}</td>
-                  <td className="px-4 py-2 text-slate-700">{inv.party.name}</td>
-                  <td className="px-4 py-2 text-slate-600">
-                    {inv.dueDate ? inv.dueDate.toISOString().slice(0, 10) : "—"}
-                  </td>
-                  <td className="px-4 py-2 text-right tabular-nums">
-                    {formatAmount(inv.total, cur)} {cur}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+      <StatGrid>
+        <StatCard icon="doc" tone="rose" label="Bills" value={String(stats.count)} sub="This month" />
+        <StatCard icon="sum" tone="blue" label="Total amount" value={formatAmount(stats.sum, cur)} unit={cur} sub="This month" />
+        <StatCard icon="avg" tone="violet" label="Average" value={formatAmount(stats.avg, cur)} unit={cur} sub="This month" />
+        <StatCard icon="calendar" tone="amber" label="Latest" value={stats.latest ? isoDate(stats.latest) : "—"} sub={stats.latest ? relativeDays(stats.latest, locale) : undefined} />
+      </StatGrid>
+
+      <div className="mt-8">
+        <ListView
+          rows={rows}
+          currency={cur}
+          hasDateFilter
+          searchKeys={["number", "supplier"]}
+          emptyText="No purchase invoices yet."
+          mobile={{ title: "supplier", subtitle: "number", amount: "amount", status: "status" }}
+          columns={[
+            { key: "number", header: "Number", kind: "link" },
+            { key: "date", header: "Date", kind: "muted" },
+            { key: "supplier", header: "Supplier" },
+            { key: "due", header: "Due", kind: "muted" },
+            { key: "status", header: "Status", kind: "status" },
+            { key: "amount", header: "Amount", kind: "amount", align: "right" },
+          ]}
+        />
       </div>
     </div>
   );

@@ -1,68 +1,65 @@
-import Link from "next/link";
+import { getLocale } from "next-intl/server";
 
 import { requireContext } from "@/lib/auth/current";
+import { docMonthStats } from "@/lib/documents";
 import { listInventoryWriteOffs } from "@/lib/inventory";
 import { formatAmount } from "@/lib/money";
+import { relativeDays, isoDate } from "@/lib/format";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { StatGrid, StatCard } from "@/components/ui/StatCards";
+import { ListView, type ListRow } from "@/components/ui/ListView";
 
 export default async function InventoryWriteOffsPage() {
   const ctx = await requireContext();
+  const locale = await getLocale();
   const cur = ctx.baseCurrency;
-  const writeOffs = await listInventoryWriteOffs(ctx.orgId);
+
+  const [writeOffs, stats] = await Promise.all([
+    listInventoryWriteOffs(ctx.orgId),
+    docMonthStats(ctx.orgId, "inventoryWriteOff"),
+  ]);
+
+  const rows: ListRow[] = writeOffs.map((w) => ({
+    id: w.id,
+    href: `/inventory-write-offs/${w.id}`,
+    _date: isoDate(w.date),
+    number: w.number,
+    date: isoDate(w.date),
+    account: w.expenseAccount.name,
+    amount: formatAmount(w.total, cur),
+  }));
 
   return (
-    <div>
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Inventory Write-offs</h1>
-          <p className="text-sm text-slate-500">
-            Damaged, lost, or expired stock — removed at average cost.
-          </p>
-        </div>
-        <Link
-          href="/inventory-write-offs/new"
-          className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
-        >
-          New write-off
-        </Link>
-      </div>
+    <div className="mx-auto max-w-6xl">
+      <PageHeader
+        title="Inventory write-offs"
+        subtitle="Damaged, lost, or expired stock — removed at average cost."
+        actionHref="/inventory-write-offs/new"
+        actionLabel="New write-off"
+      />
 
-      <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white">
-        {writeOffs.length === 0 ? (
-          <p className="p-8 text-center text-sm text-slate-500">No write-offs yet.</p>
-        ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-                <th className="px-4 py-2 font-medium">Number</th>
-                <th className="px-4 py-2 font-medium">Date</th>
-                <th className="px-4 py-2 font-medium">Expense account</th>
-                <th className="px-4 py-2 text-right font-medium">Value</th>
-              </tr>
-            </thead>
-            <tbody>
-              {writeOffs.map((w) => (
-                <tr
-                  key={w.id}
-                  className="border-b border-slate-100 last:border-0 hover:bg-slate-50"
-                >
-                  <td className="px-4 py-2 font-mono text-xs">
-                    <Link
-                      href={`/inventory-write-offs/${w.id}`}
-                      className="text-blue-600 hover:underline"
-                    >
-                      {w.number}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-2">{w.date.toISOString().slice(0, 10)}</td>
-                  <td className="px-4 py-2 text-slate-700">{w.expenseAccount.name}</td>
-                  <td className="px-4 py-2 text-right tabular-nums">
-                    {formatAmount(w.total, cur)} {cur}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+      <StatGrid>
+        <StatCard icon="box" tone="rose" label="Write-offs" value={String(stats.count)} sub="This month" />
+        <StatCard icon="sum" tone="blue" label="Total value" value={formatAmount(stats.sum, cur)} unit={cur} sub="This month" />
+        <StatCard icon="avg" tone="violet" label="Average" value={formatAmount(stats.avg, cur)} unit={cur} sub="This month" />
+        <StatCard icon="calendar" tone="amber" label="Latest" value={stats.latest ? isoDate(stats.latest) : "—"} sub={stats.latest ? relativeDays(stats.latest, locale) : undefined} />
+      </StatGrid>
+
+      <div className="mt-8">
+        <ListView
+          rows={rows}
+          currency={cur}
+          hasDateFilter
+          searchKeys={["number", "account"]}
+          emptyText="No write-offs yet."
+          mobile={{ title: "account", subtitle: "number", amount: "amount" }}
+          columns={[
+            { key: "number", header: "Number", kind: "link" },
+            { key: "date", header: "Date", kind: "muted" },
+            { key: "account", header: "Expense account" },
+            { key: "amount", header: "Value", kind: "amount", align: "right" },
+          ]}
+        />
       </div>
     </div>
   );

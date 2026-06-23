@@ -1,70 +1,66 @@
-import Link from "next/link";
+import { getLocale } from "next-intl/server";
 
 import { requireContext } from "@/lib/auth/current";
-import { listInterAccountTransfers } from "@/lib/documents";
+import { listInterAccountTransfers, docMonthStats } from "@/lib/documents";
 import { formatAmount } from "@/lib/money";
+import { relativeDays, isoDate } from "@/lib/format";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { StatGrid, StatCard } from "@/components/ui/StatCards";
+import { ListView, type ListRow } from "@/components/ui/ListView";
 
 export default async function InterAccountTransfersPage() {
   const ctx = await requireContext();
+  const locale = await getLocale();
   const cur = ctx.baseCurrency;
-  const transfers = await listInterAccountTransfers(ctx.orgId);
+
+  const [transfers, stats] = await Promise.all([
+    listInterAccountTransfers(ctx.orgId),
+    docMonthStats(ctx.orgId, "interAccountTransfer"),
+  ]);
+
+  const rows: ListRow[] = transfers.map((tr) => ({
+    id: tr.id,
+    href: `/inter-account-transfers/${tr.id}`,
+    _date: isoDate(tr.date),
+    number: tr.number,
+    date: isoDate(tr.date),
+    from: tr.fromAccount.name,
+    to: tr.toAccount.name,
+    amount: formatAmount(tr.amount, cur),
+  }));
 
   return (
-    <div>
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Inter Account Transfers</h1>
-          <p className="text-sm text-slate-500">
-            Move money between your bank and cash accounts.
-          </p>
-        </div>
-        <Link
-          href="/inter-account-transfers/new"
-          className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
-        >
-          New transfer
-        </Link>
-      </div>
+    <div className="mx-auto max-w-6xl">
+      <PageHeader
+        title="Inter-account transfers"
+        subtitle="Move money between your bank and cash accounts."
+        actionHref="/inter-account-transfers/new"
+        actionLabel="New transfer"
+      />
 
-      <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white">
-        {transfers.length === 0 ? (
-          <p className="p-8 text-center text-sm text-slate-500">No transfers yet.</p>
-        ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-                <th className="px-4 py-2 font-medium">Number</th>
-                <th className="px-4 py-2 font-medium">Date</th>
-                <th className="px-4 py-2 font-medium">From</th>
-                <th className="px-4 py-2 font-medium">To</th>
-                <th className="px-4 py-2 text-right font-medium">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {transfers.map((t) => (
-                <tr
-                  key={t.id}
-                  className="border-b border-slate-100 last:border-0 hover:bg-slate-50"
-                >
-                  <td className="px-4 py-2 font-mono text-xs">
-                    <Link
-                      href={`/inter-account-transfers/${t.id}`}
-                      className="text-blue-600 hover:underline"
-                    >
-                      {t.number}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-2">{t.date.toISOString().slice(0, 10)}</td>
-                  <td className="px-4 py-2 text-slate-700">{t.fromAccount.name}</td>
-                  <td className="px-4 py-2 text-slate-700">{t.toAccount.name}</td>
-                  <td className="px-4 py-2 text-right tabular-nums">
-                    {formatAmount(t.amount, cur)} {cur}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+      <StatGrid>
+        <StatCard icon="transfer" tone="slate" label="Transfers" value={String(stats.count)} sub="This month" />
+        <StatCard icon="sum" tone="blue" label="Total moved" value={formatAmount(stats.sum, cur)} unit={cur} sub="This month" />
+        <StatCard icon="avg" tone="violet" label="Average" value={formatAmount(stats.avg, cur)} unit={cur} sub="This month" />
+        <StatCard icon="calendar" tone="amber" label="Latest" value={stats.latest ? isoDate(stats.latest) : "—"} sub={stats.latest ? relativeDays(stats.latest, locale) : undefined} />
+      </StatGrid>
+
+      <div className="mt-8">
+        <ListView
+          rows={rows}
+          currency={cur}
+          hasDateFilter
+          searchKeys={["number", "from", "to"]}
+          emptyText="No transfers yet."
+          mobile={{ title: "to", subtitle: "number", amount: "amount" }}
+          columns={[
+            { key: "number", header: "Number", kind: "link" },
+            { key: "date", header: "Date", kind: "muted" },
+            { key: "from", header: "From" },
+            { key: "to", header: "To" },
+            { key: "amount", header: "Amount", kind: "amount", align: "right" },
+          ]}
+        />
       </div>
     </div>
   );

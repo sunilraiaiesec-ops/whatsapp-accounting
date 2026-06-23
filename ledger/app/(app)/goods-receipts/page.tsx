@@ -1,68 +1,65 @@
-import Link from "next/link";
+import { getLocale } from "next-intl/server";
 
 import { requireContext } from "@/lib/auth/current";
+import { docMonthStats } from "@/lib/documents";
 import { listGoodsReceipts } from "@/lib/inventory";
 import { formatAmount } from "@/lib/money";
+import { relativeDays, isoDate } from "@/lib/format";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { StatGrid, StatCard } from "@/components/ui/StatCards";
+import { ListView, type ListRow } from "@/components/ui/ListView";
 
 export default async function GoodsReceiptsPage() {
   const ctx = await requireContext();
+  const locale = await getLocale();
   const cur = ctx.baseCurrency;
-  const receipts = await listGoodsReceipts(ctx.orgId);
+
+  const [receipts, stats] = await Promise.all([
+    listGoodsReceipts(ctx.orgId),
+    docMonthStats(ctx.orgId, "goodsReceipt"),
+  ]);
+
+  const rows: ListRow[] = receipts.map((r) => ({
+    id: r.id,
+    href: `/goods-receipts/${r.id}`,
+    _date: isoDate(r.date),
+    number: r.number,
+    date: isoDate(r.date),
+    supplier: r.party.name,
+    amount: formatAmount(r.total, cur),
+  }));
 
   return (
-    <div>
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Goods Receipts</h1>
-          <p className="text-sm text-slate-500">
-            Stock received from suppliers — increases inventory.
-          </p>
-        </div>
-        <Link
-          href="/goods-receipts/new"
-          className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
-        >
-          New goods receipt
-        </Link>
-      </div>
+    <div className="mx-auto max-w-6xl">
+      <PageHeader
+        title="Goods receipts"
+        subtitle="Stock received from suppliers — increases inventory."
+        actionHref="/goods-receipts/new"
+        actionLabel="New goods receipt"
+      />
 
-      <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white">
-        {receipts.length === 0 ? (
-          <p className="p-8 text-center text-sm text-slate-500">No goods receipts yet.</p>
-        ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-                <th className="px-4 py-2 font-medium">Number</th>
-                <th className="px-4 py-2 font-medium">Date</th>
-                <th className="px-4 py-2 font-medium">Supplier</th>
-                <th className="px-4 py-2 text-right font-medium">Value</th>
-              </tr>
-            </thead>
-            <tbody>
-              {receipts.map((r) => (
-                <tr
-                  key={r.id}
-                  className="border-b border-slate-100 last:border-0 hover:bg-slate-50"
-                >
-                  <td className="px-4 py-2 font-mono text-xs">
-                    <Link
-                      href={`/goods-receipts/${r.id}`}
-                      className="text-blue-600 hover:underline"
-                    >
-                      {r.number}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-2">{r.date.toISOString().slice(0, 10)}</td>
-                  <td className="px-4 py-2 text-slate-700">{r.party.name}</td>
-                  <td className="px-4 py-2 text-right tabular-nums">
-                    {formatAmount(r.total, cur)} {cur}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+      <StatGrid>
+        <StatCard icon="box" tone="emerald" label="Goods receipts" value={String(stats.count)} sub="This month" />
+        <StatCard icon="sum" tone="blue" label="Total value" value={formatAmount(stats.sum, cur)} unit={cur} sub="This month" />
+        <StatCard icon="avg" tone="violet" label="Average" value={formatAmount(stats.avg, cur)} unit={cur} sub="This month" />
+        <StatCard icon="calendar" tone="amber" label="Latest" value={stats.latest ? isoDate(stats.latest) : "—"} sub={stats.latest ? relativeDays(stats.latest, locale) : undefined} />
+      </StatGrid>
+
+      <div className="mt-8">
+        <ListView
+          rows={rows}
+          currency={cur}
+          hasDateFilter
+          searchKeys={["number", "supplier"]}
+          emptyText="No goods receipts yet."
+          mobile={{ title: "supplier", subtitle: "number", amount: "amount" }}
+          columns={[
+            { key: "number", header: "Number", kind: "link" },
+            { key: "date", header: "Date", kind: "muted" },
+            { key: "supplier", header: "Supplier" },
+            { key: "amount", header: "Value", kind: "amount", align: "right" },
+          ]}
+        />
       </div>
     </div>
   );

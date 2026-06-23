@@ -4,57 +4,56 @@ import { requireContext } from "@/lib/auth/current";
 import { bankAndCashWithBalances } from "@/lib/accounts";
 import { formatAmount } from "@/lib/money";
 import { BankAccountForm } from "@/components/BankAccountForm";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { StatGrid, StatCard } from "@/components/ui/StatCards";
+import { ListView, type ListRow } from "@/components/ui/ListView";
 
 export default async function BankAndCashAccountsPage() {
   const ctx = await requireContext();
   const t = await getTranslations("bank");
   const cur = ctx.baseCurrency;
   const accounts = await bankAndCashWithBalances(ctx.orgId);
+
   const total = accounts.reduce((s, a) => s + a.balance, 0n);
+  const cashTotal = accounts.filter((a) => a.subtype === "cash").reduce((s, a) => s + a.balance, 0n);
+  const bankTotal = total - cashTotal;
+
+  const rows: ListRow[] = accounts.map((a) => ({
+    id: a.id,
+    code: a.code,
+    name: a.name,
+    type: a.subtype ?? "—",
+    balance: formatAmount(a.balance, cur),
+  }));
 
   return (
-    <div>
-      <h1 className="text-2xl font-semibold">{t("title")}</h1>
-      <p className="text-sm text-slate-500">{t("subtitle")}</p>
+    <div className="mx-auto max-w-6xl">
+      <PageHeader title={t("title")} subtitle={t("subtitle")} />
+
+      <StatGrid>
+        <StatCard icon="wallet" tone="emerald" label={t("account")} value={String(accounts.length)} />
+        <StatCard icon="sum" tone="blue" label={t("total")} value={formatAmount(total, cur)} unit={cur} />
+        <StatCard icon="wallet" tone="violet" label="Bank" value={formatAmount(bankTotal, cur)} unit={cur} />
+        <StatCard icon="wallet" tone="amber" label="Cash" value={formatAmount(cashTotal, cur)} unit={cur} />
+      </StatGrid>
 
       <div className="mt-6">
         <BankAccountForm />
       </div>
 
-      <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-              <th className="px-4 py-2 font-medium">{t("account")}</th>
-              <th className="px-4 py-2 font-medium">{t("type")}</th>
-              <th className="px-4 py-2 text-right font-medium">{t("balance")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {accounts.map((a) => (
-              <tr key={a.id} className="border-b border-slate-100 last:border-0">
-                <td className="px-4 py-2">
-                  <span className="font-mono text-xs text-slate-400">{a.code}</span>{" "}
-                  {a.name}
-                </td>
-                <td className="px-4 py-2 capitalize text-slate-600">{a.subtype}</td>
-                <td className="px-4 py-2 text-right tabular-nums">
-                  {formatAmount(a.balance, cur)} {cur}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr className="border-t-2 border-slate-300 bg-slate-50 font-semibold">
-              <td className="px-4 py-2" colSpan={2}>
-                {t("total")}
-              </td>
-              <td className="px-4 py-2 text-right tabular-nums">
-                {formatAmount(total, cur)} {cur}
-              </td>
-            </tr>
-          </tfoot>
-        </table>
+      <div className="mt-6">
+        <ListView
+          rows={rows}
+          currency={cur}
+          searchKeys={["code", "name", "type"]}
+          emptyText={t("subtitle")}
+          columns={[
+            { key: "code", header: "Code", kind: "mono" },
+            { key: "name", header: t("account") },
+            { key: "type", header: t("type"), kind: "muted" },
+            { key: "balance", header: t("balance"), kind: "amount", align: "right" },
+          ]}
+        />
       </div>
     </div>
   );
