@@ -25,6 +25,7 @@ from auth import (
 )
 from whatsapp_access import staff_pin_enabled, staff_pin_length
 from whatsapp_flow import handle_whatsapp_flow
+from brim import ensure_brim_tables, handle_brim_inbound, is_brim_household
 
 from db import (
     DEFAULT_BUSINESS_ID,
@@ -98,6 +99,7 @@ async def lifespan(app: FastAPI):
     ensure_accounting_submissions_table()
     ensure_invoices_table()
     ensure_stock_movements_table()
+    ensure_brim_tables()
     backfill_task = asyncio.create_task(asyncio.to_thread(run_startup_backfills))
     yield
     backfill_task.cancel()
@@ -286,6 +288,12 @@ async def whatsapp_webhook(request: Request):
         whatsapp_message_id = payload["whatsapp_message_id"]
         if message_exists(whatsapp_message_id):
             return {"status": "duplicate"}
+
+        # Brim household members get their own receipt path, bypassing the
+        # RR Foods employee/PIN flow entirely. Inert unless BRIM_HOUSEHOLD_PHONES
+        # is configured.
+        if is_brim_household(payload["sender"]):
+            return await handle_brim_inbound(payload)
 
         employee = get_employee_by_phone(payload["sender"])
         if not employee:
