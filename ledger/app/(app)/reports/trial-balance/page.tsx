@@ -1,3 +1,4 @@
+import { ReportBackLink } from "@/components/ReportBackLink";
 import { requireContext } from "@/lib/auth/current";
 import { trialBalance } from "@/lib/reports";
 import { formatAmount } from "@/lib/money";
@@ -9,15 +10,16 @@ export default async function TrialBalancePage() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <h1 className="text-2xl font-semibold">Trial Balance</h1>
-      <p className="text-sm text-slate-500">
+      <ReportBackLink />
+      <h1 className="mt-2 text-2xl font-semibold">Trial Balance</h1>
+      <p className="text-sm text-[var(--muted)]">
         As of {new Date().toISOString().slice(0, 10)} · all amounts in {cur}.
       </p>
 
-      <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div className="mt-6 card-surface overflow-hidden">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+            <tr className="border-b border-[var(--border)] bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
               <th className="px-4 py-2 font-medium">Account</th>
               <th className="w-40 px-4 py-2 text-right font-medium">Debit</th>
               <th className="w-40 px-4 py-2 text-right font-medium">Credit</th>

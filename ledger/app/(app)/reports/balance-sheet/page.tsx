@@ -1,3 +1,4 @@
+import { ReportBackLink } from "@/components/ReportBackLink";
 import { requireContext } from "@/lib/auth/current";
 import { balanceSheet, type AccountAmount } from "@/lib/reports";
 import { formatAmount } from "@/lib/money";
@@ -11,8 +12,9 @@ export default async function BalanceSheetPage() {
 
   return (
     <div className="mx-auto max-w-2xl">
-      <h1 className="text-2xl font-semibold">Balance Sheet</h1>
-      <p className="text-sm text-slate-500">
+      <ReportBackLink />
+      <h1 className="mt-2 text-2xl font-semibold">Balance Sheet</h1>
+      <p className="text-sm text-[var(--muted)]">
         As of {bs.asOf.toISOString().slice(0, 10)} · all amounts in {cur}.
       </p>
 
@@ -35,7 +37,7 @@ export default async function BalanceSheetPage() {
         />
       </div>
 
-      <div className="mt-6 rounded-xl border border-slate-200 bg-white p-4 text-sm">
+      <div className="mt-6 card-surface p-4 text-sm">
         <div className="flex justify-between">
           <span className="text-slate-600">Total assets</span>
           <span className="font-semibold tabular-nums">
@@ -72,8 +74,8 @@ function Section({
   extra?: { label: string; amount: bigint };
 }) {
   return (
-    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-      <div className="border-b border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-700">
+    <section className="card-surface overflow-hidden">
+      <div className="border-b border-[var(--border)] bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-700">
         {title}
       </div>
       <table className="w-full text-sm">

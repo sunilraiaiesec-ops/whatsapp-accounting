@@ -1,5 +1,6 @@
 import { requireContext } from "@/lib/auth/current";
 import { listAccounts } from "@/lib/accounts";
+import { PageHeader } from "@/components/ui/PageHeader";
 
 const TYPE_LABELS: Record<string, string> = {
   ASSET: "Assets",
@@ -22,19 +23,18 @@ export default async function AccountsPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-semibold">Chart of Accounts</h1>
-      <p className="text-sm text-slate-500">
-        The accounts every transaction posts to. Control accounts back the
-        customer, supplier and inventory subledgers.
-      </p>
+      <PageHeader
+        title="Chart of Accounts"
+        subtitle="The accounts every transaction posts to. Control accounts back the customer, supplier and inventory subledgers."
+      />
 
       <div className="mt-6 space-y-6">
         {grouped.map((group) => (
           <section
             key={group.type}
-            className="overflow-hidden rounded-xl border border-slate-200 bg-white"
+            className="card-surface overflow-hidden"
           >
-            <div className="border-b border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-700">
+            <div className="border-b border-[var(--border)] bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-700">
               {group.label}
             </div>
             <table className="w-full text-sm">

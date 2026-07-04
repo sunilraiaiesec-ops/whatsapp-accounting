@@ -1,3 +1,4 @@
+import { ReportBackLink } from "@/components/ReportBackLink";
 import { requireContext } from "@/lib/auth/current";
 import { profitAndLoss, type AccountAmount } from "@/lib/reports";
 import { formatAmount } from "@/lib/money";
@@ -15,8 +16,9 @@ export default async function ProfitLossPage() {
 
   return (
     <div className="mx-auto max-w-2xl">
-      <h1 className="text-2xl font-semibold">Profit &amp; Loss</h1>
-      <p className="text-sm text-slate-500">
+      <ReportBackLink />
+      <h1 className="mt-2 text-2xl font-semibold">Profit &amp; Loss</h1>
+      <p className="text-sm text-[var(--muted)]">
         {from.toISOString().slice(0, 10)} → {to.toISOString().slice(0, 10)} · all
         amounts in {cur}.
       </p>
@@ -36,7 +38,7 @@ export default async function ProfitLossPage() {
         />
       </div>
 
-      <div className="mt-6 flex justify-between rounded-xl border border-slate-200 bg-white p-4">
+      <div className="mt-6 flex justify-between card-surface p-4">
         <span className="font-semibold">Net profit</span>
         <span
           className={`font-semibold tabular-nums ${
@@ -62,8 +64,8 @@ function Section({
   cur: string;
 }) {
   return (
-    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-      <div className="border-b border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-700">
+    <section className="card-surface overflow-hidden">
+      <div className="border-b border-[var(--border)] bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-700">
         {title}
       </div>
       <table className="w-full text-sm">
