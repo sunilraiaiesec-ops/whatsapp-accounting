@@ -46,7 +46,7 @@ export default async function BankAndCashAccountsPage() {
           rows={rows}
           currency={cur}
           searchKeys={["code", "name", "type"]}
-          emptyText={t("subtitle")}
+          emptyText={t("empty")}
           columns={[
             { key: "code", header: "Code", kind: "mono" },
             { key: "name", header: t("account") },

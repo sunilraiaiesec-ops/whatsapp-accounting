@@ -378,7 +378,8 @@
     "bankAccount": "Bank account",
     "cashAccount": "Cash account",
     "addButton": "Add account",
-    "adding": "Adding…"
+    "adding": "Adding…",
+    "empty": "No bank or cash accounts yet. Add your first account above."
   },
   "salesInvoices": {
     "title": "Sales Invoices",

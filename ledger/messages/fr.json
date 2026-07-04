@@ -377,7 +377,8 @@
     "bankAccount": "Compte bancaire",
     "cashAccount": "Caisse",
     "addButton": "Ajouter le compte",
-    "adding": "Ajout…"
+    "adding": "Ajout…",
+    "empty": "Aucun compte bancaire ou de caisse. Ajoutez votre premier compte ci-dessus."
   },
   "salesInvoices": {
     "title": "Factures clients",
