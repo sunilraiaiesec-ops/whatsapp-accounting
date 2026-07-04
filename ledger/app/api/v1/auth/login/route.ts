@@ -3,8 +3,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { verifyPassword } from "@/lib/auth/password";
 import { createAuthToken } from "@/lib/auth/tokens";
-import { createOrganizationWithOwner, SignupError } from "@/lib/org";
 import { error, json } from "@/lib/api/http";
+import { rateLimit, requestIp } from "@/lib/rate-limit";
 
 export { OPTIONS } from "@/lib/api/route-options";
 
@@ -26,8 +26,18 @@ export async function POST(request: Request) {
     return error(parsed.error.issues[0]?.message ?? "Invalid input");
   }
 
+  const ip = requestIp(request);
+  const email = parsed.data.email.toLowerCase();
+  const [ipLimit, emailLimit] = await Promise.all([
+    rateLimit(`login:ip:${ip}`, 15, 5 * 60 * 1000),
+    rateLimit(`login:email:${email}`, 8, 15 * 60 * 1000),
+  ]);
+  if (!ipLimit.ok || !emailLimit.ok) {
+    return error("Too many attempts. Please try again later.", 429);
+  }
+
   const user = await prisma.user.findUnique({
-    where: { email: parsed.data.email.toLowerCase() },
+    where: { email },
     include: { memberships: { orderBy: { createdAt: "asc" }, take: 1, include: { org: true } } },
   });
 

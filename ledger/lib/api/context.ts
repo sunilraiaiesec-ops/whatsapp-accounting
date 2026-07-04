@@ -28,6 +28,7 @@ export async function getApiContext(
     orgName: membership.org.name,
     baseCurrency: membership.org.baseCurrency,
     role: membership.role,
+    emailVerified: membership.user.emailVerified != null,
   };
 }
 

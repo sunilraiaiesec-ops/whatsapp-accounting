@@ -11,6 +11,7 @@ export type CurrentContext = {
   orgName: string;
   baseCurrency: string;
   role: string;
+  emailVerified: boolean;
 };
 
 // Resolves the signed-in user and their active organization, verifying the
@@ -33,6 +34,7 @@ export async function getCurrentContext(): Promise<CurrentContext | null> {
     orgName: membership.org.name,
     baseCurrency: membership.org.baseCurrency,
     role: membership.role,
+    emailVerified: membership.user.emailVerified != null,
   };
 }
 

@@ -46,17 +46,47 @@ model Organization {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  name         String
-  phone        String?
-  passwordHash String
-  createdAt    DateTime @default(now())
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String
+  phone         String?
+  passwordHash  String
+  emailVerified DateTime?
+  createdAt     DateTime  @default(now())
 
   memberships Membership[]
   resetRequests OrgResetRequest[]
+  authTokens  AuthToken[]
 
   @@map("users")
+}
+
+// Single-use, high-entropy tokens for password reset and email verification.
+// Only the SHA-256 hash of the token is stored; the raw value lives only in
+// the email link sent to the user.
+model AuthToken {
+  id        String    @id @default(cuid())
+  userId    String
+  type      String // "password_reset" | "email_verify"
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+  @@map("auth_tokens")
+}
+
+// Fixed-window counter used to throttle auth endpoints (login, signup,
+// password-reset requests) per client key (usually IP).
+model RateLimit {
+  key         String   @id
+  count       Int      @default(0)
+  windowStart DateTime @default(now())
+
+  @@map("rate_limits")
 }
 
 enum Role {

@@ -2,7 +2,9 @@ import { z } from "zod";
 
 import { createAuthToken } from "@/lib/auth/tokens";
 import { createOrganizationWithOwner, SignupError } from "@/lib/org";
+import { sendUserVerification } from "@/lib/auth/account";
 import { error, json } from "@/lib/api/http";
+import { rateLimit, requestIp } from "@/lib/rate-limit";
 
 export { OPTIONS } from "@/lib/api/route-options";
 
@@ -27,8 +29,14 @@ export async function POST(request: Request) {
     return error(parsed.error.issues[0]?.message ?? "Invalid input");
   }
 
+  const limit = await rateLimit(`signup:${requestIp(request)}`, 5, 60 * 60 * 1000);
+  if (!limit.ok) {
+    return error("Too many sign-up attempts. Please try again later.", 429);
+  }
+
   try {
     const { org, user } = await createOrganizationWithOwner(parsed.data);
+    await sendUserVerification(user.id, user.email);
     const token = await createAuthToken({ userId: user.id, orgId: org.id });
 
     return json(

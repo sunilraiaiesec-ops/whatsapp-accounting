@@ -64,6 +64,13 @@ export default function SignupPage() {
             {t("signInLink")}
           </Link>
         </p>
+
+        <p className="mt-4 text-center text-xs text-[var(--muted)]">
+          By creating an account you agree to our{" "}
+          <Link href="/terms" className="hover:underline">Terms</Link>
+          {" and "}
+          <Link href="/privacy" className="hover:underline">Privacy Policy</Link>.
+        </p>
       </div>
     </main>
   );

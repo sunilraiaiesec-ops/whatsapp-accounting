@@ -198,7 +198,8 @@
     "hasAccount": "Already have an account?",
     "signInLink": "Sign in",
     "passwordHint": "At least 8 characters",
-    "createCompany": "Create company"
+    "createCompany": "Create company",
+    "forgotPassword": "Forgot password?"
   },
   "dashboard": {
     "greetingMorning": "Good morning, {name}!",

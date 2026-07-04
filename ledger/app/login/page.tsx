@@ -33,6 +33,15 @@ export default function LoginPage() {
             autoComplete="current-password"
           />
 
+          <div className="text-right">
+            <Link
+              href="/forgot-password"
+              className="text-sm font-medium text-[var(--brand)] hover:underline"
+            >
+              {t("forgotPassword")}
+            </Link>
+          </div>
+
           {state.error ? (
             <p className="text-sm text-red-600">{state.error}</p>
           ) : null}
@@ -47,6 +56,12 @@ export default function LoginPage() {
           <Link href="/signup" className="font-semibold text-[var(--brand)] hover:underline">
             {t("createOne")}
           </Link>
+        </p>
+
+        <p className="mt-4 text-center text-xs text-[var(--muted)]">
+          <Link href="/terms" className="hover:underline">Terms</Link>
+          {" · "}
+          <Link href="/privacy" className="hover:underline">Privacy</Link>
         </p>
       </div>
     </main>

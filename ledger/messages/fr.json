@@ -197,7 +197,8 @@
     "hasAccount": "Vous avez déjà un compte ?",
     "signInLink": "Se connecter",
     "passwordHint": "Au moins 8 caractères",
-    "createCompany": "Créer l'entreprise"
+    "createCompany": "Créer l'entreprise",
+    "forgotPassword": "Mot de passe oublié ?"
   },
   "dashboard": {
     "greetingMorning": "Bonjour, {name} !",

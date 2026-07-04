@@ -1,6 +1,7 @@
 import { requireContext } from "@/lib/auth/current";
 import { getSidebarCounts } from "@/lib/sidebar";
 import { AppShell } from "@/components/AppShell";
+import { EmailVerifyBanner } from "@/components/EmailVerifyBanner";
 
 export default async function AppLayout({
   children,
@@ -17,6 +18,7 @@ export default async function AppLayout({
       userName={ctx.userName}
       userEmail={ctx.userEmail}
     >
+      <EmailVerifyBanner verified={ctx.emailVerified} email={ctx.userEmail} />
       {children}
     </AppShell>
   );

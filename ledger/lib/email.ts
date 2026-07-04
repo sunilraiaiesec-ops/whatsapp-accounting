@@ -43,6 +43,40 @@ export async function sendEmail(input: SendEmailInput): Promise<void> {
   }
 }
 
+export function appUrl(): string {
+  return (process.env.APP_URL ?? "https://books.bantoobooks.com").replace(/\/$/, "");
+}
+
+export async function sendPasswordResetEmail(email: string, link: string) {
+  const subject = "Reset your Bantoo Books password";
+  const text =
+    `We received a request to reset your Bantoo Books password.\n\n` +
+    `Reset it here (link expires in 1 hour):\n${link}\n\n` +
+    `If you did not request this, you can safely ignore this email — your password will not change.\n\n` +
+    `— Bantoo Books`;
+  const html =
+    `<p>We received a request to reset your Bantoo Books password.</p>` +
+    `<p><a href="${escapeHtml(link)}" style="display:inline-block;background:#059669;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">Reset password</a></p>` +
+    `<p style="color:#64748b;font-size:13px">This link expires in <strong>1 hour</strong>. If you did not request this, you can safely ignore this email.</p>` +
+    `<p>— Bantoo Books</p>`;
+  await sendEmail({ to: email, subject, html, text });
+}
+
+export async function sendVerificationEmail(email: string, link: string) {
+  const subject = "Confirm your email for Bantoo Books";
+  const text =
+    `Welcome to Bantoo Books! Please confirm your email address to secure your account.\n\n` +
+    `Confirm here (link expires in 24 hours):\n${link}\n\n` +
+    `If you did not create this account, you can ignore this email.\n\n` +
+    `— Bantoo Books`;
+  const html =
+    `<p>Welcome to Bantoo Books! Please confirm your email address to secure your account.</p>` +
+    `<p><a href="${escapeHtml(link)}" style="display:inline-block;background:#059669;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600">Confirm email</a></p>` +
+    `<p style="color:#64748b;font-size:13px">This link expires in <strong>24 hours</strong>. If you did not create this account, you can ignore this email.</p>` +
+    `<p>— Bantoo Books</p>`;
+  await sendEmail({ to: email, subject, html, text });
+}
+
 export async function sendResetVerificationCode(email: string, code: string, orgName: string) {
   const subject = "Confirm reset of your Bantoo Books data";
   const text =
