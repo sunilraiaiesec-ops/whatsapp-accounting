@@ -4,10 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { postEntryWithin, removeEntryWithin } from "@/lib/ledger";
 import { inventoryAccount, payableAccount } from "@/lib/accounts";
 import { DocumentError, type DocNav } from "@/lib/documents";
-
-function formatNumber(prefix: string, count: number) {
-  return `${prefix}-${String(count + 1).padStart(5, "0")}`;
-}
+import { nextDocNumber } from "@/lib/numbering";
 
 function round(decimal: Prisma.Decimal): bigint {
   return BigInt(decimal.toFixed(0));
@@ -90,10 +87,7 @@ export async function receiveGoods(
       ],
     });
 
-    const number = formatNumber(
-      "GRN",
-      await tx.goodsReceipt.count({ where: { orgId } }),
-    );
+    const number = await nextDocNumber(tx, orgId, "GRN");
     const receipt = await tx.goodsReceipt.create({
       data: {
         orgId,
@@ -190,10 +184,7 @@ export async function writeOffInventory(
       ],
     });
 
-    const number = formatNumber(
-      "WO",
-      await tx.inventoryWriteOff.count({ where: { orgId } }),
-    );
+    const number = await nextDocNumber(tx, orgId, "WO");
     const writeOff = await tx.inventoryWriteOff.create({
       data: {
         orgId,
@@ -323,10 +314,7 @@ export async function adjustInventory(
       entryId = entry.id;
     }
 
-    const number = formatNumber(
-      "ADJ",
-      await tx.inventoryAdjustment.count({ where: { orgId } }),
-    );
+    const number = await nextDocNumber(tx, orgId, "ADJ");
     const adjustment = await tx.inventoryAdjustment.create({
       data: {
         orgId,

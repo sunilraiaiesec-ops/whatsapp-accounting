@@ -44,6 +44,7 @@ model Organization {
   salesReceipts    SalesReceipt[]
   refundReceipts   RefundReceipt[]
   resetRequests      OrgResetRequest[]
+  documentSequences  DocumentSequence[]
 
   @@map("organizations")
 }
@@ -731,6 +732,20 @@ model RefundReceipt {
   @@unique([orgId, number])
   @@index([orgId, date])
   @@map("refund_receipts")
+}
+
+// Per-(org, document kind) monotonic counter used to allocate document
+// numbers atomically. Incremented with INSERT … ON CONFLICT DO UPDATE inside
+// the posting transaction so concurrent posts never collide or duplicate.
+model DocumentSequence {
+  orgId String
+  kind  String // REC, PAY, INV, SR, RR, BILL, TRF, CN, DN, GRN, WO, ADJ
+  value Int    @default(0)
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@id([orgId, kind])
+  @@map("document_sequences")
 }
 
 model RefundReceiptLine {

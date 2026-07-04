@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { postEntryWithin, LedgerError } from "@/lib/ledger";
+import { nextDocNumber } from "@/lib/numbering";
 import {
   receivableAccount,
   payableAccount,
@@ -12,10 +13,6 @@ import {
 } from "@/lib/accounts";
 
 export class DocumentError extends Error {}
-
-function formatNumber(prefix: string, count: number) {
-  return `${prefix}-${String(count + 1).padStart(5, "0")}`;
-}
 
 // A category line: a plain expense/income account and a net amount (base
 // currency minor units). Optional per-line sales tax rate (percent).
@@ -155,7 +152,7 @@ export async function createReceipt(
       lines: entryLines,
     });
 
-    const number = formatNumber("REC", await tx.receipt.count({ where: { orgId } }));
+    const number = await nextDocNumber(tx, orgId, "REC");
     const receipt = await tx.receipt.create({
       data: {
         orgId,
@@ -285,7 +282,7 @@ export async function createPayment(
       lines: entryLines,
     });
 
-    const number = formatNumber("PAY", await tx.payment.count({ where: { orgId } }));
+    const number = await nextDocNumber(tx, orgId, "PAY");
     const payment = await tx.payment.create({
       data: {
         orgId,
@@ -459,10 +456,7 @@ export async function createSalesInvoice(
       lines: entryLines,
     });
 
-    const number = formatNumber(
-      "INV",
-      await tx.salesInvoice.count({ where: { orgId } }),
-    );
+    const number = await nextDocNumber(tx, orgId, "INV");
     const invoice = await tx.salesInvoice.create({
       data: {
         orgId,
@@ -596,10 +590,7 @@ export async function createSalesReceipt(
       lines: entryLines,
     });
 
-    const number = formatNumber(
-      "SR",
-      await tx.salesReceipt.count({ where: { orgId } }),
-    );
+    const number = await nextDocNumber(tx, orgId, "SR");
     const receipt = await tx.salesReceipt.create({
       data: {
         orgId,
@@ -679,10 +670,7 @@ export async function createRefundReceipt(
       ],
     });
 
-    const number = formatNumber(
-      "RR",
-      await tx.refundReceipt.count({ where: { orgId } }),
-    );
+    const number = await nextDocNumber(tx, orgId, "RR");
     const refund = await tx.refundReceipt.create({
       data: {
         orgId,
@@ -756,10 +744,7 @@ export async function createPurchaseInvoice(
       ],
     });
 
-    const number = formatNumber(
-      "BILL",
-      await tx.purchaseInvoice.count({ where: { orgId } }),
-    );
+    const number = await nextDocNumber(tx, orgId, "BILL");
     const invoice = await tx.purchaseInvoice.create({
       data: {
         orgId,
@@ -830,10 +815,7 @@ export async function createInterAccountTransfer(
       ],
     });
 
-    const number = formatNumber(
-      "TRF",
-      await tx.interAccountTransfer.count({ where: { orgId } }),
-    );
+    const number = await nextDocNumber(tx, orgId, "TRF");
     const transfer = await tx.interAccountTransfer.create({
       data: {
         orgId,
@@ -895,10 +877,7 @@ export async function createCreditNote(
       ],
     });
 
-    const number = formatNumber(
-      "CN",
-      await tx.creditNote.count({ where: { orgId } }),
-    );
+    const number = await nextDocNumber(tx, orgId, "CN");
     const note = await tx.creditNote.create({
       data: {
         orgId,
@@ -968,10 +947,7 @@ export async function createDebitNote(
       ],
     });
 
-    const number = formatNumber(
-      "DN",
-      await tx.debitNote.count({ where: { orgId } }),
-    );
+    const number = await nextDocNumber(tx, orgId, "DN");
     const note = await tx.debitNote.create({
       data: {
         orgId,
