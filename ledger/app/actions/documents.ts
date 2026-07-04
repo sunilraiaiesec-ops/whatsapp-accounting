@@ -8,6 +8,8 @@ import {
   createReceipt,
   createPayment,
   createSalesInvoice,
+  createSalesReceipt,
+  createRefundReceipt,
   createPurchaseInvoice,
   createInterAccountTransfer,
   createCreditNote,
@@ -169,6 +171,79 @@ export async function createReceiptAction(
     return fail(err);
   }
   redirect("/receipts");
+}
+
+// --- Sales receipt (cash sale) ----------------------------------------------
+export async function createSalesReceiptAction(
+  _prev: DocState,
+  formData: FormData,
+): Promise<DocState> {
+  const ctx = await requireContext();
+  const bankAccountId = String(formData.get("bankAccountId") || "");
+  if (!bankAccountId) return { error: "Choose where the money was received" };
+
+  let raw: {
+    description?: string;
+    quantity?: string;
+    unitPrice?: string;
+    accountId?: string;
+    itemId?: string;
+  }[];
+  try {
+    raw = JSON.parse(String(formData.get("lines") || "[]"));
+  } catch {
+    return { error: "Could not read line items" };
+  }
+  const lines = raw
+    .filter((l) => (l.description ?? "").trim() && l.accountId)
+    .map((l) => ({
+      description: l.description ?? "",
+      quantity: (l.quantity ?? "1").trim() || "1",
+      unitPrice: parseAmount(l.unitPrice ?? "0", ctx.baseCurrency),
+      accountId: l.accountId as string,
+      itemId: l.itemId || null,
+    }));
+
+  try {
+    await createSalesReceipt(ctx.orgId, {
+      bankAccountId,
+      partyId: String(formData.get("partyId") || "") || null,
+      date: parseDate(formData.get("date")),
+      reference: String(formData.get("reference") || "") || null,
+      notes: String(formData.get("notes") || "") || null,
+      lines,
+    });
+  } catch (err) {
+    return fail(err);
+  }
+  redirect("/sales-receipts");
+}
+
+// --- Refund receipt (refund a customer) -------------------------------------
+export async function createRefundReceiptAction(
+  _prev: DocState,
+  formData: FormData,
+): Promise<DocState> {
+  const ctx = await requireContext();
+  const bankAccountId = String(formData.get("bankAccountId") || "");
+  if (!bankAccountId) return { error: "Choose where the refund is paid from" };
+
+  const lines = parseInvoiceLines(formData, ctx.baseCurrency);
+  if (lines === null) return { error: "Could not read line items" };
+
+  try {
+    await createRefundReceipt(ctx.orgId, {
+      bankAccountId,
+      partyId: String(formData.get("partyId") || "") || null,
+      date: parseDate(formData.get("date")),
+      reference: String(formData.get("reference") || "") || null,
+      notes: String(formData.get("notes") || "") || null,
+      lines,
+    });
+  } catch (err) {
+    return fail(err);
+  }
+  redirect("/refund-receipts");
 }
 
 // --- Payment -----------------------------------------------------------------

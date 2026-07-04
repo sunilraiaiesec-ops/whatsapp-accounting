@@ -41,6 +41,8 @@ model Organization {
   goodsReceipts    GoodsReceipt[]
   inventoryWriteOffs InventoryWriteOff[]
   inventoryAdjustments InventoryAdjustment[]
+  salesReceipts    SalesReceipt[]
+  refundReceipts   RefundReceipt[]
   resetRequests      OrgResetRequest[]
 
   @@map("organizations")
@@ -153,6 +155,10 @@ model Account {
   debitNoteLines       DebitNoteLine[]
   inventoryWriteOffs   InventoryWriteOff[]
   inventoryAdjustments InventoryAdjustment[]
+  salesReceiptsBank    SalesReceipt[]        @relation("SalesReceiptBank")
+  salesReceiptLines    SalesReceiptLine[]
+  refundReceiptsBank   RefundReceipt[]       @relation("RefundReceiptBank")
+  refundReceiptLines   RefundReceiptLine[]
 
   @@unique([orgId, code])
   @@index([orgId, type])
@@ -177,6 +183,8 @@ model Party {
   creditNotes      CreditNote[]
   debitNotes       DebitNote[]
   goodsReceipts    GoodsReceipt[]
+  salesReceipts    SalesReceipt[]
+  refundReceipts   RefundReceipt[]
 
   @@index([orgId])
   @@map("parties")
@@ -534,6 +542,7 @@ model InventoryItem {
   writeOffLines    InventoryWriteOffLine[]
   adjustmentLines  InventoryAdjustmentLine[]
   salesInvoiceLines SalesInvoiceLine[]
+  salesReceiptLines SalesReceiptLine[]
   paymentLines     PaymentLine[]
 
   @@unique([orgId, code])
@@ -652,6 +661,92 @@ model InventoryAdjustmentLine {
 
   @@index([adjustmentId])
   @@map("inventory_adjustment_lines")
+}
+
+// Cash sale — sell goods/services and get paid immediately.
+// Posts: Dr bank/cash (total); Cr each income line; plus Dr COGS / Cr
+// Inventory for stock items sold.
+model SalesReceipt {
+  id             String   @id @default(cuid())
+  orgId          String
+  number         String
+  partyId        String?
+  bankAccountId  String
+  date           DateTime @db.Date
+  reference      String?
+  notes          String?
+  total          BigInt   @default(0)
+  journalEntryId String   @unique
+  createdAt      DateTime @default(now())
+
+  org         Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  party       Party?             @relation(fields: [partyId], references: [id])
+  bankAccount Account            @relation("SalesReceiptBank", fields: [bankAccountId], references: [id])
+  lines       SalesReceiptLine[]
+
+  @@unique([orgId, number])
+  @@index([orgId, date])
+  @@map("sales_receipts")
+}
+
+model SalesReceiptLine {
+  id          String  @id @default(cuid())
+  receiptId   String
+  description String
+  quantity    Decimal @default(1) @db.Decimal(14, 3)
+  unitPrice   BigInt
+  lineTotal   BigInt
+  accountId   String
+  itemId      String?
+  cost        BigInt  @default(0)
+
+  receipt SalesReceipt   @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  account Account        @relation(fields: [accountId], references: [id])
+  item    InventoryItem? @relation(fields: [itemId], references: [id])
+
+  @@index([receiptId])
+  @@map("sales_receipt_lines")
+}
+
+// Refund receipt — refund money to a customer (paid out of bank/cash).
+// Posts: Dr each income/returns line; Cr bank/cash (total).
+model RefundReceipt {
+  id             String   @id @default(cuid())
+  orgId          String
+  number         String
+  partyId        String?
+  bankAccountId  String
+  date           DateTime @db.Date
+  reference      String?
+  notes          String?
+  total          BigInt   @default(0)
+  journalEntryId String   @unique
+  createdAt      DateTime @default(now())
+
+  org         Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  party       Party?              @relation(fields: [partyId], references: [id])
+  bankAccount Account             @relation("RefundReceiptBank", fields: [bankAccountId], references: [id])
+  lines       RefundReceiptLine[]
+
+  @@unique([orgId, number])
+  @@index([orgId, date])
+  @@map("refund_receipts")
+}
+
+model RefundReceiptLine {
+  id          String  @id @default(cuid())
+  refundId    String
+  description String
+  quantity    Decimal @default(1) @db.Decimal(14, 3)
+  unitPrice   BigInt
+  lineTotal   BigInt
+  accountId   String
+
+  refund  RefundReceipt @relation(fields: [refundId], references: [id], onDelete: Cascade)
+  account Account       @relation(fields: [accountId], references: [id])
+
+  @@index([refundId])
+  @@map("refund_receipt_lines")
 }
 
 // Factory-reset workflow: email code → 2h cooldown → wipe org books.

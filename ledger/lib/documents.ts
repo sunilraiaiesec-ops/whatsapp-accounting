@@ -505,6 +505,216 @@ export async function createSalesInvoice(
 }
 
 // ---------------------------------------------------------------------------
+// Sales receipt — cash sale, paid immediately into a bank/cash account.
+// Dr bank/cash (total) ; Cr each income line ; Dr COGS / Cr Inventory on items.
+// ---------------------------------------------------------------------------
+export async function createSalesReceipt(
+  orgId: string,
+  input: {
+    bankAccountId: string;
+    partyId?: string | null;
+    date: Date;
+    reference?: string | null;
+    notes?: string | null;
+    lines: InvoiceLineInput[];
+  },
+) {
+  if (!input.bankAccountId) throw new DocumentError("Choose a deposit account");
+  const rawLines = input.lines.filter((l) => l.description.trim() && l.accountId);
+  if (rawLines.length === 0) throw new DocumentError("Add at least one line");
+
+  const lines = rawLines.map((l) => ({
+    ...l,
+    lineTotal: computeLineTotal(l.quantity, l.unitPrice),
+  }));
+  const total = lines.reduce((s, l) => s + l.lineTotal, 0n);
+  if (total <= 0n) throw new DocumentError("Sales receipt total must be positive");
+
+  return prisma.$transaction(async (tx) => {
+    // COGS at weighted-average cost for inventory items, decrementing stock.
+    const itemState = new Map<string, { qty: Prisma.Decimal; value: bigint }>();
+    const lineCosts: bigint[] = [];
+    let cogsTotal = 0n;
+
+    for (const l of lines) {
+      if (!l.itemId) {
+        lineCosts.push(0n);
+        continue;
+      }
+      let state = itemState.get(l.itemId);
+      if (!state) {
+        const item = await tx.inventoryItem.findFirstOrThrow({
+          where: { id: l.itemId, orgId },
+        });
+        state = { qty: new Prisma.Decimal(item.qtyOnHand), value: item.valueOnHand };
+        itemState.set(l.itemId, state);
+      }
+      const qty = new Prisma.Decimal(l.quantity || "0");
+      if (qty.gt(state.qty)) {
+        const item = await tx.inventoryItem.findFirstOrThrow({ where: { id: l.itemId } });
+        throw new DocumentError(
+          `Not enough stock of ${item.name}: have ${state.qty.toString()}, selling ${qty.toString()}`,
+        );
+      }
+      const cost = state.qty.gt(0)
+        ? BigInt(
+            new Prisma.Decimal(state.value.toString())
+              .times(qty)
+              .div(state.qty)
+              .toFixed(0),
+          )
+        : 0n;
+      state.qty = state.qty.minus(qty);
+      state.value -= cost;
+      lineCosts.push(cost);
+      cogsTotal += cost;
+    }
+
+    const entryLines: {
+      accountId: string;
+      debit?: bigint;
+      credit?: bigint;
+      partyId?: string | null;
+      memo?: string | null;
+    }[] = [
+      { accountId: input.bankAccountId, debit: total },
+      ...lines.map((l) => ({ accountId: l.accountId, credit: l.lineTotal })),
+    ];
+    if (cogsTotal > 0n) {
+      const cogs = await cogsAccount(orgId);
+      const inv = await inventoryAccount(orgId);
+      entryLines.push({ accountId: cogs.id, debit: cogsTotal });
+      entryLines.push({ accountId: inv.id, credit: cogsTotal });
+    }
+
+    const entry = await postEntryWithin(tx, {
+      orgId,
+      entryDate: input.date,
+      description: input.notes ?? null,
+      reference: input.reference ?? null,
+      sourceType: "sales_receipt",
+      lines: entryLines,
+    });
+
+    const number = formatNumber(
+      "SR",
+      await tx.salesReceipt.count({ where: { orgId } }),
+    );
+    const receipt = await tx.salesReceipt.create({
+      data: {
+        orgId,
+        number,
+        partyId: input.partyId ?? null,
+        bankAccountId: input.bankAccountId,
+        date: input.date,
+        reference: input.reference ?? null,
+        notes: input.notes ?? null,
+        total,
+        journalEntryId: entry.id,
+        lines: {
+          create: lines.map((l, i) => ({
+            description: l.description.trim(),
+            quantity: new Prisma.Decimal(l.quantity || "0"),
+            unitPrice: l.unitPrice,
+            lineTotal: l.lineTotal,
+            accountId: l.accountId,
+            itemId: l.itemId ?? null,
+            cost: lineCosts[i],
+          })),
+        },
+      },
+    });
+
+    for (const [itemId, state] of itemState) {
+      await tx.inventoryItem.update({
+        where: { id: itemId },
+        data: { qtyOnHand: state.qty, valueOnHand: state.value },
+      });
+    }
+
+    await tx.journalEntry.update({
+      where: { id: entry.id },
+      data: { sourceId: receipt.id },
+    });
+    return receipt;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Refund receipt — money refunded to a customer, paid out of a bank/cash
+// account. Dr each income/returns line ; Cr bank/cash (total).
+// ---------------------------------------------------------------------------
+export async function createRefundReceipt(
+  orgId: string,
+  input: {
+    bankAccountId: string;
+    partyId?: string | null;
+    date: Date;
+    reference?: string | null;
+    notes?: string | null;
+    lines: InvoiceLineInput[];
+  },
+) {
+  if (!input.bankAccountId) throw new DocumentError("Choose a refund account");
+  const rawLines = input.lines.filter((l) => l.description.trim() && l.accountId);
+  if (rawLines.length === 0) throw new DocumentError("Add at least one line");
+
+  const lines = rawLines.map((l) => ({
+    ...l,
+    lineTotal: computeLineTotal(l.quantity, l.unitPrice),
+  }));
+  const total = lines.reduce((s, l) => s + l.lineTotal, 0n);
+  if (total <= 0n) throw new DocumentError("Refund total must be positive");
+
+  return prisma.$transaction(async (tx) => {
+    const entry = await postEntryWithin(tx, {
+      orgId,
+      entryDate: input.date,
+      description: input.notes ?? null,
+      reference: input.reference ?? null,
+      sourceType: "refund_receipt",
+      lines: [
+        ...lines.map((l) => ({ accountId: l.accountId, debit: l.lineTotal })),
+        { accountId: input.bankAccountId, credit: total },
+      ],
+    });
+
+    const number = formatNumber(
+      "RR",
+      await tx.refundReceipt.count({ where: { orgId } }),
+    );
+    const refund = await tx.refundReceipt.create({
+      data: {
+        orgId,
+        number,
+        partyId: input.partyId ?? null,
+        bankAccountId: input.bankAccountId,
+        date: input.date,
+        reference: input.reference ?? null,
+        notes: input.notes ?? null,
+        total,
+        journalEntryId: entry.id,
+        lines: {
+          create: lines.map((l) => ({
+            description: l.description.trim(),
+            quantity: new Prisma.Decimal(l.quantity || "0"),
+            unitPrice: l.unitPrice,
+            lineTotal: l.lineTotal,
+            accountId: l.accountId,
+          })),
+        },
+      },
+    });
+
+    await tx.journalEntry.update({
+      where: { id: entry.id },
+      data: { sourceId: refund.id },
+    });
+    return refund;
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Purchase invoice — credit purchase (bill) from a supplier.
 // Dr each expense/asset line ; Cr Accounts payable (total, party).
 // ---------------------------------------------------------------------------
@@ -1276,7 +1486,9 @@ type DocModelName =
   | "debitNote"
   | "goodsReceipt"
   | "inventoryWriteOff"
-  | "inventoryAdjustment";
+  | "inventoryAdjustment"
+  | "salesReceipt"
+  | "refundReceipt";
 
 // Current-month KPI aggregate (count + sum + average) plus the latest doc date.
 // Aggregates over ALL rows, not just the capped list shown in the table.
@@ -1318,6 +1530,92 @@ export function listSalesInvoices(orgId: string) {
     orderBy: [{ date: "desc" }, { createdAt: "desc" }],
     take: 100,
   });
+}
+
+export function listSalesReceipts(orgId: string) {
+  return prisma.salesReceipt.findMany({
+    where: { orgId },
+    include: { party: true, bankAccount: true },
+    orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+    take: 100,
+  });
+}
+
+export async function getSalesReceipt(orgId: string, id: string) {
+  const receipt = await prisma.salesReceipt.findFirst({
+    where: { orgId, id },
+    include: {
+      lines: { include: { account: true, item: true } },
+      party: true,
+      bankAccount: true,
+    },
+  });
+  if (!receipt) return null;
+  const [entry, total, before, prev, next] = await Promise.all([
+    journalFor(receipt.journalEntryId),
+    prisma.salesReceipt.count({ where: { orgId } }),
+    prisma.salesReceipt.count({ where: { orgId, createdAt: { lt: receipt.createdAt } } }),
+    prisma.salesReceipt.findFirst({
+      where: { orgId, createdAt: { lt: receipt.createdAt } },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    }),
+    prisma.salesReceipt.findFirst({
+      where: { orgId, createdAt: { gt: receipt.createdAt } },
+      orderBy: { createdAt: "asc" },
+      select: { id: true },
+    }),
+  ]);
+  const nav: DocNav = {
+    index: before + 1,
+    total,
+    prevId: prev?.id ?? null,
+    nextId: next?.id ?? null,
+  };
+  return { receipt, entry, nav };
+}
+
+export function listRefundReceipts(orgId: string) {
+  return prisma.refundReceipt.findMany({
+    where: { orgId },
+    include: { party: true, bankAccount: true },
+    orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+    take: 100,
+  });
+}
+
+export async function getRefundReceipt(orgId: string, id: string) {
+  const refund = await prisma.refundReceipt.findFirst({
+    where: { orgId, id },
+    include: {
+      lines: { include: { account: true } },
+      party: true,
+      bankAccount: true,
+    },
+  });
+  if (!refund) return null;
+  const [entry, total, before, prev, next] = await Promise.all([
+    journalFor(refund.journalEntryId),
+    prisma.refundReceipt.count({ where: { orgId } }),
+    prisma.refundReceipt.count({ where: { orgId, createdAt: { lt: refund.createdAt } } }),
+    prisma.refundReceipt.findFirst({
+      where: { orgId, createdAt: { lt: refund.createdAt } },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    }),
+    prisma.refundReceipt.findFirst({
+      where: { orgId, createdAt: { gt: refund.createdAt } },
+      orderBy: { createdAt: "asc" },
+      select: { id: true },
+    }),
+  ]);
+  const nav: DocNav = {
+    index: before + 1,
+    total,
+    prevId: prev?.id ?? null,
+    nextId: next?.id ?? null,
+  };
+  return { refund, entry, nav };
 }
 
 export { LedgerError };
