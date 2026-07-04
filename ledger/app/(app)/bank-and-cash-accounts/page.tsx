@@ -1,7 +1,7 @@
 import { getTranslations } from "next-intl/server";
 
 import { requireContext } from "@/lib/auth/current";
-import { bankAndCashWithBalances } from "@/lib/accounts";
+import { moneyOutWithBalances } from "@/lib/accounts";
 import { formatAmount } from "@/lib/money";
 import { BankAccountForm } from "@/components/BankAccountForm";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -12,18 +12,19 @@ export default async function BankAndCashAccountsPage() {
   const ctx = await requireContext();
   const t = await getTranslations("bank");
   const cur = ctx.baseCurrency;
-  const accounts = await bankAndCashWithBalances(ctx.orgId);
+  const accounts = await moneyOutWithBalances(ctx.orgId);
 
-  const total = accounts.reduce((s, a) => s + a.balance, 0n);
   const cashTotal = accounts.filter((a) => a.subtype === "cash").reduce((s, a) => s + a.balance, 0n);
-  const bankTotal = total - cashTotal;
+  const bankTotal = accounts.filter((a) => a.subtype === "bank").reduce((s, a) => s + a.balance, 0n);
+  const total = bankTotal + cashTotal;
 
   const rows: ListRow[] = accounts.map((a) => ({
     id: a.id,
     code: a.code,
+    // Credit cards are liabilities: show the amount owed as a positive figure.
     name: a.name,
-    type: a.subtype ?? "—",
-    balance: formatAmount(a.balance, cur),
+    type: a.subtype === "credit_card" ? "credit card" : a.subtype ?? "—",
+    balance: formatAmount(a.subtype === "credit_card" ? -a.balance : a.balance, cur),
   }));
 
   return (

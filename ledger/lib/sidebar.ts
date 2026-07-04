@@ -19,6 +19,7 @@ export async function getSidebarCounts(orgId: string): Promise<SidebarCounts> {
     goodsReceipts,
     inventoryItems,
     inventoryWriteOffs,
+    inventoryAdjustments,
     journalEntries,
   ] = await Promise.all([
     prisma.account.count({ where: { orgId, subtype: { in: ["bank", "cash"] } } }),
@@ -34,6 +35,7 @@ export async function getSidebarCounts(orgId: string): Promise<SidebarCounts> {
     prisma.goodsReceipt.count({ where: { orgId } }),
     prisma.inventoryItem.count({ where: { orgId } }),
     prisma.inventoryWriteOff.count({ where: { orgId } }),
+    prisma.inventoryAdjustment.count({ where: { orgId } }),
     prisma.journalEntry.count({ where: { orgId, sourceType: "manual" } }),
   ]);
 
@@ -51,6 +53,7 @@ export async function getSidebarCounts(orgId: string): Promise<SidebarCounts> {
     "/goods-receipts": goodsReceipts,
     "/inventory-items": inventoryItems,
     "/inventory-write-offs": inventoryWriteOffs,
+    "/inventory-adjustments": inventoryAdjustments,
     "/journal": journalEntries,
   };
 }

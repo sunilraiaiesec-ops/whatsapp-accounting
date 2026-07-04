@@ -10,8 +10,14 @@ export type AccountState = { error?: string };
 
 const schema = z.object({
   name: z.string().trim().min(1, "Name is required"),
-  subtype: z.enum(["bank", "cash"]),
+  subtype: z.enum(["bank", "cash", "credit_card"]),
 });
+
+const CODE_START: Record<string, number> = {
+  cash: 1001,
+  bank: 1011,
+  credit_card: 2200,
+};
 
 function nextCode(used: Set<string>, start: number): string {
   let n = start;
@@ -37,13 +43,14 @@ export async function createBankAccountAction(
     select: { code: true },
   });
   const used = new Set(existing.map((a) => a.code));
+  const isCreditCard = parsed.data.subtype === "credit_card";
 
   await prisma.account.create({
     data: {
       orgId: ctx.orgId,
-      code: nextCode(used, parsed.data.subtype === "cash" ? 1001 : 1011),
+      code: nextCode(used, CODE_START[parsed.data.subtype] ?? 1011),
       name: parsed.data.name,
-      type: "ASSET",
+      type: isCreditCard ? "LIABILITY" : "ASSET",
       subtype: parsed.data.subtype,
       currency: ctx.baseCurrency,
     },

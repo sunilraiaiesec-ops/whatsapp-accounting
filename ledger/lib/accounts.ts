@@ -17,6 +17,22 @@ export function bankAndCashAccounts(orgId: string) {
   });
 }
 
+// Credit-card accounts — liabilities you can charge to and pay down.
+export function creditCardAccounts(orgId: string) {
+  return prisma.account.findMany({
+    where: { orgId, subtype: "credit_card" },
+    orderBy: { code: "asc" },
+  });
+}
+
+// Every account money can be paid out of: bank, cash and credit cards.
+export function moneyOutAccounts(orgId: string) {
+  return prisma.account.findMany({
+    where: { orgId, subtype: { in: ["bank", "cash", "credit_card"] } },
+    orderBy: { code: "asc" },
+  });
+}
+
 // Accounts that can appear on receipt lines (money in → credit side).
 export function receiptCounterpartAccounts(orgId: string) {
   return prisma.account.findMany({
@@ -41,9 +57,8 @@ export function paymentCounterpartAccounts(orgId: string) {
   });
 }
 
-export async function bankAndCashWithBalances(orgId: string) {
-  const accounts = await bankAndCashAccounts(orgId);
-  if (accounts.length === 0) return [];
+async function attachBalances<T extends { id: string }>(orgId: string, accounts: T[]) {
+  if (accounts.length === 0) return [] as (T & { balance: bigint })[];
 
   const sums = await prisma.journalLine.groupBy({
     by: ["accountId"],
@@ -55,6 +70,16 @@ export async function bankAndCashWithBalances(orgId: string) {
   );
 
   return accounts.map((a) => ({ ...a, balance: byId.get(a.id) ?? 0n }));
+}
+
+export async function bankAndCashWithBalances(orgId: string) {
+  return attachBalances(orgId, await bankAndCashAccounts(orgId));
+}
+
+// Bank, cash and credit-card accounts with balances — for the "paid from"
+// selector so card charges can be recorded.
+export async function moneyOutWithBalances(orgId: string) {
+  return attachBalances(orgId, await moneyOutAccounts(orgId));
 }
 
 export function accountsByType(orgId: string, type: AccountType) {

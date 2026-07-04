@@ -232,6 +232,142 @@ export async function writeOffInventory(
   });
 }
 
+// --- Quantity adjustment (correct stock up or down) -------------------------
+
+type AdjustmentLineInput = { itemId: string; newQuantity: string };
+
+export async function adjustInventory(
+  orgId: string,
+  input: {
+    date: Date;
+    adjustmentAccountId: string;
+    notes?: string | null;
+    lines: AdjustmentLineInput[];
+  },
+) {
+  if (!input.adjustmentAccountId) {
+    throw new DocumentError("Choose an adjustment account");
+  }
+  const raw = input.lines.filter(
+    (l) => l.itemId && String(l.newQuantity ?? "").trim() !== "",
+  );
+  if (raw.length === 0) throw new DocumentError("Add at least one item");
+
+  return prisma.$transaction(async (tx) => {
+    const inv = await inventoryAccount(orgId);
+
+    const computed: {
+      itemId: string;
+      before: Prisma.Decimal;
+      after: Prisma.Decimal;
+      valueChange: bigint;
+    }[] = [];
+
+    for (const l of raw) {
+      const item = await tx.inventoryItem.findFirstOrThrow({
+        where: { id: l.itemId, orgId },
+      });
+      const before = new Prisma.Decimal(item.qtyOnHand);
+      const after = new Prisma.Decimal(l.newQuantity);
+      if (after.lt(0)) {
+        throw new DocumentError(
+          `New quantity for ${item.name} cannot be negative`,
+        );
+      }
+      const delta = after.minus(before);
+      if (delta.isZero()) continue;
+
+      let valueChange: bigint;
+      if (delta.gt(0)) {
+        // Increase valued at the item's current average unit cost.
+        const avgCost = before.gt(0)
+          ? new Prisma.Decimal(item.valueOnHand.toString()).div(before)
+          : new Prisma.Decimal(0);
+        valueChange = round(avgCost.times(delta));
+      } else {
+        // Decrease removes value proportionally so the subledger stays aligned.
+        const dec = delta.abs();
+        valueChange = before.gt(0)
+          ? -round(new Prisma.Decimal(item.valueOnHand.toString()).times(dec).div(before))
+          : 0n;
+      }
+      computed.push({ itemId: item.id, before, after, valueChange });
+    }
+
+    if (computed.length === 0) {
+      throw new DocumentError("No quantity changes to record");
+    }
+
+    const netValue = computed.reduce((s, l) => s + l.valueChange, 0n);
+
+    // Only post to the ledger when the net inventory value actually changes.
+    let entryId: string | null = null;
+    if (netValue !== 0n) {
+      const lines =
+        netValue > 0n
+          ? [
+              { accountId: inv.id, debit: netValue },
+              { accountId: input.adjustmentAccountId, credit: netValue },
+            ]
+          : [
+              { accountId: input.adjustmentAccountId, debit: -netValue },
+              { accountId: inv.id, credit: -netValue },
+            ];
+      const entry = await postEntryWithin(tx, {
+        orgId,
+        entryDate: input.date,
+        description: input.notes ?? null,
+        sourceType: "inventory_adjustment",
+        lines,
+      });
+      entryId = entry.id;
+    }
+
+    const number = formatNumber(
+      "ADJ",
+      await tx.inventoryAdjustment.count({ where: { orgId } }),
+    );
+    const adjustment = await tx.inventoryAdjustment.create({
+      data: {
+        orgId,
+        number,
+        date: input.date,
+        adjustmentAccountId: input.adjustmentAccountId,
+        notes: input.notes ?? null,
+        total: netValue,
+        journalEntryId: entryId,
+        lines: {
+          create: computed.map((l) => ({
+            itemId: l.itemId,
+            quantityBefore: l.before,
+            quantityAfter: l.after,
+            valueChange: l.valueChange,
+          })),
+        },
+      },
+    });
+
+    for (const l of computed) {
+      const item = await tx.inventoryItem.findFirstOrThrow({ where: { id: l.itemId } });
+      await tx.inventoryItem.update({
+        where: { id: l.itemId },
+        data: {
+          qtyOnHand: l.after,
+          valueOnHand: item.valueOnHand + l.valueChange,
+        },
+      });
+    }
+
+    if (entryId) {
+      await tx.journalEntry.update({
+        where: { id: entryId },
+        data: { sourceId: adjustment.id },
+      });
+    }
+    return adjustment;
+  });
+}
+
 // --- Edit (reverse stock, repost journal) ------------------------------------
 
 export async function updateGoodsReceipt(
@@ -493,6 +629,47 @@ export async function getGoodsReceipt(orgId: string, id: string) {
     nextId: next?.id ?? null,
   };
   return { receipt, entry, nav };
+}
+
+export function listInventoryAdjustments(orgId: string) {
+  return prisma.inventoryAdjustment.findMany({
+    where: { orgId },
+    include: { adjustmentAccount: true },
+    orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+    take: 100,
+  });
+}
+
+export async function getInventoryAdjustment(orgId: string, id: string) {
+  const adjustment = await prisma.inventoryAdjustment.findFirst({
+    where: { orgId, id },
+    include: { lines: { include: { item: true } }, adjustmentAccount: true },
+  });
+  if (!adjustment) return null;
+  const [entry, total, before, prev, next] = await Promise.all([
+    adjustment.journalEntryId ? journalFor(adjustment.journalEntryId) : null,
+    prisma.inventoryAdjustment.count({ where: { orgId } }),
+    prisma.inventoryAdjustment.count({
+      where: { orgId, createdAt: { lt: adjustment.createdAt } },
+    }),
+    prisma.inventoryAdjustment.findFirst({
+      where: { orgId, createdAt: { lt: adjustment.createdAt } },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    }),
+    prisma.inventoryAdjustment.findFirst({
+      where: { orgId, createdAt: { gt: adjustment.createdAt } },
+      orderBy: { createdAt: "asc" },
+      select: { id: true },
+    }),
+  ]);
+  const nav: DocNav = {
+    index: before + 1,
+    total,
+    prevId: prev?.id ?? null,
+    nextId: next?.id ?? null,
+  };
+  return { adjustment, entry, nav };
 }
 
 export async function getInventoryWriteOff(orgId: string, id: string) {

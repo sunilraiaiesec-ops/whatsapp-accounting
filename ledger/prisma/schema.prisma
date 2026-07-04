@@ -40,6 +40,7 @@ model Organization {
   inventoryItems   InventoryItem[]
   goodsReceipts    GoodsReceipt[]
   inventoryWriteOffs InventoryWriteOff[]
+  inventoryAdjustments InventoryAdjustment[]
   resetRequests      OrgResetRequest[]
 
   @@map("organizations")
@@ -151,6 +152,7 @@ model Account {
   creditNoteLines      CreditNoteLine[]
   debitNoteLines       DebitNoteLine[]
   inventoryWriteOffs   InventoryWriteOff[]
+  inventoryAdjustments InventoryAdjustment[]
 
   @@unique([orgId, code])
   @@index([orgId, type])
@@ -530,6 +532,7 @@ model InventoryItem {
   org              Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
   receiptLines     GoodsReceiptLine[]
   writeOffLines    InventoryWriteOffLine[]
+  adjustmentLines  InventoryAdjustmentLine[]
   salesInvoiceLines SalesInvoiceLine[]
   paymentLines     PaymentLine[]
 
@@ -610,6 +613,45 @@ model InventoryWriteOffLine {
 
   @@index([writeOffId])
   @@map("inventory_write_off_lines")
+}
+
+// Correcting stock counts up or down after a physical count.
+// Posts the net value change between Inventory on hand and an adjustment
+// (gain/loss) account. `total` is the signed net change to inventory value:
+// positive = stock increased (Dr Inventory), negative = stock decreased.
+model InventoryAdjustment {
+  id                  String   @id @default(cuid())
+  orgId               String
+  number              String
+  date                DateTime @db.Date
+  adjustmentAccountId String
+  notes               String?
+  total               BigInt   @default(0)
+  journalEntryId      String?  @unique
+  createdAt           DateTime @default(now())
+
+  org               Organization              @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  adjustmentAccount Account                   @relation(fields: [adjustmentAccountId], references: [id])
+  lines             InventoryAdjustmentLine[]
+
+  @@unique([orgId, number])
+  @@index([orgId, date])
+  @@map("inventory_adjustments")
+}
+
+model InventoryAdjustmentLine {
+  id             String  @id @default(cuid())
+  adjustmentId   String
+  itemId         String
+  quantityBefore Decimal @db.Decimal(18, 3)
+  quantityAfter  Decimal @db.Decimal(18, 3)
+  valueChange    BigInt  @default(0)
+
+  adjustment InventoryAdjustment @relation(fields: [adjustmentId], references: [id], onDelete: Cascade)
+  item       InventoryItem       @relation(fields: [itemId], references: [id])
+
+  @@index([adjustmentId])
+  @@map("inventory_adjustment_lines")
 }
 
 // Factory-reset workflow: email code → 2h cooldown → wipe org books.

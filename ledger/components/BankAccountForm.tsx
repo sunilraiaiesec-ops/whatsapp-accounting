@@ -40,6 +40,7 @@ export function BankAccountForm() {
         >
           <option value="bank">{t("bankAccount")}</option>
           <option value="cash">{t("cashAccount")}</option>
+          <option value="credit_card">{t("creditCardAccount")}</option>
         </select>
       </label>
       <button

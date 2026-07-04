@@ -26,6 +26,7 @@ const CATEGORIES: ReportCategory[] = [
     titleKey: "whoOwesYou",
     reports: [
       { href: "/reports/customer-balances", titleKey: "customerBalances", descKey: "customerBalancesDesc" },
+      { href: "/reports/customer-statement", titleKey: "customerStatement", descKey: "customerStatementDesc" },
       { href: "/reports/ar-aging", titleKey: "arAging", descKey: "arAgingDesc" },
     ],
   },

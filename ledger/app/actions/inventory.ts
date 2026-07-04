@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { requireContext } from "@/lib/auth/current";
 import { parseAmount } from "@/lib/money";
 import {
+  adjustInventory,
   createInventoryItem,
   receiveGoods,
   writeOffInventory,
@@ -108,4 +109,35 @@ export async function createWriteOffAction(
     return fail(err);
   }
   redirect("/inventory-write-offs");
+}
+
+export async function createInventoryAdjustmentAction(
+  _prev: InvState,
+  formData: FormData,
+): Promise<InvState> {
+  const ctx = await requireContext();
+  let raw: { itemId?: string; newQuantity?: string }[];
+  try {
+    raw = JSON.parse(String(formData.get("lines") || "[]"));
+  } catch {
+    return { error: "Could not read line items" };
+  }
+  const lines = raw
+    .filter((l) => l.itemId)
+    .map((l) => ({
+      itemId: l.itemId as string,
+      newQuantity: String(l.newQuantity ?? "").trim(),
+    }));
+
+  try {
+    await adjustInventory(ctx.orgId, {
+      date: parseDate(formData.get("date")),
+      adjustmentAccountId: String(formData.get("adjustmentAccountId") || ""),
+      notes: String(formData.get("notes") || "") || null,
+      lines,
+    });
+  } catch (err) {
+    return fail(err);
+  }
+  redirect("/inventory-adjustments");
 }

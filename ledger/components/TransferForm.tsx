@@ -14,11 +14,21 @@ const initial: DocState = {};
 
 export function TransferForm({
   accounts,
+  fromAccounts,
+  toAccounts,
+  fromLabel = "From account",
+  toLabel = "To account",
+  submitLabel,
   currency,
   documentId,
   defaults,
 }: {
   accounts: Option[];
+  fromAccounts?: Option[];
+  toAccounts?: Option[];
+  fromLabel?: string;
+  toLabel?: string;
+  submitLabel?: string;
   currency: string;
   documentId?: string;
   defaults?: {
@@ -35,20 +45,22 @@ export function TransferForm({
     initial,
   );
   const today = new Date().toISOString().slice(0, 10);
+  const fromList = fromAccounts ?? accounts;
+  const toList = toAccounts ?? accounts;
 
   return (
     <form action={action} className="mt-6 space-y-5">
       {documentId ? <input type="hidden" name="id" value={documentId} /> : null}
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="block">
-          <span className="text-sm font-medium text-slate-700">From account</span>
+          <span className="text-sm font-medium text-slate-700">{fromLabel}</span>
           <select
             name="fromAccountId"
-            defaultValue={defaults?.fromAccountId ?? accounts[0]?.id ?? ""}
+            defaultValue={defaults?.fromAccountId ?? fromList[0]?.id ?? ""}
             className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
           >
             <option value="">Select…</option>
-            {accounts.map((a) => (
+            {fromList.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.label}
               </option>
@@ -56,14 +68,14 @@ export function TransferForm({
           </select>
         </label>
         <label className="block">
-          <span className="text-sm font-medium text-slate-700">To account</span>
+          <span className="text-sm font-medium text-slate-700">{toLabel}</span>
           <select
             name="toAccountId"
-            defaultValue={defaults?.toAccountId ?? accounts[1]?.id ?? ""}
+            defaultValue={defaults?.toAccountId ?? toList[0]?.id ?? ""}
             className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
           >
             <option value="">Select…</option>
-            {accounts.map((a) => (
+            {toList.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.label}
               </option>
@@ -122,7 +134,11 @@ export function TransferForm({
           disabled={pending}
           className="rounded-lg bg-slate-900 px-5 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-40"
         >
-          {pending ? "Saving…" : documentId ? "Save changes" : "Save transfer"}
+          {pending
+            ? "Saving…"
+            : documentId
+              ? "Save changes"
+              : submitLabel ?? "Save transfer"}
         </button>
       </div>
     </form>

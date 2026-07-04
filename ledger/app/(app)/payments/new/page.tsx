@@ -3,7 +3,7 @@ import { getTranslations } from "next-intl/server";
 
 import { requireContext } from "@/lib/auth/current";
 import {
-  bankAndCashWithBalances,
+  moneyOutWithBalances,
   paymentCounterpartAccounts,
 } from "@/lib/accounts";
 import { listParties } from "@/lib/parties";
@@ -16,17 +16,18 @@ import { formatAmount } from "@/lib/money";
 export default async function NewPaymentPage({
   searchParams,
 }: {
-  searchParams: Promise<{ partyId?: string; kind?: string }>;
+  searchParams: Promise<{ partyId?: string; kind?: string; method?: string }>;
 }) {
-  const { partyId, kind } = await searchParams;
+  const { partyId, kind, method } = await searchParams;
   const isExpense = kind === "expense";
+  const isCheque = kind === "cheque" || method === "cheque";
   const ctx = await requireContext();
   const t = await getTranslations("payments");
   const tn = await getTranslations("nav");
   const today = new Date().toISOString().slice(0, 10);
 
   const [banks, accounts, parties, classOptions, items] = await Promise.all([
-    bankAndCashWithBalances(ctx.orgId),
+    moneyOutWithBalances(ctx.orgId),
     paymentCounterpartAccounts(ctx.orgId),
     listParties(ctx.orgId),
     listClassNames(ctx.orgId),
@@ -51,8 +52,16 @@ export default async function NewPaymentPage({
         mode="payment"
         action={createPaymentAction}
         currency={ctx.baseCurrency}
-        formTitle={isExpense ? t("expenseTitle") : t("newTitle")}
-        formSubtitle={isExpense ? t("expenseSubtitle") : t("newSubtitle")}
+        formTitle={
+          isCheque ? t("chequeTitle") : isExpense ? t("expenseTitle") : t("newTitle")
+        }
+        formSubtitle={
+          isCheque
+            ? t("chequeSubtitle")
+            : isExpense
+              ? t("expenseSubtitle")
+              : t("newSubtitle")
+        }
         bankAccounts={banks.map((a) => ({
           id: a.id,
           label: `${a.code} — ${a.name}`,
@@ -72,13 +81,14 @@ export default async function NewPaymentPage({
         }))}
         saveLabel={isExpense ? t("expenseSave") : undefined}
         defaults={
-          partyId
+          partyId || isCheque
             ? {
-                partyId,
+                partyId: partyId ?? "",
                 date: today,
                 bankAccountId: "",
                 reference: "",
                 description: "",
+                paymentMethod: isCheque ? "cheque" : undefined,
                 lines: [],
               }
             : undefined

@@ -1275,7 +1275,8 @@ type DocModelName =
   | "creditNote"
   | "debitNote"
   | "goodsReceipt"
-  | "inventoryWriteOff";
+  | "inventoryWriteOff"
+  | "inventoryAdjustment";
 
 // Current-month KPI aggregate (count + sum + average) plus the latest doc date.
 // Aggregates over ALL rows, not just the capped list shown in the table.
