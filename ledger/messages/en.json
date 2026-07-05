@@ -226,6 +226,7 @@
     "actionSalesReceipt": "Record cash sale",
     "actionUnknown": "Not sure",
     "aiUnavailable": "Photo and voice need AI setup (OPENAI_API_KEY). You can still type your request below.",
+    "aiFallbackNote": "AI was unavailable, so we used basic text parsing. Please double-check the details below.",
     "rateLimited": "You're going a bit fast. Please wait a moment and try again."
   },
   "auth": {

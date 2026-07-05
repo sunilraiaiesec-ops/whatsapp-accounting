@@ -84,9 +84,7 @@ class OpenAiProvider implements AiProvider {
         ],
       });
     } catch (err) {
-      throw new AiError(
-        err instanceof Error ? `AI request failed: ${err.message}` : "AI request failed.",
-      );
+      throw new AiError(describeOpenAiError("AI request failed", err));
     }
 
     const raw = completion.choices[0]?.message?.content;
@@ -111,11 +109,21 @@ class OpenAiProvider implements AiProvider {
       });
       return result.text?.trim() ?? "";
     } catch (err) {
-      throw new AiError(
-        err instanceof Error ? `Transcription failed: ${err.message}` : "Transcription failed.",
-      );
+      throw new AiError(describeOpenAiError("Transcription failed", err));
     }
   }
+}
+
+// Builds a diagnostic message that surfaces the HTTP status/code from OpenAI SDK
+// errors (e.g. 401 invalid key, 403 model.request, 404 model-not-found, 429
+// quota) so failures are actionable in server logs. OpenAI error messages do
+// NOT contain the API key, so this is safe to log; we never include the key.
+function describeOpenAiError(prefix: string, err: unknown): string {
+  const status = (err as { status?: number })?.status;
+  const code = (err as { code?: string | null })?.code;
+  const detail = err instanceof Error ? err.message : "unknown error";
+  const tag = status ? ` (HTTP ${status}${code ? ` ${code}` : ""})` : "";
+  return `${prefix}${tag}: ${detail}`;
 }
 
 let cached: AiProvider | null | undefined;

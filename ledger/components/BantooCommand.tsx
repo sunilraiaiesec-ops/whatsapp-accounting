@@ -62,6 +62,9 @@ export function BantooCommand() {
   const [error, setError] = useState<string | null>(null);
   const [proposal, setProposal] = useState<BantooProposal | null>(null);
   const [success, setSuccess] = useState<{ href: string; number: string } | null>(null);
+  // Set when the server had to use the rule-based parser because the AI path
+  // errored (key/quota/model). Text still works; we just note it was basic.
+  const [aiNote, setAiNote] = useState<string | null>(null);
   // null = unknown/not yet checked; true/false = AI photo+voice availability.
   const [aiConfigured, setAiConfigured] = useState<boolean | null>(null);
   const aiStatusRequested = useRef(false);
@@ -87,6 +90,7 @@ export function BantooCommand() {
     setError(null);
     setProposal(null);
     setSuccess(null);
+    setAiNote(null);
     setDraft(emptyDraft());
     setPartyId(null);
     setCreateParty(false);
@@ -255,6 +259,7 @@ export function BantooCommand() {
     setError(null);
     setProposal(null);
     setSuccess(null);
+    setAiNote(null);
     try {
       const form = new FormData();
       form.append("text", prompt.trim());
@@ -265,6 +270,7 @@ export function BantooCommand() {
         setError(res.status === 429 ? t("rateLimited") : data.error ?? t("genericError"));
         return;
       }
+      if (data.aiFallback) setAiNote(t("aiFallbackNote"));
       hydrateFromProposal(data.proposal as BantooProposal);
     } catch {
       setError(t("genericError"));
@@ -706,6 +712,11 @@ export function BantooCommand() {
                 ) : null}
               </div>
 
+              {aiNote ? (
+                <p className="rounded-lg bg-sky-50 px-3 py-2 text-sm text-sky-800">
+                  {aiNote}
+                </p>
+              ) : null}
               {proposal.lowConfidence ? (
                 <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
                   {t("notSure")}

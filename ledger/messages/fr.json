@@ -225,6 +225,7 @@
     "actionSalesReceipt": "Enregistrer une vente au comptant",
     "actionUnknown": "Incertain",
     "aiUnavailable": "La photo et la voix nécessitent la configuration de l'IA (OPENAI_API_KEY). Vous pouvez toujours écrire votre demande ci-dessous.",
+    "aiFallbackNote": "L'IA était indisponible ; nous avons utilisé une analyse de texte basique. Veuillez vérifier les détails ci-dessous.",
     "rateLimited": "Vous allez un peu vite. Patientez un instant et réessayez."
   },
   "auth": {

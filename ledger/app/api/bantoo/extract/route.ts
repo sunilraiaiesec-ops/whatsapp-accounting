@@ -96,28 +96,60 @@ export async function POST(request: Request) {
   const combinedText = [text, ...pdfTexts.map((t) => `Document text:\n${t}`)]
     .filter(Boolean)
     .join("\n\n");
+  const hasText = combinedText.trim().length > 0;
 
-  try {
-    let action: ExtractedAction;
-    if (!isAiConfigured()) {
-      // No AI key: text-only still works via the rule-based parser; photos need AI.
-      if (images.length > 0) {
+  // Resolve the extracted action. Text can always degrade to the rule-based
+  // parser; images/voice require AI and surface a clear message when it's down.
+  let action: ExtractedAction;
+  let aiFallback = false;
+
+  if (!isAiConfigured()) {
+    // No AI key configured: text-only still works via the rule-based parser.
+    if (images.length > 0) {
+      return NextResponse.json(
+        { error: new AiNotConfiguredError().message },
+        { status: 503 },
+      );
+    }
+    action = ruleBasedExtract(combinedText);
+  } else {
+    try {
+      action = await extractBantooAction({ text: combinedText, images });
+    } catch (err) {
+      // A HARD AI failure (auth/quota/model-not-enabled/network) — distinct from
+      // a legitimate low-confidence "unknown", which returns normally without
+      // throwing. Log the real cause (no secrets) so it's visible in server logs
+      // instead of being masked by a generic user message.
+      console.error(
+        "[bantoo/extract] AI extraction error (org=%s):",
+        ctx.orgId,
+        err instanceof Error ? err.message : err,
+      );
+      if (images.length === 0 && hasText) {
+        // Keep text entry working even if OpenAI is down/misconfigured.
+        action = ruleBasedExtract(combinedText);
+        aiFallback = true;
+      } else {
+        // Images/voice can't fall back to rules — give a clear, actionable note.
+        const notConfigured = err instanceof AiNotConfiguredError;
         return NextResponse.json(
-          { error: new AiNotConfiguredError().message },
-          { status: 503 },
+          {
+            error: notConfigured
+              ? new AiNotConfiguredError().message
+              : "Ask Bantoo's photo/voice AI is temporarily unavailable. Please try again shortly, or type the details as text.",
+          },
+          { status: notConfigured ? 503 : 502 },
         );
       }
-      action = ruleBasedExtract(combinedText);
-    } else {
-      action = await extractBantooAction({ text: combinedText, images });
     }
+  }
+
+  try {
     const proposal = await resolveExtraction(ctx, action);
-    return NextResponse.json({ proposal });
+    return NextResponse.json({ proposal, aiFallback });
   } catch (err) {
-    if (err instanceof AiNotConfiguredError) {
-      return NextResponse.json({ error: err.message }, { status: 503 });
-    }
-    console.error("[bantoo/extract] failed:", err);
+    // Resolution (org-scoped DB lookups) failed — not an AI problem.
+    console.error("[bantoo/extract] resolve failed (org=%s):", ctx.orgId, err);
     return NextResponse.json(
       { error: "Sorry, I couldn't read that. Please try again or type the details." },
       { status: 500 },
