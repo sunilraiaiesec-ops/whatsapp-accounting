@@ -364,6 +364,27 @@ export async function interpretCommand(
   return { proposal };
 }
 
+// Trust boundary: a partyId reaching us here comes from the client and must
+// never be trusted just because interpretCommand echoed one back. Confirm the
+// contact belongs to the caller's active org (and is a compatible type) before
+// any document is posted, so a crafted request can't attach another tenant's
+// party. The error text is intentionally generic — it must not reveal whether
+// the id exists in some other org.
+async function assertOrgParty(
+  orgId: string,
+  partyId: string,
+  type: "customer" | "supplier",
+): Promise<string> {
+  const party = await prisma.party.findFirst({
+    where: { id: partyId, orgId, type: { in: [type, "both"] } },
+    select: { id: true },
+  });
+  if (!party) {
+    throw new DocumentError("That contact was not found.");
+  }
+  return party.id;
+}
+
 export async function executeCommand(
   input: ExecuteCommandInput,
 ): Promise<{ ok: true; href: string; number: string } | { ok: false; error: string }> {
@@ -388,7 +409,9 @@ export async function executeCommand(
         return { ok: false, error: "Unit cost must be greater than zero." };
       }
 
-      let partyId = input.partyId;
+      let partyId = input.partyId
+        ? await assertOrgParty(ctx.orgId, input.partyId, "supplier")
+        : null;
       if (!partyId && input.createParty && input.partyName.trim()) {
         const created = await createParty(ctx.orgId, {
           name: input.partyName.trim(),
@@ -418,7 +441,9 @@ export async function executeCommand(
     const amount = BigInt(input.amount);
     if (amount <= 0n) return { ok: false, error: "Amount must be greater than zero." };
 
-    let partyId = input.partyId;
+    let partyId = input.partyId
+      ? await assertOrgParty(ctx.orgId, input.partyId, input.partyType)
+      : null;
     if (!partyId && input.createParty && input.partyName.trim()) {
       const created = await createParty(ctx.orgId, {
         name: input.partyName.trim(),

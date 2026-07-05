@@ -42,11 +42,29 @@ Money is stored as `BigInt` minor units; formatting is currency-aware
    with a full chart of accounts. Post a journal entry and watch the Balance
    Sheet update.
 
+## Ask Bantoo (AI capture)
+
+The **Ask Bantoo** modal (✨ button / Cmd-Ctrl+K) lets shopkeepers add inventory,
+receipts, purchases, and payments by **text, photo, or voice**. Input is sent to
+an AI extraction endpoint (`/api/bantoo/extract`, voice via
+`/api/bantoo/transcribe`), classified into one of `add_inventory_item`,
+`receive_stock`, `supplier_purchase`, `customer_payment`, `expense`,
+`sales_receipt`, or `unknown`, validated with zod, and shown for
+confirm/edit before any write. Writes reuse the existing `lib/documents.ts` /
+`lib/inventory.ts` helpers.
+
+- Set `OPENAI_API_KEY` in `.env` to enable photo, voice, and AI text extraction
+  (uses `gpt-4o-mini` for text+vision and `whisper-1` for transcription).
+- Without a key, plain **text** commands still work via the built-in rule-based
+  parser; photo/voice return a clear "not configured" message.
+- The provider lives in a single swappable module (`lib/ai/provider.ts`).
+
 ## Scripts
 
 | Script              | Purpose                                  |
 | ------------------- | ---------------------------------------- |
 | `npm run dev`       | Start the dev server                     |
+| `npm run test`      | Run unit tests (Vitest)                  |
 | `npm run db:push`   | Sync the Prisma schema to the database   |
 | `npm run db:migrate`| Create + apply a migration               |
 | `npm run db:studio` | Browse data in Prisma Studio             |
