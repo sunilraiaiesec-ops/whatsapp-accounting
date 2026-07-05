@@ -12,12 +12,24 @@ import {
   DocumentError,
 } from "@/lib/documents";
 import { createInventoryItem, receiveGoods } from "@/lib/inventory";
+import { MATCH_HIGH } from "@/lib/bantoo/match";
 import { parseAmount } from "@/lib/money";
-import { createParty } from "@/lib/parties";
+import { createParty, findPossiblePartyDuplicates } from "@/lib/parties";
 import { prisma } from "@/lib/prisma";
 import { BANTOO_ACTION_TYPES } from "@/lib/ai/actions";
 import { isAiConfigured } from "@/lib/ai/provider";
-import type { BantooExecuteResult, ExecuteBantooInput } from "@/lib/bantoo/types";
+import {
+  productDefaultsFromItem,
+  searchEntities,
+} from "@/lib/bantoo/entities";
+import { listInventoryItems } from "@/lib/inventory";
+import type {
+  BantooExecuteResult,
+  EntitySearchType,
+  ExecuteBantooInput,
+  MatchCandidate,
+  ProductDefaults,
+} from "@/lib/bantoo/types";
 
 // Lets the client know whether AI photo/voice capture is available WITHOUT ever
 // exposing the key itself — only a boolean crosses the wire. Text still works
@@ -25,6 +37,48 @@ import type { BantooExecuteResult, ExecuteBantooInput } from "@/lib/bantoo/types
 export async function getBantooAiStatus(): Promise<{ configured: boolean }> {
   await requireContext();
   return { configured: isAiConfigured() };
+}
+
+const ENTITY_TYPES: readonly EntitySearchType[] = [
+  "supplier",
+  "customer",
+  "product",
+  "unit",
+  "expense_category",
+  "income_account",
+  "bank_account",
+];
+
+// Org-scoped, authenticated search the confirmation dropdowns call as the user
+// types (debounced). Returns ranked candidates for the requested entity type.
+// Never leaks another org's records — everything is loaded via ctx.orgId.
+export async function searchBantooEntities(
+  type: string,
+  query: string,
+): Promise<{ candidates: MatchCandidate[] }> {
+  const ctx = await requireContext();
+  if (!ENTITY_TYPES.includes(type as EntitySearchType)) {
+    return { candidates: [] };
+  }
+  const candidates = await searchEntities(
+    ctx,
+    type as EntitySearchType,
+    String(query ?? "").slice(0, 200),
+  );
+  return { candidates };
+}
+
+// Fetch an existing product's defaults so dependent fields (unit, tax, cost,
+// sale price, reorder level) auto-populate when it is selected. The id is
+// validated against the org before anything is returned.
+export async function getBantooProductDefaults(
+  itemId: string,
+): Promise<{ ok: true; defaults: ProductDefaults } | { ok: false }> {
+  const ctx = await requireContext();
+  const items = await listInventoryItems(ctx.orgId);
+  const item = items.find((it) => it.id === itemId);
+  if (!item) return { ok: false };
+  return { ok: true, defaults: productDefaultsFromItem(item, ctx.baseCurrency) };
 }
 
 const draftSchema = z.object({
@@ -43,6 +97,7 @@ const draftSchema = z.object({
   paymentMethod: z.string().max(100).default(""),
   description: z.string().max(500).default(""),
   date: z.string().max(40).default(""),
+  dueDate: z.string().max(40).default(""),
   currency: z.string().max(8).default("XAF"),
 });
 
@@ -96,6 +151,20 @@ async function ensurePartyId(
     return found.id;
   }
   if (input.createParty && input.partyName.trim()) {
+    // Duplicate-prevention safety net: the text-matching dropdown (resolve.ts)
+    // already surfaces alternatives at medium+ confidence before the user
+    // confirms, but re-check here with the shared matcher (which also covers
+    // exact phone/WhatsApp — not just name) right before writing. Only a
+    // HIGH-confidence hit auto-reuses the existing contact instead of
+    // creating a near-duplicate; anything less ambiguous is left to the
+    // dropdown the user already saw, so this never silently blocks a
+    // legitimate "create new" the user explicitly chose.
+    const duplicates = await findPossiblePartyDuplicates(ctx.orgId, {
+      name: input.partyName,
+    });
+    const highConfidence = duplicates.find((d) => d.score >= MATCH_HIGH);
+    if (highConfidence) return highConfidence.id;
+
     const created = await createParty(ctx.orgId, {
       name: input.partyName.trim(),
       type: input.type,
@@ -103,6 +172,30 @@ async function ensurePartyId(
     return created.id;
   }
   return null;
+}
+
+// Trust boundary for selectable inventory items. A client-supplied itemId must
+// belong to the caller's org before it is posted, mirroring ensurePartyId.
+async function assertOrgItemId(ctx: CurrentContext, itemId: string): Promise<string> {
+  const found = await prisma.inventoryItem.findFirst({
+    where: { id: itemId, orgId: ctx.orgId },
+    select: { id: true },
+  });
+  if (!found) throw new DocumentError("That item was not found.");
+  return found.id;
+}
+
+// Trust boundary for selectable accounts (bank/cash, expense/income categories).
+// Confirms the account belongs to the org so a crafted request can't post to
+// another tenant's chart of accounts. The generic message never reveals whether
+// the id exists elsewhere.
+async function assertOrgAccountId(ctx: CurrentContext, accountId: string): Promise<string> {
+  const found = await prisma.account.findFirst({
+    where: { id: accountId, orgId: ctx.orgId },
+    select: { id: true },
+  });
+  if (!found) throw new DocumentError("That account was not found.");
+  return found.id;
 }
 
 // Confirm-and-write endpoint for Ask Bantoo. Re-validates the client payload,
@@ -181,7 +274,7 @@ export async function executeBantooAction(
         });
         if (!supplierId) return { ok: false, error: "Choose a supplier." };
 
-        let itemId = input.itemId;
+        let itemId = input.itemId ? await assertOrgItemId(ctx, input.itemId) : null;
         if (!itemId) {
           const name = draft.productName.trim();
           if (!name) return { ok: false, error: "Choose or name the inventory item." };
@@ -213,6 +306,7 @@ export async function executeBantooAction(
         const amount = parseAmount(draft.amount || "0", cur);
         if (amount <= 0n) return { ok: false, error: "Enter the invoice total." };
         if (!input.lineAccountId) return { ok: false, error: "Choose an expense/purchases account." };
+        const lineAccountId = await assertOrgAccountId(ctx, input.lineAccountId);
         const supplierId = await ensurePartyId(ctx, {
           partyId: input.partyId,
           createParty: input.createParty,
@@ -221,16 +315,18 @@ export async function executeBantooAction(
         });
         if (!supplierId) return { ok: false, error: "Choose a supplier." };
 
+        const dueDate = draft.dueDate.trim() ? parseDate(draft.dueDate) : null;
         const invoice = await createPurchaseInvoice(ctx.orgId, {
           partyId: supplierId,
           date,
+          dueDate,
           notes: draft.description.trim() || null,
           lines: [
             {
               description: draft.description.trim() || draft.partyName.trim() || "Purchase",
               quantity: "1",
               unitPrice: amount,
-              accountId: input.lineAccountId,
+              accountId: lineAccountId,
             },
           ],
         });
@@ -246,6 +342,7 @@ export async function executeBantooAction(
         const amount = parseAmount(draft.amount || "0", cur);
         if (amount <= 0n) return { ok: false, error: "Enter the amount received." };
         if (!input.bankAccountId) return { ok: false, error: "Choose a bank or cash account." };
+        const bankAccountId = await assertOrgAccountId(ctx, input.bankAccountId);
         const customerId = await ensurePartyId(ctx, {
           partyId: input.partyId,
           createParty: input.createParty,
@@ -254,11 +351,12 @@ export async function executeBantooAction(
         });
         if (!customerId) return { ok: false, error: "Choose the customer who paid." };
 
-        const lineAccountId =
-          input.lineAccountId ?? (await receivableAccount(ctx.orgId)).id;
+        const lineAccountId = input.lineAccountId
+          ? await assertOrgAccountId(ctx, input.lineAccountId)
+          : (await receivableAccount(ctx.orgId)).id;
         const receipt = await createReceipt(ctx.orgId, {
           date,
-          bankAccountId: input.bankAccountId,
+          bankAccountId,
           partyId: customerId,
           description: draft.description.trim() || null,
           paymentMethod: draft.paymentMethod.trim() || null,
@@ -277,6 +375,8 @@ export async function executeBantooAction(
         if (amount <= 0n) return { ok: false, error: "Enter the amount paid." };
         if (!input.bankAccountId) return { ok: false, error: "Choose a bank or cash account." };
         if (!input.lineAccountId) return { ok: false, error: "Choose an expense account." };
+        const bankAccountId = await assertOrgAccountId(ctx, input.bankAccountId);
+        const lineAccountId = await assertOrgAccountId(ctx, input.lineAccountId);
         const supplierId = await ensurePartyId(ctx, {
           partyId: input.partyId,
           createParty: input.createParty,
@@ -286,11 +386,11 @@ export async function executeBantooAction(
 
         const payment = await createPayment(ctx.orgId, {
           date,
-          bankAccountId: input.bankAccountId,
+          bankAccountId,
           partyId: supplierId,
           description: draft.description.trim() || null,
           paymentMethod: draft.paymentMethod.trim() || null,
-          lines: [{ accountId: input.lineAccountId, amount }],
+          lines: [{ accountId: lineAccountId, amount }],
         });
         return {
           ok: true,
@@ -305,6 +405,8 @@ export async function executeBantooAction(
         if (amount <= 0n) return { ok: false, error: "Enter the sale amount." };
         if (!input.bankAccountId) return { ok: false, error: "Choose a bank or cash account." };
         if (!input.lineAccountId) return { ok: false, error: "Choose an income account." };
+        const bankAccountId = await assertOrgAccountId(ctx, input.bankAccountId);
+        const lineAccountId = await assertOrgAccountId(ctx, input.lineAccountId);
         const customerId = await ensurePartyId(ctx, {
           partyId: input.partyId,
           createParty: input.createParty,
@@ -313,7 +415,7 @@ export async function executeBantooAction(
         });
 
         const receipt = await createSalesReceipt(ctx.orgId, {
-          bankAccountId: input.bankAccountId,
+          bankAccountId,
           partyId: customerId,
           date,
           notes: draft.description.trim() || null,
@@ -322,7 +424,7 @@ export async function executeBantooAction(
               description: draft.description.trim() || "Cash sale",
               quantity: "1",
               unitPrice: amount,
-              accountId: input.lineAccountId,
+              accountId: lineAccountId,
             },
           ],
         });

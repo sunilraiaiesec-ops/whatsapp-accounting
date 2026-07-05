@@ -5,18 +5,34 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslations } from "next-intl";
 
-import { executeBantooAction, getBantooAiStatus } from "@/app/actions/bantoo";
+import {
+  executeBantooAction,
+  getBantooAiStatus,
+  getBantooProductDefaults,
+  searchBantooEntities,
+} from "@/app/actions/bantoo";
 import { createExpenseCategory } from "@/app/actions/command";
+import { BantooCombobox } from "@/components/BantooCombobox";
 import {
   emptyDraft,
   type BantooDraft,
+  type BantooOption,
   type BantooProposal,
+  type EntitySearchType,
   type ExecuteBantooInput,
 } from "@/lib/bantoo/types";
 
+// Debounced org-scoped search bound to an entity type, adapted to the shape the
+// combobox expects.
+function makeEntitySearch(type: EntitySearchType) {
+  return async (query: string): Promise<BantooOption[]> => {
+    const { candidates } = await searchBantooEntities(type, query);
+    return candidates;
+  };
+}
+
 const inputClass = "input-modern text-base md:text-sm";
 const NEW_CATEGORY_VALUE = "__new_category__";
-const CREATE_ITEM_VALUE = "__create_item__";
 
 const MAX_IMAGES = 4;
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
@@ -79,7 +95,9 @@ export function BantooCommand() {
   const [showNewCategory, setShowNewCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [creatingCategory, setCreatingCategory] = useState(false);
-  const [lineAccountOptions, setLineAccountOptions] = useState<{ id: string; label: string }[]>([]);
+  const [lineAccountOptions, setLineAccountOptions] = useState<BantooOption[]>([]);
+  // Display text for the account combobox (accounts are selected by id).
+  const [lineAccountText, setLineAccountText] = useState("");
 
   const resetAll = useCallback(() => {
     setPrompt("");
@@ -97,6 +115,7 @@ export function BantooCommand() {
     setItemId(null);
     setBankAccountId("");
     setLineAccountId("");
+    setLineAccountText("");
     setShowNewCategory(false);
     setNewCategoryName("");
   }, []);
@@ -249,8 +268,33 @@ export function BantooCommand() {
     setBankAccountId(p.bankAccountId ?? "");
     setLineAccountId(p.lineAccountId ?? "");
     setLineAccountOptions(p.lineAccountOptions);
+    setLineAccountText(
+      p.lineAccountOptions.find((a) => a.id === p.lineAccountId)?.label ?? "",
+    );
     setShowNewCategory(false);
     scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  // Selecting an existing product auto-populates its dependent defaults (unit,
+  // tax rate, cost, sale price, reorder level). "Create new" clears the id and
+  // leaves the fields editable.
+  async function handleSelectProduct(option: BantooOption) {
+    if (!option.id) {
+      setItemId(null);
+      return;
+    }
+    setItemId(option.id);
+    const res = await getBantooProductDefaults(option.id);
+    if (res.ok) {
+      setDraft((prev) => ({
+        ...prev,
+        unit: res.defaults.unit || prev.unit,
+        taxRate: res.defaults.taxRate || prev.taxRate,
+        costPrice: res.defaults.costPrice || prev.costPrice,
+        salePrice: res.defaults.salePrice || prev.salePrice,
+        reorderLevel: res.defaults.reorderLevel || prev.reorderLevel,
+      }));
+    }
   }
 
   async function handleSubmit() {
@@ -298,6 +342,7 @@ export function BantooCommand() {
       prev.some((a) => a.id === result.id) ? prev : [...prev, result],
     );
     setLineAccountId(result.id);
+    setLineAccountText(result.label);
     setShowNewCategory(false);
   }
 
@@ -333,11 +378,25 @@ export function BantooCommand() {
 
   // --- Small render helpers -------------------------------------------------
 
+  // A small muted "why" line shown under a field when org transaction-pattern
+  // learning (lib/command-patterns.ts) drove its suggestion/prefill — fully
+  // informational; the field itself always stays editable.
+  function reasonHint(key: keyof BantooProposal["fieldReasons"]) {
+    const reason = proposal?.fieldReasons?.[key];
+    if (!reason) return null;
+    return <p className="mt-1 text-xs text-[var(--muted)]">💡 {reason.text}</p>;
+  }
+
   function field(
     label: string,
     value: string,
     onChange: (v: string) => void,
-    opts?: { money?: boolean; placeholder?: string; type?: string },
+    opts?: {
+      money?: boolean;
+      placeholder?: string;
+      type?: string;
+      reasonKey?: keyof BantooProposal["fieldReasons"];
+    },
   ) {
     return (
       <label className="block text-sm">
@@ -350,6 +409,7 @@ export function BantooCommand() {
           placeholder={opts?.placeholder}
           className={`${inputClass} mt-1`}
         />
+        {opts?.reasonKey ? reasonHint(opts.reasonKey) : null}
       </label>
     );
   }
@@ -442,58 +502,133 @@ export function BantooCommand() {
 
   function partyBlock(label: string, createLabel: string) {
     if (!proposal) return null;
+    const type: EntitySearchType = proposal.partyType === "customer" ? "customer" : "supplier";
+    const reasonKey: keyof BantooProposal["fieldReasons"] =
+      proposal.partyType === "customer" ? "customer" : "supplier";
     return (
-      <>
-        {proposal.partyOptions.length > 0 ? (
-          <label className="block text-sm">
-            <span className="font-medium text-slate-700">{t("matches")}</span>
-            <select
-              value={partyId ?? ""}
-              onChange={(e) => {
-                const id = e.target.value || null;
-                setPartyId(id);
-                const match = proposal.partyOptions.find((p) => p.id === id);
-                if (match) {
-                  updateDraft("partyName", match.label);
-                  setCreateParty(false);
-                }
-              }}
-              className={`${inputClass} mt-1`}
-            >
-              <option value="">— {t("typeNameBelow")} —</option>
-              {proposal.partyOptions.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : null}
-        <label className="block text-sm">
-          <span className="font-medium text-slate-700">{label}</span>
-          <input
-            type="text"
-            value={draft.partyName}
-            onChange={(e) => {
-              updateDraft("partyName", e.target.value);
+      <div>
+        <BantooCombobox
+          label={label}
+          text={draft.partyName}
+          selectedId={partyId}
+          options={proposal.partyOptions}
+          onSearch={makeEntitySearch(type)}
+          placeholder={t("searchOrType")}
+          createLabel={() => createLabel}
+          onSelectExisting={(opt) => {
+            if (opt.id) {
+              setPartyId(opt.id);
+              updateDraft("partyName", opt.label);
+              setCreateParty(false);
+            } else {
               setPartyId(null);
-              setCreateParty(Boolean(e.target.value.trim()));
-            }}
-            className={`${inputClass} mt-1`}
-          />
-        </label>
-        {!partyId && draft.partyName.trim() ? (
-          <label className="flex items-center gap-2 text-sm text-slate-700">
-            <input
-              type="checkbox"
-              checked={createParty}
-              onChange={(e) => setCreateParty(e.target.checked)}
-              className="rounded border-slate-300"
-            />
-            {createLabel}
-          </label>
+              updateDraft("partyName", opt.label);
+              setCreateParty(true);
+            }
+          }}
+          onTextChange={(v) => {
+            updateDraft("partyName", v);
+            setPartyId(null);
+            setCreateParty(Boolean(v.trim()));
+          }}
+        />
+        {reasonHint(reasonKey)}
+      </div>
+    );
+  }
+
+  // Searchable unit picker (units are free text on items; suggestions come from
+  // existing items + the search endpoint).
+  function unitCombobox() {
+    if (!proposal) return null;
+    return (
+      <div>
+        <BantooCombobox
+          label={t("unit")}
+          text={draft.unit}
+          selectedId={null}
+          options={proposal.unitOptions}
+          onSearch={makeEntitySearch("unit")}
+          allowCreate={false}
+          placeholder={t("unitPlaceholder")}
+          onSelectExisting={(opt) => updateDraft("unit", opt.label)}
+          onTextChange={(v) => updateDraft("unit", v)}
+        />
+        {reasonHint("unit")}
+      </div>
+    );
+  }
+
+  // Searchable account picker for expense/income categories. Accounts must
+  // exist, so free-text create is disabled here; new expense categories are
+  // added via the "+ add category" affordance which calls createExpenseCategory.
+  function accountCombobox(
+    label: string,
+    type: EntitySearchType,
+    canAddCategory: boolean,
+  ) {
+    return (
+      <div className="block text-sm">
+        {canAddCategory ? (
+          <div className="mb-1 flex items-center justify-end">
+            <button
+              type="button"
+              onClick={() => {
+                setShowNewCategory(true);
+                if (!newCategoryName && draft.description) setNewCategoryName(draft.description);
+              }}
+              className="shrink-0 text-xs font-semibold text-[var(--brand)] hover:underline"
+            >
+              + {t("addCategoryShort")}
+            </button>
+          </div>
         ) : null}
-      </>
+        <BantooCombobox
+          label={label}
+          text={lineAccountText}
+          selectedId={lineAccountId || null}
+          options={lineAccountOptions}
+          onSearch={makeEntitySearch(type)}
+          allowCreate={false}
+          placeholder={t("searchAccount")}
+          onSelectExisting={(opt) => {
+            if (!opt.id) return;
+            setLineAccountId(opt.id);
+            setLineAccountText(opt.label);
+            setLineAccountOptions((prev) =>
+              prev.some((a) => a.id === opt.id) ? prev : [...prev, opt],
+            );
+            setShowNewCategory(false);
+          }}
+          onTextChange={(v) => {
+            setLineAccountText(v);
+            setLineAccountId("");
+          }}
+        />
+        {canAddCategory && showNewCategory ? (
+          <div className="mt-2 rounded-xl border-2 border-[var(--brand)]/30 bg-[var(--brand)]/5 p-3">
+            <p className="text-sm font-semibold text-slate-900">{t("addCategory")}</p>
+            <p className="mt-0.5 text-xs text-[var(--muted)]">{t("addCategoryHint")}</p>
+            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+              <input
+                type="text"
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                placeholder={t("categoryNamePlaceholder")}
+                className={`${inputClass} flex-1`}
+              />
+              <button
+                type="button"
+                onClick={handleCreateCategory}
+                disabled={creatingCategory || !newCategoryName.trim()}
+                className="btn-brand shrink-0 px-4"
+              >
+                {creatingCategory ? "…" : t("addCategorySave")}
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
     );
   }
 
@@ -523,18 +658,18 @@ export function BantooCommand() {
             })}
             {field(t("barcode"), draft.barcode, (v) => updateDraft("barcode", v))}
             {field(t("category"), draft.category, (v) => updateDraft("category", v))}
-            {field(t("unit"), draft.unit, (v) => updateDraft("unit", v), {
-              placeholder: t("unitPlaceholder"),
-            })}
+            {unitCombobox()}
             {field(t("salePrice"), draft.salePrice, (v) => updateDraft("salePrice", v), {
               money: true,
             })}
             {field(t("costPrice"), draft.costPrice, (v) => updateDraft("costPrice", v), {
               money: true,
+              reasonKey: "costPrice",
             })}
             {field(t("openingStock"), draft.quantity, (v) => updateDraft("quantity", v), {
               money: true,
               placeholder: t("openingStockPlaceholder"),
+              reasonKey: "quantity",
             })}
             {field(t("taxRate"), draft.taxRate, (v) => updateDraft("taxRate", v), { money: true })}
             {field(t("reorderLevel"), draft.reorderLevel, (v) => updateDraft("reorderLevel", v), {
@@ -546,37 +681,37 @@ export function BantooCommand() {
       case "receive_stock":
         return (
           <>
-            <label className="block text-sm">
-              <span className="font-medium text-slate-700">{t("inventoryItem")}</span>
-              <select
-                value={itemId ?? CREATE_ITEM_VALUE}
-                onChange={(e) =>
-                  setItemId(e.target.value === CREATE_ITEM_VALUE ? null : e.target.value)
+            <BantooCombobox
+              label={t("inventoryItem")}
+              text={draft.productName}
+              selectedId={itemId}
+              options={proposal.itemOptions}
+              onSearch={makeEntitySearch("product")}
+              placeholder={t("searchOrType")}
+              createLabel={(name) => t("createItem", { name })}
+              onSelectExisting={(opt) => {
+                if (opt.id) {
+                  updateDraft("productName", opt.label.replace(/^[^—]+—\s*/, ""));
+                  void handleSelectProduct(opt);
+                } else {
+                  setItemId(null);
                 }
-                className={`${inputClass} mt-1`}
-              >
-                <option value={CREATE_ITEM_VALUE}>
-                  ➕ {t("createItem", { name: draft.productName || "…" })}
-                </option>
-                {proposal.itemOptions.map((it) => (
-                  <option key={it.id} value={it.id}>
-                    {it.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {!itemId
-              ? field(t("productName"), draft.productName, (v) => updateDraft("productName", v))
-              : null}
+              }}
+              onTextChange={(v) => {
+                updateDraft("productName", v);
+                setItemId(null);
+              }}
+            />
+            {reasonHint("item")}
             {field(t("quantity"), draft.quantity, (v) => updateDraft("quantity", v), {
               money: true,
+              reasonKey: "quantity",
             })}
-            {field(t("unit"), draft.unit, (v) => updateDraft("unit", v), {
-              placeholder: t("unitPlaceholder"),
-            })}
+            {unitCombobox()}
             {field(t("unitCost"), draft.costPrice, (v) => updateDraft("costPrice", v), {
               money: true,
               placeholder: t("unitCostPlaceholder"),
+              reasonKey: "costPrice",
             })}
             {partyBlock(t("supplier"), t("createSupplier"))}
             {dateField()}
@@ -588,9 +723,13 @@ export function BantooCommand() {
             {field(t("amount"), draft.amount, (v) => updateDraft("amount", v), { money: true })}
             {partyBlock(t("supplier"), t("createSupplier"))}
             {field(t("expenseDescription"), draft.description, (v) => updateDraft("description", v))}
-            {accountSelect(t("expenseAccount"), true)}
+            {accountCombobox(t("expenseAccount"), "expense_category", true)}
             {field(t("paymentMethod"), draft.paymentMethod, (v) => updateDraft("paymentMethod", v))}
             {dateField()}
+            {field(t("dueDate"), draft.dueDate, (v) => updateDraft("dueDate", v), {
+              type: "date",
+              reasonKey: "dueDate",
+            })}
           </>
         );
       case "customer_payment":
@@ -610,7 +749,7 @@ export function BantooCommand() {
           <>
             {field(t("amount"), draft.amount, (v) => updateDraft("amount", v), { money: true })}
             {field(t("expenseDescription"), draft.description, (v) => updateDraft("description", v))}
-            {accountSelect(t("expenseAccount"), true)}
+            {accountCombobox(t("expenseAccount"), "expense_category", true)}
             {partyBlock(t("payee"), t("createSupplier"))}
             {bankSelect()}
             {field(t("paymentMethod"), draft.paymentMethod, (v) => updateDraft("paymentMethod", v))}
@@ -622,7 +761,7 @@ export function BantooCommand() {
           <>
             {field(t("amount"), draft.amount, (v) => updateDraft("amount", v), { money: true })}
             {field(t("expenseDescription"), draft.description, (v) => updateDraft("description", v))}
-            {accountSelect(t("incomeAccount"), false)}
+            {accountCombobox(t("incomeAccount"), "income_account", false)}
             {partyBlock(t("customer"), t("createParty"))}
             {bankSelect()}
             {field(t("paymentMethod"), draft.paymentMethod, (v) => updateDraft("paymentMethod", v))}

@@ -175,6 +175,38 @@ model Party {
   phone     String?
   createdAt DateTime @default(now())
 
+  // --- Quick-add extras (alongside phone; kept nullable/backward compatible) ---
+  whatsapp  String?
+  country   String?
+  city      String?
+
+  // --- Extended "Profile" fields (all nullable — set later, never required) ---
+  email                  String?
+  address                String?
+  // Google Maps location, stored as a share/place URL (e.g.
+  // "https://maps.google.com/?q=..." or a shortened maps.app.goo.gl link)
+  // rather than separate lat/lng columns — simpler to capture from a phone
+  // share sheet and just as usable as a link on the profile page.
+  googleMapsUrl          String?
+  companyName            String?
+  contactPerson          String?
+  // Tax ID / business registration number (name varies by country).
+  taxId                  String?
+  defaultCurrency        String?
+  preferredLanguage      String?
+  // Payment terms, in days (e.g. 30 = "net 30"). Nullable — most contacts
+  // have no explicit terms until set on the Profile tab or accepted from an
+  // AI-suggested enrichment.
+  paymentTermsDays        Int?
+  // Credit limit in the party's/org's minor currency units (same
+  // BigInt-minor-units convention as every other money column — see lib/money.ts).
+  creditLimit             BigInt?
+  // Default discount, as a percentage (e.g. 5 = 5%).
+  defaultDiscount         Decimal? @db.Decimal(7, 4)
+  preferredPaymentMethod  String?
+  // Freeform notes shown on the contact's "Notes" tab.
+  notes                   String?
+
   org              Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
   lines            JournalLine[]
   receipts         Receipt[]

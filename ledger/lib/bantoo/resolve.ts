@@ -6,17 +6,30 @@ import {
   receivableAccount,
 } from "@/lib/accounts";
 import { pickExpenseAccount, pickSalesAccount } from "@/lib/command-accounts";
-import { rankInventoryItems, rankParties } from "@/lib/command-match";
 import { listInventoryItems } from "@/lib/inventory";
-import { listParties } from "@/lib/parties";
+import { MATCH_HIGH, MATCH_MEDIUM, bucketFor, rankMatches } from "@/lib/bantoo/match";
+import {
+  loadEntityCandidates,
+  productDefaultsFromItem,
+  resolveCandidates,
+  toOptions,
+} from "@/lib/bantoo/entities";
+import {
+  dueDateFromTerms,
+  getCommandPatternSuggestions,
+  type EntityPatternCandidate,
+} from "@/lib/command-patterns";
 import {
   LOW_CONFIDENCE_THRESHOLD,
   type ExtractedAction,
 } from "@/lib/ai/actions";
 import {
   emptyDraft,
+  type BantooDraft,
+  type BantooFieldReasons,
   type BantooOption,
   type BantooProposal,
+  type MatchBucket,
 } from "@/lib/bantoo/types";
 
 function numToStr(n: number | null | undefined): string {
@@ -26,6 +39,130 @@ function numToStr(n: number | null | undefined): string {
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+// --- Blending entity-matching with transaction-pattern learning ------------
+// Two interactions (see the module doc comment in lib/command-patterns.ts for
+// the "why"):
+//   - BOOST: pattern's top candidate is the SAME record the text matcher
+//     already found → its effective score gets a bonus (up to +20, scaled
+//     from the pattern score), which can push a borderline text match over
+//     the auto-select line.
+//   - FILL: the text matcher found nothing usable (no query text, or its own
+//     top match is below "medium") → use the pattern module's own top
+//     candidate directly, bucketed by its own score.
+// A pattern suggestion NEVER overrides an already-decent (>=60) text match
+// with a *different* record, and NEVER auto-creates anything — `id` is only
+// ever an id of an EXISTING record already offered by entity matching or
+// found by the pattern module itself (both come from real database rows).
+export function blendEntity(
+  textTop: { id: string; score: number } | undefined,
+  pattern: EntityPatternCandidate | undefined,
+): { id: string | null; score: number; reason?: string } {
+  if (!pattern) {
+    return textTop
+      ? { id: textTop.score >= MATCH_HIGH ? textTop.id : null, score: textTop.score }
+      : { id: null, score: 0 };
+  }
+  if (textTop && textTop.id === pattern.id) {
+    const boosted = Math.min(100, textTop.score + Math.round(pattern.score * 0.2));
+    return { id: boosted >= MATCH_HIGH ? textTop.id : null, score: boosted, reason: pattern.reason };
+  }
+  if (!textTop || textTop.score < MATCH_MEDIUM) {
+    return { id: pattern.score >= MATCH_HIGH ? pattern.id : null, score: pattern.score, reason: pattern.reason };
+  }
+  return { id: textTop.score >= MATCH_HIGH ? textTop.id : null, score: textTop.score };
+}
+
+// Blends a pattern-learned supplier suggestion into the party resolution
+// already computed by resolveParty(). Only FILLS proposal.partyId when the
+// text matcher hadn't already resolved one; always surfaces the pattern's
+// candidate as an extra dropdown option (even at low confidence, per spec)
+// and attaches the human-readable reason for the UI.
+function applyPartyPatternBlend(
+  proposal: BantooProposal,
+  draft: BantooDraft,
+  fieldReasons: BantooFieldReasons,
+  pattern: EntityPatternCandidate | undefined,
+) {
+  if (!pattern) return;
+  const textTop = proposal.partyOptions[0]
+    ? { id: proposal.partyOptions[0].id, score: proposal.partyOptions[0].score ?? 0 }
+    : undefined;
+  const blended = blendEntity(textTop, pattern);
+  if (blended.reason) {
+    fieldReasons.supplier = { text: blended.reason, bucket: bucketFor(Math.round(blended.score)) };
+  }
+  if (blended.id && !proposal.partyId) {
+    proposal.partyId = blended.id;
+    proposal.createParty = false;
+    if (blended.id === pattern.id) draft.partyName = pattern.label;
+  }
+  if (!proposal.partyOptions.some((o) => o.id === pattern.id)) {
+    proposal.partyOptions = [
+      ...proposal.partyOptions,
+      { id: pattern.id, label: pattern.label, score: pattern.score, bucket: pattern.bucket },
+    ];
+  }
+}
+
+// Same idea as applyPartyPatternBlend, for the inventory item field. When the
+// pattern-preferred item ends up selected, its stored unit/cost/sale/reorder
+// defaults are applied exactly like a normal high-confidence text match would
+// (via productDefaultsFromItem) — pattern learning only changes WHICH item
+// gets picked, not how its defaults populate.
+function applyItemPatternBlend(
+  proposal: BantooProposal,
+  draft: BantooDraft,
+  fieldReasons: BantooFieldReasons,
+  items: Awaited<ReturnType<typeof listInventoryItems>>,
+  pattern: EntityPatternCandidate | undefined,
+) {
+  if (!pattern) return;
+  const textTop = proposal.itemOptions[0]
+    ? { id: proposal.itemOptions[0].id, score: proposal.itemOptions[0].score ?? 0 }
+    : undefined;
+  const blended = blendEntity(textTop, pattern);
+  if (blended.reason) {
+    // Attributed to the item field only — the item IS the unit-disambiguating
+    // signal (e.g. "50kg bag" is part of the item name), so a separate,
+    // identical-looking hint under the Unit combobox would just be noise.
+    fieldReasons.item = { text: blended.reason, bucket: bucketFor(Math.round(blended.score)) };
+  }
+  if (blended.id && !proposal.itemId) {
+    proposal.itemId = blended.id;
+    const selected = items.find((it) => it.id === blended.id);
+    if (selected) {
+      const defaults = productDefaultsFromItem(selected, draft.currency);
+      if (!draft.unit) draft.unit = defaults.unit;
+      if (!draft.costPrice) draft.costPrice = defaults.costPrice;
+    }
+  }
+  if (!proposal.itemOptions.some((o) => o.id === pattern.id)) {
+    proposal.itemOptions = [
+      ...proposal.itemOptions,
+      { id: pattern.id, label: pattern.label, score: pattern.score, bucket: pattern.bucket },
+    ];
+  }
+}
+
+// Fills a plain numeric/text draft field from a value-pattern suggestion, but
+// ONLY when it's still empty — never overwrites something the AI/rule-based
+// extractor (or the user) already provided. Always attaches the reason so the
+// UI can show it even for a low-confidence suggestion that wasn't filled in.
+function applyValueSuggestion(
+  draft: BantooDraft,
+  key: "quantity" | "costPrice",
+  suggestion: { value: string; score: number; bucket: MatchBucket; reason: string } | undefined,
+  fieldReasons: BantooFieldReasons,
+  reasonKey: keyof BantooFieldReasons,
+) {
+  if (!suggestion) return;
+  const alreadySet = draft[key] && Number(draft[key]) > 0;
+  if (!alreadySet && suggestion.bucket !== "low") {
+    draft[key] = suggestion.value;
+  }
+  fieldReasons[reasonKey] = { text: suggestion.reason, bucket: suggestion.bucket };
 }
 
 // Turn a validated ExtractedAction into a client-ready proposal: fills the
@@ -53,6 +190,7 @@ export async function resolveExtraction(
     partyOptions: [],
     itemId: null,
     itemOptions: [],
+    unitOptions: [],
     bankAccountId: null,
     bankOptions: [],
     lineAccountId: null,
@@ -61,24 +199,36 @@ export async function resolveExtraction(
     needsParty: false,
     needsBank: false,
     needsLineAccount: false,
+    fieldReasons: {},
   };
 
   if (action.action === "unknown") {
     return proposal;
   }
 
-  // Shared: resolve a named party (customer/supplier) against the org list.
+  const fieldReasons: BantooFieldReasons = proposal.fieldReasons;
+
+  // Shared: resolve a named party (customer/supplier) against the org list using
+  // the confidence-bucketed matcher. Auto-selects only a HIGH-confidence match;
+  // MEDIUM leaves the best highlighted for the user; LOW offers "create new".
   async function resolveParty(
     name: string | null | undefined,
     type: "customer" | "supplier",
   ): Promise<{ options: BantooOption[]; id: string | null; create: boolean }> {
-    const parties = await listParties(ctx.orgId, type);
-    const ranked = name ? rankParties(name, parties) : [];
-    const top = ranked[0];
-    const id = top && top.score >= 0.85 ? top.id : null;
-    const options = ranked.map((p) => ({ id: p.id, label: p.name }));
-    const create = Boolean(name && !id && name.trim().length >= 2);
-    return { options, id, create };
+    const candidates = await loadEntityCandidates(ctx, type);
+    const { candidates: ranked, autoId } = name
+      ? resolveCandidates(name, candidates)
+      : { candidates: [], autoId: null };
+    const options = toOptions(ranked);
+    // Offer create-new when there is no confident (high) match yet.
+    const create = Boolean(name && !autoId && name.trim().length >= 2);
+    return { options, id: autoId, create };
+  }
+
+  // Distinct free-text units already used in the org (there is no Unit table).
+  async function unitOptions(): Promise<BantooOption[]> {
+    const units = await loadEntityCandidates(ctx, "unit");
+    return units.map((u) => ({ id: u.id, label: u.label }));
   }
 
   async function bankOptions(): Promise<BantooOption[]> {
@@ -102,20 +252,24 @@ export async function resolveExtraction(
       proposal.partyType = "supplier";
 
       const items = await listInventoryItems(ctx.orgId);
+      proposal.unitOptions = await unitOptions();
       // Barcode is the strongest signal; fall back to code/name fuzzy match.
       const barcodeDup = draft.barcode
         ? items.find((it) => it.barcode && it.barcode === draft.barcode.trim())
         : undefined;
-      const dup = draft.productName
-        ? rankInventoryItems(draft.productName, items)[0]
-        : undefined;
+      const productCandidates = items.map((it) => ({
+        id: it.id,
+        label: `${it.code} — ${it.name}`,
+        text: [it.name, it.code, it.barcode ?? ""].filter(Boolean).join(" "),
+      }));
+      const dup = draft.productName ? rankMatches(draft.productName, productCandidates)[0] : undefined;
       if (barcodeDup) {
         warnings.push(
           `“${barcodeDup.name}” already exists with this barcode — receiving stock may be a better fit.`,
         );
-      } else if (dup && dup.score >= 0.85) {
+      } else if (dup && dup.bucket === "high") {
         warnings.push(
-          `An item like “${dup.name}” already exists — receiving stock may be a better fit.`,
+          `An item like “${dup.label}” already exists — receiving stock may be a better fit.`,
         );
       }
       if (!draft.productName) warnings.push("Enter the product name before saving.");
@@ -125,6 +279,16 @@ export async function resolveExtraction(
         proposal.partyOptions = party.options;
         proposal.partyId = party.id;
         proposal.createParty = party.create;
+
+        const patterns = await getCommandPatternSuggestions(ctx.orgId, {
+          action: "add_inventory_item",
+          productQuery: draft.productName,
+          partyType: "supplier",
+          currency: draft.currency,
+        });
+        applyPartyPatternBlend(proposal, draft, fieldReasons, patterns.supplier);
+        applyValueSuggestion(draft, "quantity", patterns.quantity, fieldReasons, "quantity");
+        applyValueSuggestion(draft, "costPrice", patterns.costPrice, fieldReasons, "costPrice");
         if (!draft.costPrice || Number(draft.costPrice) <= 0) {
           warnings.push("Add the unit cost to record opening stock, or clear the quantity.");
         }
@@ -146,21 +310,74 @@ export async function resolveExtraction(
       proposal.needsParty = true;
 
       const items = await listInventoryItems(ctx.orgId);
-      proposal.itemOptions = items.map((it) => ({
+      proposal.unitOptions = await unitOptions();
+      const productCandidates = items.map((it) => ({
         id: it.id,
         label: `${it.code} — ${it.name}`,
+        text: [it.name, it.code, it.barcode ?? ""].filter(Boolean).join(" "),
+        sub: it.code,
       }));
-      // Prefer an exact barcode hit, then a strong code/name match, before
+      // Prefer an exact barcode hit, then a confident code/name match, before
       // offering to create a new item — this avoids duplicates.
       const barcodeMatch = draft.barcode
         ? items.find((it) => it.barcode && it.barcode === draft.barcode.trim())
         : undefined;
       const rankedItems = draft.productName
-        ? rankInventoryItems(draft.productName, items)
+        ? rankMatches(draft.productName, productCandidates)
         : [];
+      proposal.itemOptions = toOptions(rankedItems.length ? rankedItems : []);
+      // When no query ranking (or to always allow browsing), fall back to the
+      // full item list so the dropdown is usable.
+      if (proposal.itemOptions.length === 0) {
+        proposal.itemOptions = items.map((it) => ({ id: it.id, label: `${it.code} — ${it.name}`, sub: it.code }));
+      }
       const topItem = rankedItems[0];
       proposal.itemId =
-        barcodeMatch?.id ?? (topItem && topItem.score >= 0.85 ? topItem.id : null);
+        barcodeMatch?.id ?? (topItem && topItem.bucket === "high" ? topItem.id : null);
+      // Dependent auto-population: when an existing item is auto-selected, fill
+      // unit from that item so the user sees a consistent default. Cost is
+      // handled below, AFTER pattern learning: the item's stored value is a
+      // static weighted-average cost, while the pattern module's suggestion is
+      // the actual LAST purchase price — more relevant, so it takes priority
+      // when available; the item average remains the fallback.
+      const selected = proposal.itemId
+        ? items.find((it) => it.id === proposal.itemId)
+        : undefined;
+      if (selected && !draft.unit) {
+        draft.unit = productDefaultsFromItem(selected, draft.currency).unit;
+      }
+
+      const party = await resolveParty(draft.partyName, "supplier");
+      proposal.partyOptions = party.options;
+      proposal.partyId = party.id;
+      proposal.createParty = party.create;
+
+      // Transaction-pattern learning: "Received bread" with no supplier named
+      // still ranks the usual bread supplier highly; a generic/ambiguous
+      // product match ("rice") gets disambiguated toward the item the org
+      // actually buys, carrying its unit along; quantity/cost prefill from the
+      // org's own history. A confirmed barcode hit is certain, so we skip
+      // item-pattern blending in that case — there is nothing to disambiguate.
+      const patterns = await getCommandPatternSuggestions(ctx.orgId, {
+        action: "receive_stock",
+        productQuery: draft.productName,
+        partyType: "supplier",
+        resolvedItemId: barcodeMatch?.id ?? null,
+        resolvedPartyId: proposal.partyId,
+        currency: draft.currency,
+      });
+      if (!barcodeMatch) {
+        applyItemPatternBlend(proposal, draft, fieldReasons, items, patterns.item);
+      }
+      applyPartyPatternBlend(proposal, draft, fieldReasons, patterns.supplier);
+      applyValueSuggestion(draft, "quantity", patterns.quantity, fieldReasons, "quantity");
+      applyValueSuggestion(draft, "costPrice", patterns.costPrice, fieldReasons, "costPrice");
+      // Fallback: no (or low-confidence) last-purchase-cost pattern — use the
+      // selected item's own stored (weighted-average) cost, as before.
+      if (!draft.costPrice && selected) {
+        draft.costPrice = productDefaultsFromItem(selected, draft.currency).costPrice;
+      }
+
       if (!proposal.itemId) {
         warnings.push(
           draft.productName
@@ -168,11 +385,6 @@ export async function resolveExtraction(
             : "Choose which inventory item was received.",
         );
       }
-
-      const party = await resolveParty(draft.partyName, "supplier");
-      proposal.partyOptions = party.options;
-      proposal.partyId = party.id;
-      proposal.createParty = party.create;
       if (!draft.partyName) warnings.push("Choose the supplier this stock came from.");
       if (!draft.quantity || Number(draft.quantity) <= 0) {
         warnings.push("Enter the quantity received.");
@@ -200,6 +412,30 @@ export async function resolveExtraction(
       if (!draft.partyName) warnings.push("Choose the supplier for this bill.");
       if (!draft.amount || Number(draft.amount) <= 0) {
         warnings.push("Enter the invoice total.");
+      }
+
+      // Payment terms: "usually paid ~30 days after delivery" — suggests a
+      // concrete due date from this supplier's history (see
+      // paymentTermsPatternForSupplier in lib/command-patterns.ts for exactly
+      // what's derived from vs. approximated). Only fills draft.dueDate when
+      // it's still empty; always attaches the reason.
+      if (proposal.partyId) {
+        const patterns = await getCommandPatternSuggestions(ctx.orgId, {
+          action: "supplier_purchase",
+          resolvedPartyId: proposal.partyId,
+          currency: draft.currency,
+        });
+        if (patterns.dueDateDays) {
+          const invoiceDate = new Date(draft.date || today());
+          const suggestedDueDate = dueDateFromTerms(invoiceDate, patterns.dueDateDays.value);
+          if (!draft.dueDate && patterns.dueDateDays.bucket !== "low") {
+            draft.dueDate = suggestedDueDate;
+          }
+          fieldReasons.dueDate = {
+            text: patterns.dueDateDays.reason,
+            bucket: patterns.dueDateDays.bucket,
+          };
+        }
       }
 
       const accounts = await paymentCounterpartAccounts(ctx.orgId);

@@ -65,6 +65,28 @@ export async function listPartyBalances(
   );
 }
 
+// Single-party version of listPartyBalances, for pages/services that only
+// need one contact's AR/AP balance (e.g. the relationship-stats service)
+// rather than every party in the org.
+export async function getPartyBalance(
+  orgId: string,
+  partyId: string,
+  kind: "customer" | "supplier",
+): Promise<bigint> {
+  const account =
+    kind === "customer"
+      ? await receivableAccount(orgId)
+      : await payableAccount(orgId);
+
+  const sum = await prisma.journalLine.aggregate({
+    where: { orgId, accountId: account.id, partyId },
+    _sum: { debit: true, credit: true },
+  });
+  const debit = sum._sum.debit ?? 0n;
+  const credit = sum._sum.credit ?? 0n;
+  return kind === "customer" ? debit - credit : credit - debit;
+}
+
 const SOURCE_TYPE_KEYS = [
   "sales_invoice",
   "receipt",

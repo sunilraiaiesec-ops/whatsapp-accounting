@@ -176,6 +176,7 @@
     "incomeAccount": "Compte de produit",
     "bankAccount": "Compte banque ou caisse",
     "date": "Date",
+    "dueDate": "Date d'échéance (facultatif)",
     "createParty": "Créer un nouveau contact à l'enregistrement",
     "examples": "Essayez : « Reçu 2 millions de Acme Corp », « Payé 45 000 pour changement de pneu », ou « Reçu 150 sacs de riz de Fournisseur »",
     "successReceipt": "Encaissement {number} enregistré.",
@@ -226,7 +227,15 @@
     "actionUnknown": "Incertain",
     "aiUnavailable": "La photo et la voix nécessitent la configuration de l'IA (OPENAI_API_KEY). Vous pouvez toujours écrire votre demande ci-dessous.",
     "aiFallbackNote": "L'IA était indisponible ; nous avons utilisé une analyse de texte basique. Veuillez vérifier les détails ci-dessous.",
-    "rateLimited": "Vous allez un peu vite. Patientez un instant et réessayez."
+    "rateLimited": "Vous allez un peu vite. Patientez un instant et réessayez.",
+    "searchOrType": "Rechercher ou saisir un nom…",
+    "searchAccount": "Rechercher un compte…",
+    "searching": "Recherche…",
+    "noMatches": "Aucune correspondance — vous pouvez en créer une.",
+    "bestMatch": "Meilleure correspondance",
+    "createNew": "Créer « {name} »",
+    "usingExisting": "Utilisation de : {name}",
+    "willCreateNew": "Créera : {name}"
   },
   "auth": {
     "signIn": "Connexion",

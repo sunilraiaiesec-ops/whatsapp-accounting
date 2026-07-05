@@ -177,6 +177,7 @@
     "incomeAccount": "Income account",
     "bankAccount": "Bank or cash account",
     "date": "Date",
+    "dueDate": "Due date (optional)",
     "createParty": "Create new contact on save",
     "examples": "Try: “Received 2 million from Acme Corp”, “Paid 45,000 for tire change”, or “Received 150 bags of rice from Supplier”",
     "successReceipt": "Receipt {number} saved.",
@@ -227,7 +228,15 @@
     "actionUnknown": "Not sure",
     "aiUnavailable": "Photo and voice need AI setup (OPENAI_API_KEY). You can still type your request below.",
     "aiFallbackNote": "AI was unavailable, so we used basic text parsing. Please double-check the details below.",
-    "rateLimited": "You're going a bit fast. Please wait a moment and try again."
+    "rateLimited": "You're going a bit fast. Please wait a moment and try again.",
+    "searchOrType": "Search or type a name…",
+    "searchAccount": "Search accounts…",
+    "searching": "Searching…",
+    "noMatches": "No matches — you can create a new one.",
+    "bestMatch": "Best match",
+    "createNew": "Create new “{name}”",
+    "usingExisting": "Using existing: {name}",
+    "willCreateNew": "Will create new: {name}"
   },
   "auth": {
     "signIn": "Sign in",

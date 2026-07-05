@@ -84,6 +84,7 @@ class OpenAiProvider implements AiProvider {
         ],
       });
     } catch (err) {
+      logOpenAiError(err);
       throw new AiError(describeOpenAiError("AI request failed", err));
     }
 
@@ -109,19 +110,81 @@ class OpenAiProvider implements AiProvider {
       });
       return result.text?.trim() ?? "";
     } catch (err) {
+      logOpenAiError(err);
       throw new AiError(describeOpenAiError("Transcription failed", err));
     }
   }
 }
 
+// OpenAI's own error bodies can echo back a masked-but-partial fragment of the
+// submitted key (e.g. "Incorrect API key provided: sk-ab12...wxyz"). Strip any
+// key-shaped substring before it ever reaches a log line, regardless of source.
+const API_KEY_PATTERN = /sk-[A-Za-z0-9_-]{4,}/g;
+
+function redactSecrets(value: string): string {
+  return value.replace(API_KEY_PATTERN, "sk-***redacted***");
+}
+
+// Structured, secret-safe server log of an OpenAI failure. We read ONLY the four
+// diagnostic fields (status/type/code/message) from the SDK error — never the
+// whole error object, request config, headers, prompt/image/audio content, or
+// the API key. Emits a single line with the stable `[bantoo/ai]` prefix so the
+// exact cause (e.g. 401 invalid_api_key, 429 insufficient_quota, 404
+// model_not_found) is visible in Vercel logs.
+function logOpenAiError(err: unknown): void {
+  const fields = extractOpenAiErrorFields(err);
+  console.error(
+    `[bantoo/ai] OpenAI request failed — HTTP ${fields.status} type=${fields.type} code=${fields.code} message=${fields.message}`,
+  );
+}
+
+type OpenAiErrorFields = {
+  status: string;
+  type: string;
+  code: string;
+  message: string;
+};
+
+// Robustly pulls the diagnostic fields from an OpenAI SDK error. `OpenAI.APIError`
+// subclasses expose `.status`, `.code`, `.type`, and `.error` (the parsed body
+// `{ message, type, code, param }`). Network errors have no HTTP status, so we
+// fall back to `status=none` and the error name/message. Absolutely nothing
+// beyond these four fields (and never the key) is read.
+function extractOpenAiErrorFields(err: unknown): OpenAiErrorFields {
+  if (err instanceof OpenAI.APIError) {
+    const body = (err as { error?: { type?: unknown; code?: unknown; message?: unknown } }).error;
+    return {
+      status: err.status != null ? String(err.status) : "none",
+      type: str(err.type ?? body?.type) ?? "none",
+      code: str(err.code ?? body?.code) ?? "none",
+      message: redactSecrets(str(body?.message ?? err.message) ?? "unknown error"),
+    };
+  }
+  if (err instanceof Error) {
+    // Network/timeout/other non-HTTP failure — no status/type/code available.
+    return {
+      status: "none",
+      type: err.name || "Error",
+      code: "none",
+      message: redactSecrets(err.message),
+    };
+  }
+  return { status: "none", type: "unknown", code: "none", message: "unknown error" };
+}
+
+function str(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
 // Builds a diagnostic message that surfaces the HTTP status/code from OpenAI SDK
 // errors (e.g. 401 invalid key, 403 model.request, 404 model-not-found, 429
-// quota) so failures are actionable in server logs. OpenAI error messages do
-// NOT contain the API key, so this is safe to log; we never include the key.
+// quota) so failures are actionable in server logs. OpenAI's error message text
+// can echo a masked fragment of the submitted key, so it's redacted before use
+// even though this string may also be surfaced to the caller.
 function describeOpenAiError(prefix: string, err: unknown): string {
   const status = (err as { status?: number })?.status;
   const code = (err as { code?: string | null })?.code;
-  const detail = err instanceof Error ? err.message : "unknown error";
+  const detail = redactSecrets(err instanceof Error ? err.message : "unknown error");
   const tag = status ? ` (HTTP ${status}${code ? ` ${code}` : ""})` : "";
   return `${prefix}${tag}: ${detail}`;
 }
