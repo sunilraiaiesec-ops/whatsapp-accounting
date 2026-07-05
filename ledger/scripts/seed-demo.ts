@@ -104,8 +104,8 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 8): Promise<T> {
       const msg = e instanceof Error ? e.message : String(e);
       const code = (e as { code?: string }).code;
       const transient =
-        code === "P1017" || code === "P1001" || code === "P1002" || code === "P2024" ||
-        /closed the connection|Closed|ECONNRESET|Connection terminated|connection pool|timed out|reset by peer/i.test(msg);
+        code === "P1017" || code === "P1001" || code === "P1002" || code === "P2024" || code === "P2028" ||
+        /closed the connection|Closed|ECONNRESET|Connection terminated|connection pool|timed out|reset by peer|Transaction (already closed|not found|API error)|expired transaction|Unable to start a transaction/i.test(msg);
       if (!transient) throw e;
       lastErr = e;
       await new Promise((r) => setTimeout(r, Math.min(8000, 400 * 2 ** i)));
@@ -842,7 +842,7 @@ async function main() {
     for (const cfg of COMPANIES) await purgeExisting(cfg.email);
   }
 
-  const companies: Company[] = [];
+  const toSeed: { cfg: CompanyConfig; i: number }[] = [];
   for (let i = 0; i < COMPANIES.length; i++) {
     const cfg = COMPANIES[i];
     const existing = await withRetry(() => prisma.user.findUnique({ where: { email: cfg.email } }));
@@ -850,14 +850,22 @@ async function main() {
       console.log(`• ${cfg.name}: admin ${cfg.email} already exists — skipping (use DEMO_RESEED=1 to rebuild).`);
       continue;
     }
-    process.stdout.write(`Provisioning ${cfg.name}…\n`);
-    const c = await setupCompany(cfg, i);
-    process.stdout.write(`  setup done — ${c.items.length} items, ${c.customers.length} customers, ${c.suppliers.length} suppliers. Posting history…\n`);
-    await driveCompany(c);
-    const entries = await withRetry(() => prisma.journalEntry.count({ where: { orgId: c.orgId } }));
-    process.stdout.write(`  ✓ ${cfg.name}: ${entries} journal entries\n`);
-    companies.push(c);
+    toSeed.push({ cfg, i });
   }
+
+  // Seed the (independent, isolated) companies in parallel to hide network
+  // latency; each company posts sequentially within itself.
+  console.log(`Provisioning ${toSeed.length} companies in parallel…`);
+  const companies = await Promise.all(
+    toSeed.map(async ({ cfg, i }) => {
+      const c = await setupCompany(cfg, i);
+      process.stdout.write(`  ${cfg.name}: setup done (${c.items.length} items, ${c.customers.length} customers, ${c.suppliers.length} suppliers) — posting history…\n`);
+      await driveCompany(c);
+      const entries = await withRetry(() => prisma.journalEntry.count({ where: { orgId: c.orgId } }));
+      process.stdout.write(`  ✓ ${cfg.name}: ${entries} journal entries\n`);
+      return c;
+    }),
+  );
 
   if (companies.length === 0) {
     console.log("\nNothing to do — all demo companies already exist.\n");
