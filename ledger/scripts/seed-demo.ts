@@ -22,21 +22,26 @@
 import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
-import { createOrganizationWithOwner } from "@/lib/org";
-import { listAccounts, signedBalance } from "@/lib/accounts";
-import { createParty } from "@/lib/parties";
-import { createInventoryItem, receiveGoods, writeOffInventory, adjustInventory } from "@/lib/inventory";
+import { createOrganizationWithOwner as _createOrganizationWithOwner } from "@/lib/org";
+import { listAccounts as _listAccounts, signedBalance } from "@/lib/accounts";
+import { createParty as _createParty } from "@/lib/parties";
 import {
-  createReceipt,
-  createPayment,
-  createSalesInvoice,
-  createSalesReceipt,
-  createRefundReceipt,
-  createPurchaseInvoice,
-  createCreditNote,
-  createInterAccountTransfer,
+  createInventoryItem as _createInventoryItem,
+  receiveGoods as _receiveGoods,
+  writeOffInventory as _writeOffInventory,
+  adjustInventory as _adjustInventory,
+} from "@/lib/inventory";
+import {
+  createReceipt as _createReceipt,
+  createPayment as _createPayment,
+  createSalesInvoice as _createSalesInvoice,
+  createSalesReceipt as _createSalesReceipt,
+  createRefundReceipt as _createRefundReceipt,
+  createPurchaseInvoice as _createPurchaseInvoice,
+  createCreditNote as _createCreditNote,
+  createInterAccountTransfer as _createInterAccountTransfer,
 } from "@/lib/documents";
-import { postEntry } from "@/lib/ledger";
+import { postEntry as _postEntry } from "@/lib/ledger";
 import {
   trialBalance,
   balanceSheet,
@@ -85,6 +90,49 @@ function makeRng(seed: number) {
 }
 const choose = <T>(rng: () => number, arr: T[]): T => arr[Math.floor(rng() * arr.length)];
 const jitter = (rng: () => number, lo: number, hi: number) => lo + rng() * (hi - lo);
+
+// Neon (serverless Postgres) occasionally drops a connection mid-run. Because
+// every posting call is its own transaction, a failed call has rolled back and
+// is safe to replay with identical arguments — so wrap them all in a retry that
+// backs off and lets Prisma reconnect on the next query.
+async function withRetry<T>(fn: () => Promise<T>, attempts = 8): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      const code = (e as { code?: string }).code;
+      const transient =
+        code === "P1017" || code === "P1001" || code === "P1002" || code === "P2024" ||
+        /closed the connection|Closed|ECONNRESET|Connection terminated|connection pool|timed out|reset by peer/i.test(msg);
+      if (!transient) throw e;
+      lastErr = e;
+      await new Promise((r) => setTimeout(r, Math.min(8000, 400 * 2 ** i)));
+    }
+  }
+  throw lastErr;
+}
+
+// Retrying wrappers keep call sites unchanged while surviving connection drops.
+// Params are inferred; the return is a plain Promise (Prisma's PrismaPromise is
+// only meaningful when awaited, which every call site does).
+const createOrganizationWithOwner = (...a: Parameters<typeof _createOrganizationWithOwner>) => withRetry(() => _createOrganizationWithOwner(...a));
+const listAccounts = (...a: Parameters<typeof _listAccounts>) => withRetry(() => _listAccounts(...a));
+const createParty = (...a: Parameters<typeof _createParty>) => withRetry(() => _createParty(...a));
+const createInventoryItem = (...a: Parameters<typeof _createInventoryItem>) => withRetry(() => _createInventoryItem(...a));
+const receiveGoods = (...a: Parameters<typeof _receiveGoods>) => withRetry(() => _receiveGoods(...a));
+const writeOffInventory = (...a: Parameters<typeof _writeOffInventory>) => withRetry(() => _writeOffInventory(...a));
+const adjustInventory = (...a: Parameters<typeof _adjustInventory>) => withRetry(() => _adjustInventory(...a));
+const createReceipt = (...a: Parameters<typeof _createReceipt>) => withRetry(() => _createReceipt(...a));
+const createPayment = (...a: Parameters<typeof _createPayment>) => withRetry(() => _createPayment(...a));
+const createSalesInvoice = (...a: Parameters<typeof _createSalesInvoice>) => withRetry(() => _createSalesInvoice(...a));
+const createSalesReceipt = (...a: Parameters<typeof _createSalesReceipt>) => withRetry(() => _createSalesReceipt(...a));
+const createRefundReceipt = (...a: Parameters<typeof _createRefundReceipt>) => withRetry(() => _createRefundReceipt(...a));
+const createPurchaseInvoice = (...a: Parameters<typeof _createPurchaseInvoice>) => withRetry(() => _createPurchaseInvoice(...a));
+const createCreditNote = (...a: Parameters<typeof _createCreditNote>) => withRetry(() => _createCreditNote(...a));
+const createInterAccountTransfer = (...a: Parameters<typeof _createInterAccountTransfer>) => withRetry(() => _createInterAccountTransfer(...a));
+const postEntry = (...a: Parameters<typeof _postEntry>) => withRetry(() => _postEntry(...a));
 
 // Monthly demand multipliers — quiet Jan/Feb, back-to-school Aug/Sep, festive Nov/Dec.
 const SEASON = [0.7, 0.75, 0.95, 1.0, 1.05, 1.0, 0.95, 1.15, 1.2, 1.05, 1.25, 1.5];
@@ -223,7 +271,7 @@ function dayInWeek(rng: () => number, weekStart: Date): Date {
 async function purgeOrg(orgId: string) {
   const del = async (fn: () => Promise<unknown>) => {
     try {
-      await fn();
+      await withRetry(fn);
     } catch (e) {
       console.warn(`  (purge) step failed for org ${orgId}: ${String(e)}`);
     }
@@ -269,25 +317,25 @@ async function setupCompany(cfg: CompanyConfig, index: number): Promise<Company>
     baseCurrency: CURRENCY,
   });
   // Demo logins should work immediately without the verification prompt.
-  await prisma.user.update({ where: { id: user.id }, data: { emailVerified: new Date() } });
+  await withRetry(() => prisma.user.update({ where: { id: user.id }, data: { emailVerified: new Date() } }));
 
   const accounts = await listAccounts(org.id);
   const acc: Record<string, string> = {};
   for (const a of accounts) acc[a.code] = a.id;
 
   // Extra accounts a real distributor keeps beyond the starter chart.
-  const petty = await prisma.account.create({
+  const petty = await withRetry(() => prisma.account.create({
     data: { orgId: org.id, code: "1020", name: "Petty cash", type: "ASSET", subtype: "cash", currency: CURRENCY },
-  });
-  const card = await prisma.account.create({
+  }));
+  const card = await withRetry(() => prisma.account.create({
     data: { orgId: org.id, code: "2200", name: "Company credit card", type: "LIABILITY", subtype: "credit_card", currency: CURRENCY },
-  });
-  const accumDepr = await prisma.account.create({
+  }));
+  const accumDepr = await withRetry(() => prisma.account.create({
     data: { orgId: org.id, code: "1600", name: "Accumulated depreciation", type: "ASSET", subtype: "fixed_asset", currency: CURRENCY },
-  });
-  const deprExp = await prisma.account.create({
+  }));
+  const deprExp = await withRetry(() => prisma.account.create({
     data: { orgId: org.id, code: "6400", name: "Depreciation expense", type: "EXPENSE", currency: CURRENCY },
-  });
+  }));
 
   // --- Items ---
   const chosen = selectCatalog(cfg);
@@ -718,7 +766,7 @@ async function driveCompany(c: Company) {
 type Check = { name: string; pass: boolean; detail: string };
 
 async function controlBalance(orgId: string, accountId: string, type: "ASSET" | "LIABILITY"): Promise<bigint> {
-  const agg = await prisma.journalLine.aggregate({ where: { orgId, accountId }, _sum: { debit: true, credit: true } });
+  const agg = await withRetry(() => prisma.journalLine.aggregate({ where: { orgId, accountId }, _sum: { debit: true, credit: true } }));
   return signedBalance(type, agg._sum.debit ?? 0n, agg._sum.credit ?? 0n);
 }
 
@@ -797,7 +845,7 @@ async function main() {
   const companies: Company[] = [];
   for (let i = 0; i < COMPANIES.length; i++) {
     const cfg = COMPANIES[i];
-    const existing = await prisma.user.findUnique({ where: { email: cfg.email } });
+    const existing = await withRetry(() => prisma.user.findUnique({ where: { email: cfg.email } }));
     if (existing && !RESEED) {
       console.log(`• ${cfg.name}: admin ${cfg.email} already exists — skipping (use DEMO_RESEED=1 to rebuild).`);
       continue;
@@ -806,7 +854,7 @@ async function main() {
     const c = await setupCompany(cfg, i);
     process.stdout.write(`  setup done — ${c.items.length} items, ${c.customers.length} customers, ${c.suppliers.length} suppliers. Posting history…\n`);
     await driveCompany(c);
-    const entries = await prisma.journalEntry.count({ where: { orgId: c.orgId } });
+    const entries = await withRetry(() => prisma.journalEntry.count({ where: { orgId: c.orgId } }));
     process.stdout.write(`  ✓ ${cfg.name}: ${entries} journal entries\n`);
     companies.push(c);
   }
@@ -825,15 +873,15 @@ async function main() {
 
   let failed = 0;
   for (const c of companies) {
-    const entries = await prisma.journalEntry.count({ where: { orgId: c.orgId } });
-    const bs = await balanceSheet(c.orgId);
-    const pnl = await profitAndLoss(c.orgId, START, END);
+    const entries = await withRetry(() => prisma.journalEntry.count({ where: { orgId: c.orgId } }));
+    const bs = await withRetry(() => balanceSheet(c.orgId));
+    const pnl = await withRetry(() => profitAndLoss(c.orgId, START, END));
     console.log(`── ${c.cfg.name} ──`);
     console.log(`   ${c.cfg.description}`);
     console.log(`   Journal entries: ${entries}`);
     console.log(`   Documents: ${Object.entries(c.counters).map(([k, v]) => `${k}:${v}`).join(", ")}`);
     console.log(`   Total assets: ${bs.totalAssets.toLocaleString()} ${CURRENCY}  |  Revenue: ${pnl.totalIncome.toLocaleString()} ${CURRENCY}  |  Net profit: ${pnl.netProfit.toLocaleString()} ${CURRENCY}`);
-    const checks = await verify(c);
+    const checks = await withRetry(() => verify(c));
     for (const ch of checks) {
       if (!ch.pass) failed++;
       console.log(`     ${ch.pass ? "✓" : "✗ FAIL"}  ${ch.name.padEnd(30)} ${ch.detail}`);
