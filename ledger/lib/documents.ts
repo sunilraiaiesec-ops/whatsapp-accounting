@@ -1609,7 +1609,11 @@ export function listReceipts(orgId: string) {
 export function listPayments(orgId: string) {
   return prisma.payment.findMany({
     where: { orgId },
-    include: { bankAccount: true, party: true },
+    include: {
+      bankAccount: true,
+      party: true,
+      lines: { select: { memo: true, account: { select: { name: true } } } },
+    },
     orderBy: [{ date: "desc" }, { createdAt: "desc" }],
     take: 100,
   });

@@ -26,7 +26,12 @@ export default async function PaymentsPage() {
     _date: isoDate(p.date),
     number: p.number,
     date: isoDate(p.date),
-    party: p.party?.name ?? "—",
+    party:
+      p.party?.name ??
+      p.description ??
+      p.lines.find((l) => l.memo)?.memo ??
+      p.lines[0]?.account.name ??
+      "—",
     from: p.bankAccount.name,
     amount: formatAmount(p.total, cur),
   }));
