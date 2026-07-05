@@ -392,6 +392,16 @@ function inStockItems(s: AgentState) {
 }
 
 // --- Execute one operation for an agent --------------------------------------
+const TAX_RATES = [5, 10, 15];
+
+// Mirror the backend's exclusive tax rounding so the harness can predict
+// document totals and tie the tax accounts out exactly. All harness docs are
+// single-line, so per-line rounding equals rounding the net.
+function taxOn(net: bigint, taxRate: number | null): bigint {
+  if (!taxRate) return 0n;
+  return BigInt(Math.round((Number(net) * taxRate) / 100));
+}
+
 async function runOp(s: AgentState, op: OpType): Promise<void> {
   const rng = s.rng;
   const date = randDate(rng);
@@ -416,7 +426,10 @@ async function runOp(s: AgentState, op: OpType): Promise<void> {
       } else {
         lines = [{ description: "Service rendered", quantity: "1", unitPrice: money(5000 + rng() * 200000), accountId: choose(rng, s.incomeIds) }];
       }
-      const total = lines.reduce((t, l) => t + BigInt(l.quantity) * l.unitPrice, 0n);
+      const taxRate = rng() > 0.6 ? choose(rng, TAX_RATES) : null;
+      if (taxRate) lines = lines.map((l) => ({ ...l, taxRate }));
+      const net = lines.reduce((t, l) => t + BigInt(l.quantity) * l.unitPrice, 0n);
+      const total = net + taxOn(net, taxRate);
       if (op === "salesInvoice") {
         const party = choose(rng, s.customers);
         await createSalesInvoice(s.orgId, { partyId: party, date, lines });
@@ -450,36 +463,42 @@ async function runOp(s: AgentState, op: OpType): Promise<void> {
       // ~half of refunds for inventory businesses return physical goods, which
       // must restock inventory and reverse COGS. We deliberately allow items
       // with zero stock too, to exercise the last-known-cost fallback.
+      const taxRate = rng() > 0.6 ? choose(rng, TAX_RATES) : null;
       if (s.profile.usesInventory && s.items.length > 0 && rng() > 0.5) {
         const it = choose(rng, s.items);
         const qty = 1 + Math.floor(rng() * 3);
-        const total = BigInt(qty) * it.salePrice;
-        await createRefundReceipt(s.orgId, { bankAccountId: bank.id, partyId: party, date, lines: [{ description: "Returned goods", quantity: String(qty), unitPrice: it.salePrice, accountId: sales.id, itemId: it.id }] });
+        const lines = [{ description: "Returned goods", quantity: String(qty), unitPrice: it.salePrice, accountId: sales.id, itemId: it.id, ...(taxRate ? { taxRate } : {}) }];
+        await createRefundReceipt(s.orgId, { bankAccountId: bank.id, partyId: party, date, lines });
         s.stock.set(it.id, (s.stock.get(it.id) ?? 0) + qty);
-        s.cashBalance -= total;
+        const net = BigInt(qty) * it.salePrice;
+        s.cashBalance -= net + taxOn(net, taxRate);
         bump(s, "itemReturnRestock");
       } else {
         const amount = money(2000 + rng() * 60000);
-        await createRefundReceipt(s.orgId, { bankAccountId: bank.id, partyId: party, date, lines: [{ description: "Refund to customer", quantity: "1", unitPrice: amount, accountId: choose(rng, s.incomeIds) }] });
-        s.cashBalance -= amount;
+        const lines = [{ description: "Refund to customer", quantity: "1", unitPrice: amount, accountId: choose(rng, s.incomeIds), ...(taxRate ? { taxRate } : {}) }];
+        await createRefundReceipt(s.orgId, { bankAccountId: bank.id, partyId: party, date, lines });
+        s.cashBalance -= amount + taxOn(amount, taxRate);
       }
       bump(s, op);
       break;
     }
     case "creditNote": {
       const party = choose(rng, s.customers);
+      const taxRate = rng() > 0.6 ? choose(rng, TAX_RATES) : null;
       if (s.profile.usesInventory && s.items.length > 0 && rng() > 0.5) {
         const it = choose(rng, s.items);
         const qty = 1 + Math.floor(rng() * 3);
-        const total = BigInt(qty) * it.salePrice;
-        await createCreditNote(s.orgId, { partyId: party, date, lines: [{ description: "Returned goods", quantity: String(qty), unitPrice: it.salePrice, accountId: sales.id, itemId: it.id }] });
+        const lines = [{ description: "Returned goods", quantity: String(qty), unitPrice: it.salePrice, accountId: sales.id, itemId: it.id, ...(taxRate ? { taxRate } : {}) }];
+        await createCreditNote(s.orgId, { partyId: party, date, lines });
         s.stock.set(it.id, (s.stock.get(it.id) ?? 0) + qty);
-        s.ar.set(party, (s.ar.get(party) ?? 0n) - total);
+        const net = BigInt(qty) * it.salePrice;
+        s.ar.set(party, (s.ar.get(party) ?? 0n) - (net + taxOn(net, taxRate)));
         bump(s, "itemReturnRestock");
       } else {
         const amount = money(2000 + rng() * 40000);
-        await createCreditNote(s.orgId, { partyId: party, date, lines: [{ description: "Sales return", quantity: "1", unitPrice: amount, accountId: sales.id }] });
-        s.ar.set(party, (s.ar.get(party) ?? 0n) - amount);
+        const lines = [{ description: "Sales return", quantity: "1", unitPrice: amount, accountId: sales.id, ...(taxRate ? { taxRate } : {}) }];
+        await createCreditNote(s.orgId, { partyId: party, date, lines });
+        s.ar.set(party, (s.ar.get(party) ?? 0n) - (amount + taxOn(amount, taxRate)));
       }
       bump(s, op);
       break;
@@ -487,8 +506,10 @@ async function runOp(s: AgentState, op: OpType): Promise<void> {
     case "purchaseBill": {
       const party = choose(rng, s.suppliers);
       const amount = money(5000 + rng() * 300000);
-      await createPurchaseInvoice(s.orgId, { partyId: party, date, lines: [{ description: "Expense bill", quantity: "1", unitPrice: amount, accountId: choose(rng, s.expenseIds) }] });
-      s.ap.set(party, (s.ap.get(party) ?? 0n) + amount);
+      const taxRate = rng() > 0.6 ? choose(rng, TAX_RATES) : null;
+      const lines = [{ description: "Expense bill", quantity: "1", unitPrice: amount, accountId: choose(rng, s.expenseIds), ...(taxRate ? { taxRate } : {}) }];
+      await createPurchaseInvoice(s.orgId, { partyId: party, date, lines });
+      s.ap.set(party, (s.ap.get(party) ?? 0n) + amount + taxOn(amount, taxRate));
       bump(s, op);
       break;
     }
@@ -692,6 +713,32 @@ async function verifyAgent(s: AgentState): Promise<Check[]> {
     const val = await inventoryValuation(orgId);
     checks.push({ name: "valuation report == control acct", pass: val.total === invLedger, detail: `report ${val.total} vs ledger ${invLedger}` });
   }
+
+  // 6. Tax accounts tie out to the tax recorded on documents.
+  const sum = (n: bigint | null | undefined) => n ?? 0n;
+  const [siTax, srTax, cnTax, rrTax, piTax, dnTax] = await Promise.all([
+    prisma.salesInvoiceLine.aggregate({ where: { invoice: { orgId } }, _sum: { taxAmount: true } }),
+    prisma.salesReceiptLine.aggregate({ where: { receipt: { orgId } }, _sum: { taxAmount: true } }),
+    prisma.creditNoteLine.aggregate({ where: { note: { orgId } }, _sum: { taxAmount: true } }),
+    prisma.refundReceiptLine.aggregate({ where: { refund: { orgId } }, _sum: { taxAmount: true } }),
+    prisma.purchaseInvoiceLine.aggregate({ where: { invoice: { orgId } }, _sum: { taxAmount: true } }),
+    prisma.debitNoteLine.aggregate({ where: { note: { orgId } }, _sum: { taxAmount: true } }),
+  ]);
+  const expectedPayable =
+    sum(siTax._sum.taxAmount) + sum(srTax._sum.taxAmount) -
+    sum(cnTax._sum.taxAmount) - sum(rrTax._sum.taxAmount);
+  const expectedRecoverable = sum(piTax._sum.taxAmount) - sum(dnTax._sum.taxAmount);
+
+  const payAcc = await prisma.account.findFirst({ where: { orgId, subtype: "tax" } });
+  const recAcc = await prisma.account.findFirst({ where: { orgId, subtype: "tax_recoverable" } });
+  const payLedger = payAcc
+    ? await prisma.journalLine.aggregate({ where: { orgId, accountId: payAcc.id }, _sum: { debit: true, credit: true } }).then((a) => signedBalance("LIABILITY", a._sum.debit ?? 0n, a._sum.credit ?? 0n))
+    : 0n;
+  const recLedger = recAcc
+    ? await prisma.journalLine.aggregate({ where: { orgId, accountId: recAcc.id }, _sum: { debit: true, credit: true } }).then((a) => signedBalance("ASSET", a._sum.debit ?? 0n, a._sum.credit ?? 0n))
+    : 0n;
+  checks.push({ name: "tax payable == output tax on docs", pass: payLedger === expectedPayable, detail: `ledger ${payLedger} vs docs ${expectedPayable}` });
+  checks.push({ name: "tax recoverable == input tax on docs", pass: recLedger === expectedRecoverable, detail: `ledger ${recLedger} vs docs ${expectedRecoverable}` });
 
   return checks;
 }

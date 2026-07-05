@@ -58,6 +58,7 @@ export default async function EditPurchaseInvoicePage({
             quantity: l.quantity.toString(),
             unitPrice: formatAmount(l.unitPrice, ctx.baseCurrency),
             accountId: l.accountId,
+            taxRate: l.taxRate != null ? l.taxRate.toString() : "",
           })),
         }}
       />

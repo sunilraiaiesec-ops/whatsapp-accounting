@@ -32,11 +32,19 @@ type InvoiceLineInput = {
   unitPrice: bigint;
   accountId: string;
   itemId?: string | null;
+  taxRate?: number | null;
 };
 
 function computeLineTotal(quantity: string, unitPrice: bigint): bigint {
   const qty = new Prisma.Decimal(quantity || "0");
   return BigInt(qty.times(unitPrice.toString()).toFixed(0));
+}
+
+function withLineTax<T extends { quantity: string; unitPrice: bigint; taxRate?: number | null }>(
+  line: T,
+): T & { lineTotal: bigint; tax: bigint } {
+  const lineTotal = computeLineTotal(line.quantity, line.unitPrice);
+  return { ...line, lineTotal, tax: computeTax(lineTotal, line.taxRate) };
 }
 
 async function controlIdsFor(
@@ -469,11 +477,10 @@ export async function updateSalesInvoice(
   const rawLines = input.lines.filter((l) => l.description.trim() && l.accountId);
   if (rawLines.length === 0) throw new DocumentError("Add at least one line");
 
-  const lines = rawLines.map((l) => ({
-    ...l,
-    lineTotal: computeLineTotal(l.quantity, l.unitPrice),
-  }));
-  const total = lines.reduce((s, l) => s + l.lineTotal, 0n);
+  const lines = rawLines.map(withLineTax);
+  const subtotal = lines.reduce((s, l) => s + l.lineTotal, 0n);
+  const taxTotal = lines.reduce((s, l) => s + l.tax, 0n);
+  const total = subtotal + taxTotal;
   if (total <= 0n) throw new DocumentError("Invoice total must be positive");
 
   return prisma.$transaction(async (tx) => {
@@ -491,6 +498,10 @@ export async function updateSalesInvoice(
       { accountId: ar.id, debit: total, partyId: input.partyId },
       ...lines.map((l) => ({ accountId: l.accountId, credit: l.lineTotal })),
     ];
+    if (taxTotal > 0n) {
+      const tax = await ensureTaxPayableAccount(tx, orgId);
+      entryLines.push({ accountId: tax.id, credit: taxTotal });
+    }
     if (cogsTotal > 0n) {
       const cogs = await cogsAccount(orgId);
       const inv = await inventoryAccount(orgId);
@@ -528,6 +539,8 @@ export async function updateSalesInvoice(
             accountId: l.accountId,
             itemId: l.itemId ?? null,
             cost: lineCosts[i],
+            taxRate: l.taxRate != null ? new Prisma.Decimal(l.taxRate) : null,
+            taxAmount: l.tax,
           })),
         },
       },
@@ -560,15 +573,28 @@ export async function updatePurchaseInvoice(
   const rawLines = input.lines.filter((l) => l.description.trim() && l.accountId);
   if (rawLines.length === 0) throw new DocumentError("Add at least one line");
 
-  const lines = rawLines.map((l) => ({
-    ...l,
-    lineTotal: computeLineTotal(l.quantity, l.unitPrice),
-  }));
-  const total = lines.reduce((s, l) => s + l.lineTotal, 0n);
+  const lines = rawLines.map(withLineTax);
+  const subtotal = lines.reduce((s, l) => s + l.lineTotal, 0n);
+  const taxTotal = lines.reduce((s, l) => s + l.tax, 0n);
+  const total = subtotal + taxTotal;
   if (total <= 0n) throw new DocumentError("Bill total must be positive");
 
   return prisma.$transaction(async (tx) => {
     const ap = await payableAccount(orgId);
+
+    const entryLines: {
+      accountId: string;
+      debit?: bigint;
+      credit?: bigint;
+      partyId?: string | null;
+    }[] = [
+      ...lines.map((l) => ({ accountId: l.accountId, debit: l.lineTotal })),
+      { accountId: ap.id, credit: total, partyId: input.partyId },
+    ];
+    if (taxTotal > 0n) {
+      const tax = await ensureTaxRecoverableAccount(tx, orgId);
+      entryLines.push({ accountId: tax.id, debit: taxTotal });
+    }
 
     const entry = await postEntryWithin(tx, {
       orgId,
@@ -577,10 +603,7 @@ export async function updatePurchaseInvoice(
       reference: input.supplierRef ?? null,
       sourceType: "purchase_invoice",
       sourceId: id,
-      lines: [
-        ...lines.map((l) => ({ accountId: l.accountId, debit: l.lineTotal })),
-        { accountId: ap.id, credit: total, partyId: input.partyId },
-      ],
+      lines: entryLines,
     });
 
     await tx.purchaseInvoiceLine.deleteMany({ where: { invoiceId: id } });
@@ -601,6 +624,8 @@ export async function updatePurchaseInvoice(
             unitPrice: l.unitPrice,
             lineTotal: l.lineTotal,
             accountId: l.accountId,
+            taxRate: l.taxRate != null ? new Prisma.Decimal(l.taxRate) : null,
+            taxAmount: l.tax,
           })),
         },
       },
@@ -640,15 +665,28 @@ export async function updateCreditNote(
   const rawLines = input.lines.filter((l) => l.description.trim() && l.accountId);
   if (rawLines.length === 0) throw new DocumentError("Add at least one line");
 
-  const lines = rawLines.map((l) => ({
-    ...l,
-    lineTotal: computeLineTotal(l.quantity, l.unitPrice),
-  }));
-  const total = lines.reduce((s, l) => s + l.lineTotal, 0n);
+  const lines = rawLines.map(withLineTax);
+  const subtotal = lines.reduce((s, l) => s + l.lineTotal, 0n);
+  const taxTotal = lines.reduce((s, l) => s + l.tax, 0n);
+  const total = subtotal + taxTotal;
   if (total <= 0n) throw new DocumentError("Credit note total must be positive");
 
   return prisma.$transaction(async (tx) => {
     const ar = await receivableAccount(orgId);
+
+    const entryLines: {
+      accountId: string;
+      debit?: bigint;
+      credit?: bigint;
+      partyId?: string | null;
+    }[] = [
+      ...lines.map((l) => ({ accountId: l.accountId, debit: l.lineTotal })),
+      { accountId: ar.id, credit: total, partyId: input.partyId },
+    ];
+    if (taxTotal > 0n) {
+      const tax = await ensureTaxPayableAccount(tx, orgId);
+      entryLines.push({ accountId: tax.id, debit: taxTotal });
+    }
 
     const entry = await postEntryWithin(tx, {
       orgId,
@@ -657,10 +695,7 @@ export async function updateCreditNote(
       reference: input.reference ?? null,
       sourceType: "credit_note",
       sourceId: id,
-      lines: [
-        ...lines.map((l) => ({ accountId: l.accountId, debit: l.lineTotal })),
-        { accountId: ar.id, credit: total, partyId: input.partyId },
-      ],
+      lines: entryLines,
     });
 
     await tx.creditNoteLine.deleteMany({ where: { noteId: id } });
@@ -680,6 +715,8 @@ export async function updateCreditNote(
             unitPrice: l.unitPrice,
             lineTotal: l.lineTotal,
             accountId: l.accountId,
+            taxRate: l.taxRate != null ? new Prisma.Decimal(l.taxRate) : null,
+            taxAmount: l.tax,
           })),
         },
       },
@@ -711,15 +748,28 @@ export async function updateDebitNote(
   const rawLines = input.lines.filter((l) => l.description.trim() && l.accountId);
   if (rawLines.length === 0) throw new DocumentError("Add at least one line");
 
-  const lines = rawLines.map((l) => ({
-    ...l,
-    lineTotal: computeLineTotal(l.quantity, l.unitPrice),
-  }));
-  const total = lines.reduce((s, l) => s + l.lineTotal, 0n);
+  const lines = rawLines.map(withLineTax);
+  const subtotal = lines.reduce((s, l) => s + l.lineTotal, 0n);
+  const taxTotal = lines.reduce((s, l) => s + l.tax, 0n);
+  const total = subtotal + taxTotal;
   if (total <= 0n) throw new DocumentError("Debit note total must be positive");
 
   return prisma.$transaction(async (tx) => {
     const ap = await payableAccount(orgId);
+
+    const entryLines: {
+      accountId: string;
+      debit?: bigint;
+      credit?: bigint;
+      partyId?: string | null;
+    }[] = [
+      { accountId: ap.id, debit: total, partyId: input.partyId },
+      ...lines.map((l) => ({ accountId: l.accountId, credit: l.lineTotal })),
+    ];
+    if (taxTotal > 0n) {
+      const tax = await ensureTaxRecoverableAccount(tx, orgId);
+      entryLines.push({ accountId: tax.id, credit: taxTotal });
+    }
 
     const entry = await postEntryWithin(tx, {
       orgId,
@@ -728,10 +778,7 @@ export async function updateDebitNote(
       reference: input.supplierRef ?? null,
       sourceType: "debit_note",
       sourceId: id,
-      lines: [
-        { accountId: ap.id, debit: total, partyId: input.partyId },
-        ...lines.map((l) => ({ accountId: l.accountId, credit: l.lineTotal })),
-      ],
+      lines: entryLines,
     });
 
     await tx.debitNoteLine.deleteMany({ where: { noteId: id } });
@@ -751,6 +798,8 @@ export async function updateDebitNote(
             unitPrice: l.unitPrice,
             lineTotal: l.lineTotal,
             accountId: l.accountId,
+            taxRate: l.taxRate != null ? new Prisma.Decimal(l.taxRate) : null,
+            taxAmount: l.tax,
           })),
         },
       },

@@ -362,15 +362,17 @@ model SalesInvoice {
 }
 
 model SalesInvoiceLine {
-  id          String  @id @default(cuid())
+  id          String   @id @default(cuid())
   invoiceId   String
   description String
-  quantity    Decimal @default(1) @db.Decimal(14, 3)
+  quantity    Decimal  @default(1) @db.Decimal(14, 3)
   unitPrice   BigInt
   lineTotal   BigInt
   accountId   String
   itemId      String?
-  cost        BigInt  @default(0)
+  cost        BigInt   @default(0)
+  taxRate     Decimal? @db.Decimal(7, 4)
+  taxAmount   BigInt   @default(0)
 
   invoice SalesInvoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   account Account        @relation(fields: [accountId], references: [id])
@@ -406,13 +408,15 @@ model PurchaseInvoice {
 }
 
 model PurchaseInvoiceLine {
-  id          String  @id @default(cuid())
+  id          String   @id @default(cuid())
   invoiceId   String
   description String
-  quantity    Decimal @default(1) @db.Decimal(14, 3)
+  quantity    Decimal  @default(1) @db.Decimal(14, 3)
   unitPrice   BigInt
   lineTotal   BigInt
   accountId   String
+  taxRate     Decimal? @db.Decimal(7, 4)
+  taxAmount   BigInt   @default(0)
 
   invoice PurchaseInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   account Account         @relation(fields: [accountId], references: [id])
@@ -469,15 +473,17 @@ model CreditNote {
 }
 
 model CreditNoteLine {
-  id          String  @id @default(cuid())
+  id          String   @id @default(cuid())
   noteId      String
   description String
-  quantity    Decimal @default(1) @db.Decimal(14, 3)
+  quantity    Decimal  @default(1) @db.Decimal(14, 3)
   unitPrice   BigInt
   lineTotal   BigInt
   accountId   String
   itemId      String?
-  cost        BigInt  @default(0) // COGS reversed / stock value restored
+  cost        BigInt   @default(0) // COGS reversed / stock value restored
+  taxRate     Decimal? @db.Decimal(7, 4)
+  taxAmount   BigInt   @default(0)
 
   note    CreditNote     @relation(fields: [noteId], references: [id], onDelete: Cascade)
   account Account        @relation(fields: [accountId], references: [id])
@@ -511,13 +517,15 @@ model DebitNote {
 }
 
 model DebitNoteLine {
-  id          String  @id @default(cuid())
+  id          String   @id @default(cuid())
   noteId      String
   description String
-  quantity    Decimal @default(1) @db.Decimal(14, 3)
+  quantity    Decimal  @default(1) @db.Decimal(14, 3)
   unitPrice   BigInt
   lineTotal   BigInt
   accountId   String
+  taxRate     Decimal? @db.Decimal(7, 4)
+  taxAmount   BigInt   @default(0)
 
   note    DebitNote @relation(fields: [noteId], references: [id], onDelete: Cascade)
   account Account   @relation(fields: [accountId], references: [id])
@@ -696,15 +704,17 @@ model SalesReceipt {
 }
 
 model SalesReceiptLine {
-  id          String  @id @default(cuid())
+  id          String   @id @default(cuid())
   receiptId   String
   description String
-  quantity    Decimal @default(1) @db.Decimal(14, 3)
+  quantity    Decimal  @default(1) @db.Decimal(14, 3)
   unitPrice   BigInt
   lineTotal   BigInt
   accountId   String
   itemId      String?
-  cost        BigInt  @default(0)
+  cost        BigInt   @default(0)
+  taxRate     Decimal? @db.Decimal(7, 4)
+  taxAmount   BigInt   @default(0)
 
   receipt SalesReceipt   @relation(fields: [receiptId], references: [id], onDelete: Cascade)
   account Account        @relation(fields: [accountId], references: [id])
@@ -754,15 +764,17 @@ model DocumentSequence {
 }
 
 model RefundReceiptLine {
-  id          String  @id @default(cuid())
+  id          String   @id @default(cuid())
   refundId    String
   description String
-  quantity    Decimal @default(1) @db.Decimal(14, 3)
+  quantity    Decimal  @default(1) @db.Decimal(14, 3)
   unitPrice   BigInt
   lineTotal   BigInt
   accountId   String
   itemId      String?
-  cost        BigInt  @default(0) // COGS reversed / stock value restored
+  cost        BigInt   @default(0) // COGS reversed / stock value restored
+  taxRate     Decimal? @db.Decimal(7, 4)
+  taxAmount   BigInt   @default(0)
 
   refund  RefundReceipt  @relation(fields: [refundId], references: [id], onDelete: Cascade)
   account Account        @relation(fields: [accountId], references: [id])

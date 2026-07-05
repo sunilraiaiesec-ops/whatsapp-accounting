@@ -14,6 +14,7 @@ type Row = {
   quantity: string;
   unitPrice: string;
   accountId: string;
+  taxRate: string;
 };
 
 const initial: DocState = {};
@@ -22,6 +23,7 @@ const emptyRow = (): Row => ({
   quantity: "1",
   unitPrice: "",
   accountId: "",
+  taxRate: "",
 });
 
 export function DebitNoteForm({
@@ -47,11 +49,24 @@ export function DebitNoteForm({
     return BigInt(Math.round(qty * Number(price)));
   };
 
-  const total = useMemo(
+  const taxOf = (r: Row): bigint => {
+    const rate = parseFloat(r.taxRate);
+    const net = lineTotal(r);
+    if (!rate || rate <= 0 || net <= 0n) return 0n;
+    return BigInt(Math.round((Number(net) * rate) / 100));
+  };
+
+  const subtotal = useMemo(
     () => rows.reduce((s, r) => s + lineTotal(r), 0n),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [rows, currency],
   );
+  const taxTotal = useMemo(
+    () => rows.reduce((s, r) => s + taxOf(r), 0n),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rows, currency],
+  );
+  const total = subtotal + taxTotal;
 
   const linesPayload = useMemo(
     () =>
@@ -62,6 +77,7 @@ export function DebitNoteForm({
           quantity: r.quantity || "1",
           unitPrice: r.unitPrice || "0",
           accountId: r.accountId,
+          taxRate: r.taxRate.trim() || undefined,
         })),
     [rows],
   );
@@ -114,6 +130,7 @@ export function DebitNoteForm({
               <th className="px-3 py-2 font-medium">Description</th>
               <th className="w-20 px-3 py-2 text-right font-medium">Qty</th>
               <th className="w-32 px-3 py-2 text-right font-medium">Unit price</th>
+              <th className="w-20 px-3 py-2 text-right font-medium">Tax %</th>
               <th className="px-3 py-2 font-medium">Expense / asset account</th>
               <th className="w-32 px-3 py-2 text-right font-medium">Total</th>
               <th className="w-10" />
@@ -143,6 +160,15 @@ export function DebitNoteForm({
                     value={row.unitPrice}
                     onChange={(e) => update(i, { unitPrice: e.target.value })}
                     className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-right text-sm"
+                  />
+                </td>
+                <td className="px-3 py-2">
+                  <input
+                    inputMode="decimal"
+                    value={row.taxRate}
+                    onChange={(e) => update(i, { taxRate: e.target.value })}
+                    className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-right text-sm"
+                    placeholder="0"
                   />
                 </td>
                 <td className="px-3 py-2">
@@ -180,8 +206,30 @@ export function DebitNoteForm({
             ))}
           </tbody>
           <tfoot>
+            {taxTotal > 0n ? (
+              <>
+                <tr className="border-t border-slate-200 text-slate-600">
+                  <td className="px-3 py-1.5 text-right" colSpan={5}>
+                    Subtotal
+                  </td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">
+                    {formatAmount(subtotal, currency)}
+                  </td>
+                  <td />
+                </tr>
+                <tr className="text-slate-600">
+                  <td className="px-3 py-1.5 text-right" colSpan={5}>
+                    Tax
+                  </td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">
+                    {formatAmount(taxTotal, currency)}
+                  </td>
+                  <td />
+                </tr>
+              </>
+            ) : null}
             <tr className="border-t border-slate-200 bg-slate-50 font-medium">
-              <td className="px-3 py-2" colSpan={4}>
+              <td className="px-3 py-2" colSpan={5}>
                 <button
                   type="button"
                   onClick={() =>

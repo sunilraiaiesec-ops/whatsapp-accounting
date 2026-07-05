@@ -22,7 +22,9 @@ export default async function SalesInvoiceViewPage({
   const { invoice, entry, nav } = data;
 
   const cogs = invoice.lines.reduce((s, l) => s + l.cost, 0n);
-  const profit = invoice.total - cogs;
+  const tax = invoice.lines.reduce((s, l) => s + l.taxAmount, 0n);
+  const subtotal = invoice.lines.reduce((s, l) => s + l.lineTotal, 0n);
+  const profit = subtotal - cogs;
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -116,7 +118,7 @@ export default async function SalesInvoiceViewPage({
               <div className="w-full space-y-2 text-sm sm:w-56">
                 <div className="flex justify-between">
                   <span className="text-[var(--muted)]">Revenue</span>
-                  <span className="tabular-nums">{formatAmount(invoice.total, cur)}</span>
+                  <span className="tabular-nums">{formatAmount(subtotal, cur)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-[var(--muted)]">Cost of goods sold</span>
@@ -132,6 +134,18 @@ export default async function SalesInvoiceViewPage({
             ) : null}
 
             <div className="rounded-xl bg-slate-50 px-6 py-4 text-right sm:min-w-[220px]">
+              {tax > 0n ? (
+                <div className="mb-2 space-y-1 text-sm">
+                  <div className="flex justify-between gap-6">
+                    <span className="text-[var(--muted)]">Subtotal</span>
+                    <span className="tabular-nums text-slate-700">{formatAmount(subtotal, cur)}</span>
+                  </div>
+                  <div className="flex justify-between gap-6">
+                    <span className="text-[var(--muted)]">Tax</span>
+                    <span className="tabular-nums text-slate-700">{formatAmount(tax, cur)}</span>
+                  </div>
+                </div>
+              ) : null}
               <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
                 Total due
               </p>

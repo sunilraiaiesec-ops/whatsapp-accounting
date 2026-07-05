@@ -20,6 +20,9 @@ export default async function PurchaseInvoiceViewPage({
   if (!data) notFound();
   const { invoice, entry, nav } = data;
 
+  const tax = invoice.lines.reduce((s, l) => s + l.taxAmount, 0n);
+  const subtotal = invoice.lines.reduce((s, l) => s + l.lineTotal, 0n);
+
   return (
     <div className="mx-auto max-w-3xl">
       <DocToolbar
@@ -96,6 +99,26 @@ export default async function PurchaseInvoiceViewPage({
             ))}
           </tbody>
           <tfoot>
+            {tax > 0n ? (
+              <>
+                <tr className="text-slate-600">
+                  <td className="px-4 py-1.5 text-right" colSpan={3}>
+                    Subtotal
+                  </td>
+                  <td className="px-4 py-1.5 text-right tabular-nums">
+                    {formatAmount(subtotal, cur)}
+                  </td>
+                </tr>
+                <tr className="text-slate-600">
+                  <td className="px-4 py-1.5 text-right" colSpan={3}>
+                    Tax (recoverable)
+                  </td>
+                  <td className="px-4 py-1.5 text-right tabular-nums">
+                    {formatAmount(tax, cur)}
+                  </td>
+                </tr>
+              </>
+            ) : null}
             <tr className="font-semibold">
               <td className="px-4 py-2 text-right" colSpan={3}>
                 Total

@@ -60,6 +60,7 @@ export default async function EditSalesInvoicePage({
             unitPrice: formatAmount(l.unitPrice, ctx.baseCurrency),
             accountId: l.accountId,
             itemId: l.itemId ?? "",
+            taxRate: l.taxRate != null ? l.taxRate.toString() : "",
           })),
         }}
       />
