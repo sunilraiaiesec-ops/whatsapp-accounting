@@ -28,7 +28,15 @@ export async function listInventoryItems(orgId: string) {
 
 export function createInventoryItem(
   orgId: string,
-  input: { code: string; name: string; salePrice: bigint },
+  input: {
+    code: string;
+    name: string;
+    salePrice: bigint;
+    barcode?: string | null;
+    unit?: string | null;
+    reorderLevel?: number | string | null;
+    defaultTaxRate?: number | null;
+  },
 ) {
   if (!input.code.trim() || !input.name.trim()) {
     throw new DocumentError("Code and name are required");
@@ -39,6 +47,14 @@ export function createInventoryItem(
       code: input.code.trim(),
       name: input.name.trim(),
       salePrice: input.salePrice,
+      barcode: input.barcode?.trim() || null,
+      unit: input.unit?.trim() || null,
+      reorderLevel:
+        input.reorderLevel != null && String(input.reorderLevel).trim() !== ""
+          ? new Prisma.Decimal(input.reorderLevel)
+          : null,
+      defaultTaxRate:
+        input.defaultTaxRate != null ? new Prisma.Decimal(input.defaultTaxRate) : null,
     },
   });
 }

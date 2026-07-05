@@ -540,14 +540,18 @@ model DebitNoteLine {
 // account (1200). Average unit cost is derived as valueOnHand / qtyOnHand.
 // ---------------------------------------------------------------------------
 model InventoryItem {
-  id          String   @id @default(cuid())
-  orgId       String
-  code        String
-  name        String
-  salePrice   BigInt   @default(0)
-  qtyOnHand   Decimal  @default(0) @db.Decimal(18, 3)
-  valueOnHand BigInt   @default(0)
-  createdAt   DateTime @default(now())
+  id             String   @id @default(cuid())
+  orgId          String
+  code           String
+  name           String
+  salePrice      BigInt   @default(0)
+  qtyOnHand      Decimal  @default(0) @db.Decimal(18, 3)
+  valueOnHand    BigInt   @default(0)
+  barcode        String?
+  unit           String?
+  reorderLevel   Decimal? @db.Decimal(18, 3)
+  defaultTaxRate Decimal? @db.Decimal(7, 4)
+  createdAt      DateTime @default(now())
 
   org              Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
   receiptLines     GoodsReceiptLine[]

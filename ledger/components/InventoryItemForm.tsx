@@ -47,6 +47,40 @@ export function InventoryItemForm({ currency }: { currency: string }) {
           className="mt-1 w-32 rounded-lg border border-slate-300 px-3 py-2 text-right text-sm"
         />
       </label>
+      <label className="block">
+        <span className="text-xs font-medium text-slate-600">Barcode</span>
+        <input
+          name="barcode"
+          placeholder="Optional"
+          className="mt-1 w-40 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+        />
+      </label>
+      <label className="block">
+        <span className="text-xs font-medium text-slate-600">Unit</span>
+        <input
+          name="unit"
+          placeholder="e.g. case, unit, kg"
+          className="mt-1 w-32 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+        />
+      </label>
+      <label className="block">
+        <span className="text-xs font-medium text-slate-600">Reorder level</span>
+        <input
+          name="reorderLevel"
+          inputMode="decimal"
+          placeholder="0"
+          className="mt-1 w-28 rounded-lg border border-slate-300 px-3 py-2 text-right text-sm"
+        />
+      </label>
+      <label className="block">
+        <span className="text-xs font-medium text-slate-600">Tax %</span>
+        <input
+          name="defaultTaxRate"
+          inputMode="decimal"
+          placeholder="0"
+          className="mt-1 w-24 rounded-lg border border-slate-300 px-3 py-2 text-right text-sm"
+        />
+      </label>
       <button
         type="submit"
         disabled={pending}

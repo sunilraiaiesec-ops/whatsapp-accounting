@@ -35,11 +35,18 @@ export async function createInventoryItemAction(
   formData: FormData,
 ): Promise<InvState> {
   const ctx = await requireContext();
+  const taxRaw = String(formData.get("defaultTaxRate") || "").trim();
+  const taxRate = taxRaw ? Number(taxRaw) : null;
+  const reorderRaw = String(formData.get("reorderLevel") || "").trim();
   try {
     await createInventoryItem(ctx.orgId, {
       code: String(formData.get("code") || ""),
       name: String(formData.get("name") || ""),
       salePrice: parseAmount(String(formData.get("salePrice") || "0"), ctx.baseCurrency),
+      barcode: String(formData.get("barcode") || "") || null,
+      unit: String(formData.get("unit") || "") || null,
+      reorderLevel: reorderRaw || null,
+      defaultTaxRate: taxRate != null && Number.isFinite(taxRate) && taxRate > 0 ? taxRate : null,
     });
   } catch (err) {
     return fail(err);
