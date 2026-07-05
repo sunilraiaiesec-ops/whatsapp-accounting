@@ -629,6 +629,14 @@ export async function updateCreditNote(
   });
   if (!existing) throw new DocumentError("Credit note not found");
 
+  // Editing does not reverse/re-apply inventory restock, so refuse to touch a
+  // credit note that moves stock. Delete and recreate it instead.
+  if (existing.lines.some((l) => l.itemId) || input.lines.some((l) => l.itemId)) {
+    throw new DocumentError(
+      "This credit note returns inventory items and can't be edited. Delete it and create a new one.",
+    );
+  }
+
   const rawLines = input.lines.filter((l) => l.description.trim() && l.accountId);
   if (rawLines.length === 0) throw new DocumentError("Add at least one line");
 

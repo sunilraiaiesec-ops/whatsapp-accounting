@@ -9,11 +9,13 @@ import {
 import { parseAmount, formatAmount } from "@/lib/money";
 
 type Option = { id: string; label: string };
+type ItemOption = { id: string; label: string; name: string; salePrice: string };
 type Row = {
   description: string;
   quantity: string;
   unitPrice: string;
   accountId: string;
+  itemId: string;
 };
 
 const initial: DocState = {};
@@ -22,20 +24,26 @@ const emptyRow = (): Row => ({
   quantity: "1",
   unitPrice: "",
   accountId: "",
+  itemId: "",
 });
 
 export function CreditNoteForm({
   customers,
   incomeAccounts,
+  items = [],
+  salesAccountId = "",
   currency,
 }: {
   customers: Option[];
   incomeAccounts: Option[];
+  items?: ItemOption[];
+  salesAccountId?: string;
   currency: string;
 }) {
   const [state, action, pending] = useActionState(createCreditNoteAction, initial);
   const today = new Date().toISOString().slice(0, 10);
   const defaultAccount = incomeAccounts[0]?.id ?? "";
+  const showItems = items.length > 0;
   const [rows, setRows] = useState<Row[]>([
     { ...emptyRow(), accountId: defaultAccount },
   ]);
@@ -62,12 +70,35 @@ export function CreditNoteForm({
           quantity: r.quantity || "1",
           unitPrice: r.unitPrice || "0",
           accountId: r.accountId,
+          itemId: showItems ? r.itemId || undefined : undefined,
         })),
-    [rows],
+    [rows, showItems],
   );
 
   const update = (i: number, patch: Partial<Row>) =>
     setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+
+  const selectItem = (i: number, itemId: string) => {
+    if (!itemId) {
+      update(i, { itemId: "" });
+      return;
+    }
+    const item = items.find((it) => it.id === itemId);
+    if (!item) return;
+    setRows((prev) =>
+      prev.map((r, idx) =>
+        idx === i
+          ? {
+              ...r,
+              itemId,
+              accountId: salesAccountId || r.accountId,
+              unitPrice: item.salePrice,
+              description: r.description.trim() ? r.description : item.name,
+            }
+          : r,
+      ),
+    );
+  };
 
   return (
     <form action={action} className="mt-6 space-y-5">
@@ -109,6 +140,7 @@ export function CreditNoteForm({
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+              {showItems ? <th className="px-3 py-2 font-medium">Item</th> : null}
               <th className="px-3 py-2 font-medium">Description</th>
               <th className="w-20 px-3 py-2 text-right font-medium">Qty</th>
               <th className="w-32 px-3 py-2 text-right font-medium">Unit price</th>
@@ -120,6 +152,22 @@ export function CreditNoteForm({
           <tbody>
             {rows.map((row, i) => (
               <tr key={i} className="border-b border-slate-100 last:border-0">
+                {showItems ? (
+                  <td className="px-3 py-2">
+                    <select
+                      value={row.itemId}
+                      onChange={(e) => selectItem(i, e.target.value)}
+                      className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+                    >
+                      <option value="">— none —</option>
+                      {items.map((it) => (
+                        <option key={it.id} value={it.id}>
+                          {it.label}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                ) : null}
                 <td className="px-3 py-2">
                   <input
                     value={row.description}
@@ -179,7 +227,7 @@ export function CreditNoteForm({
           </tbody>
           <tfoot>
             <tr className="border-t border-slate-200 bg-slate-50 font-medium">
-              <td className="px-3 py-2" colSpan={4}>
+              <td className="px-3 py-2" colSpan={showItems ? 5 : 4}>
                 <button
                   type="button"
                   onClick={() =>

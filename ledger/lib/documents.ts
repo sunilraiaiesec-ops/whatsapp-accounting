@@ -363,6 +363,78 @@ function computeLineTotal(quantity: string, unitPrice: bigint): bigint {
   return BigInt(total.toFixed(0));
 }
 
+// Cost basis for goods coming back into stock on a return. Normally the item's
+// current weighted-average cost; if nothing is on hand (average undefined) we
+// fall back to the most recent purchase cost so the returned units re-enter at
+// a sensible value rather than zero.
+async function lastKnownUnitCost(
+  tx: Prisma.TransactionClient,
+  orgId: string,
+  itemId: string,
+): Promise<Prisma.Decimal> {
+  const gr = await tx.goodsReceiptLine.findFirst({
+    where: { itemId, receipt: { orgId } },
+    orderBy: { receipt: { date: "desc" } },
+    select: { unitCost: true },
+  });
+  if (gr) return new Prisma.Decimal(gr.unitCost.toString());
+  const pl = await tx.paymentLine.findFirst({
+    where: { itemId, unitCost: { not: null }, payment: { orgId } },
+    orderBy: { payment: { date: "desc" } },
+    select: { unitCost: true },
+  });
+  if (pl?.unitCost != null) return new Prisma.Decimal(pl.unitCost.toString());
+  return new Prisma.Decimal(0);
+}
+
+// For a sales return (credit note / refund receipt), put any inventory-item
+// lines back into stock at weighted-average cost and report the per-line cost
+// so the caller can post the matching Dr Inventory / Cr COGS reversal. Updates
+// the item subledger in place. Returns aligned per-line costs (0 for non-item
+// lines) and their total.
+async function restockReturnedItems(
+  tx: Prisma.TransactionClient,
+  orgId: string,
+  lines: { itemId?: string | null; quantity: string }[],
+): Promise<{ lineCosts: bigint[]; restockTotal: bigint }> {
+  const itemState = new Map<string, { qty: Prisma.Decimal; value: bigint }>();
+  const lineCosts: bigint[] = [];
+  let restockTotal = 0n;
+
+  for (const l of lines) {
+    if (!l.itemId) {
+      lineCosts.push(0n);
+      continue;
+    }
+    let state = itemState.get(l.itemId);
+    if (!state) {
+      const item = await tx.inventoryItem.findFirstOrThrow({
+        where: { id: l.itemId, orgId },
+      });
+      state = { qty: new Prisma.Decimal(item.qtyOnHand), value: item.valueOnHand };
+      itemState.set(l.itemId, state);
+    }
+    const qty = new Prisma.Decimal(l.quantity || "0");
+    const unitCost = state.qty.gt(0)
+      ? new Prisma.Decimal(state.value.toString()).div(state.qty)
+      : await lastKnownUnitCost(tx, orgId, l.itemId);
+    const cost = BigInt(unitCost.times(qty).toFixed(0));
+    state.qty = state.qty.plus(qty);
+    state.value += cost;
+    lineCosts.push(cost);
+    restockTotal += cost;
+  }
+
+  for (const [itemId, state] of itemState) {
+    await tx.inventoryItem.update({
+      where: { id: itemId },
+      data: { qtyOnHand: state.qty, valueOnHand: state.value },
+    });
+  }
+
+  return { lineCosts, restockTotal };
+}
+
 export async function createSalesInvoice(
   orgId: string,
   input: {
@@ -658,16 +730,31 @@ export async function createRefundReceipt(
   if (total <= 0n) throw new DocumentError("Refund total must be positive");
 
   return prisma.$transaction(async (tx) => {
+    // Returned goods go back into stock; reverse their cost of goods sold.
+    const { lineCosts, restockTotal } = await restockReturnedItems(tx, orgId, lines);
+
+    const entryLines: {
+      accountId: string;
+      debit?: bigint;
+      credit?: bigint;
+    }[] = [
+      ...lines.map((l) => ({ accountId: l.accountId, debit: l.lineTotal })),
+      { accountId: input.bankAccountId, credit: total },
+    ];
+    if (restockTotal > 0n) {
+      const cogs = await cogsAccount(orgId);
+      const inv = await inventoryAccount(orgId);
+      entryLines.push({ accountId: inv.id, debit: restockTotal });
+      entryLines.push({ accountId: cogs.id, credit: restockTotal });
+    }
+
     const entry = await postEntryWithin(tx, {
       orgId,
       entryDate: input.date,
       description: input.notes ?? null,
       reference: input.reference ?? null,
       sourceType: "refund_receipt",
-      lines: [
-        ...lines.map((l) => ({ accountId: l.accountId, debit: l.lineTotal })),
-        { accountId: input.bankAccountId, credit: total },
-      ],
+      lines: entryLines,
     });
 
     const number = await nextDocNumber(tx, orgId, "RR");
@@ -683,12 +770,14 @@ export async function createRefundReceipt(
         total,
         journalEntryId: entry.id,
         lines: {
-          create: lines.map((l) => ({
+          create: lines.map((l, i) => ({
             description: l.description.trim(),
             quantity: new Prisma.Decimal(l.quantity || "0"),
             unitPrice: l.unitPrice,
             lineTotal: l.lineTotal,
             accountId: l.accountId,
+            itemId: l.itemId ?? null,
+            cost: lineCosts[i],
           })),
         },
       },
@@ -865,16 +954,32 @@ export async function createCreditNote(
   return prisma.$transaction(async (tx) => {
     const ar = await receivableAccount(orgId);
 
+    // Returned goods go back into stock; reverse their cost of goods sold.
+    const { lineCosts, restockTotal } = await restockReturnedItems(tx, orgId, lines);
+
+    const entryLines: {
+      accountId: string;
+      debit?: bigint;
+      credit?: bigint;
+      partyId?: string | null;
+    }[] = [
+      ...lines.map((l) => ({ accountId: l.accountId, debit: l.lineTotal })),
+      { accountId: ar.id, credit: total, partyId: input.partyId },
+    ];
+    if (restockTotal > 0n) {
+      const cogs = await cogsAccount(orgId);
+      const inv = await inventoryAccount(orgId);
+      entryLines.push({ accountId: inv.id, debit: restockTotal });
+      entryLines.push({ accountId: cogs.id, credit: restockTotal });
+    }
+
     const entry = await postEntryWithin(tx, {
       orgId,
       entryDate: input.date,
       description: input.notes ?? null,
       reference: input.reference ?? null,
       sourceType: "credit_note",
-      lines: [
-        ...lines.map((l) => ({ accountId: l.accountId, debit: l.lineTotal })),
-        { accountId: ar.id, credit: total, partyId: input.partyId },
-      ],
+      lines: entryLines,
     });
 
     const number = await nextDocNumber(tx, orgId, "CN");
@@ -889,12 +994,14 @@ export async function createCreditNote(
         total,
         journalEntryId: entry.id,
         lines: {
-          create: lines.map((l) => ({
+          create: lines.map((l, i) => ({
             description: l.description.trim(),
             quantity: new Prisma.Decimal(l.quantity || "0"),
             unitPrice: l.unitPrice,
             lineTotal: l.lineTotal,
             accountId: l.accountId,
+            itemId: l.itemId ?? null,
+            cost: lineCosts[i],
           })),
         },
       },

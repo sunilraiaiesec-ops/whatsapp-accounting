@@ -446,17 +446,41 @@ async function runOp(s: AgentState, op: OpType): Promise<void> {
       break;
     }
     case "refundReceipt": {
-      const amount = money(2000 + rng() * 60000);
-      await createRefundReceipt(s.orgId, { bankAccountId: bank.id, partyId: choose(rng, s.customers), date, lines: [{ description: "Refund to customer", quantity: "1", unitPrice: amount, accountId: choose(rng, s.incomeIds) }] });
-      s.cashBalance -= amount;
+      const party = choose(rng, s.customers);
+      // ~half of refunds for inventory businesses return physical goods, which
+      // must restock inventory and reverse COGS. We deliberately allow items
+      // with zero stock too, to exercise the last-known-cost fallback.
+      if (s.profile.usesInventory && s.items.length > 0 && rng() > 0.5) {
+        const it = choose(rng, s.items);
+        const qty = 1 + Math.floor(rng() * 3);
+        const total = BigInt(qty) * it.salePrice;
+        await createRefundReceipt(s.orgId, { bankAccountId: bank.id, partyId: party, date, lines: [{ description: "Returned goods", quantity: String(qty), unitPrice: it.salePrice, accountId: sales.id, itemId: it.id }] });
+        s.stock.set(it.id, (s.stock.get(it.id) ?? 0) + qty);
+        s.cashBalance -= total;
+        bump(s, "itemReturnRestock");
+      } else {
+        const amount = money(2000 + rng() * 60000);
+        await createRefundReceipt(s.orgId, { bankAccountId: bank.id, partyId: party, date, lines: [{ description: "Refund to customer", quantity: "1", unitPrice: amount, accountId: choose(rng, s.incomeIds) }] });
+        s.cashBalance -= amount;
+      }
       bump(s, op);
       break;
     }
     case "creditNote": {
       const party = choose(rng, s.customers);
-      const amount = money(2000 + rng() * 40000);
-      await createCreditNote(s.orgId, { partyId: party, date, lines: [{ description: "Sales return", quantity: "1", unitPrice: amount, accountId: sales.id }] });
-      s.ar.set(party, (s.ar.get(party) ?? 0n) - amount);
+      if (s.profile.usesInventory && s.items.length > 0 && rng() > 0.5) {
+        const it = choose(rng, s.items);
+        const qty = 1 + Math.floor(rng() * 3);
+        const total = BigInt(qty) * it.salePrice;
+        await createCreditNote(s.orgId, { partyId: party, date, lines: [{ description: "Returned goods", quantity: String(qty), unitPrice: it.salePrice, accountId: sales.id, itemId: it.id }] });
+        s.stock.set(it.id, (s.stock.get(it.id) ?? 0) + qty);
+        s.ar.set(party, (s.ar.get(party) ?? 0n) - total);
+        bump(s, "itemReturnRestock");
+      } else {
+        const amount = money(2000 + rng() * 40000);
+        await createCreditNote(s.orgId, { partyId: party, date, lines: [{ description: "Sales return", quantity: "1", unitPrice: amount, accountId: sales.id }] });
+        s.ar.set(party, (s.ar.get(party) ?? 0n) - amount);
+      }
       bump(s, op);
       break;
     }

@@ -61,7 +61,14 @@ export default async function RefundReceiptViewPage({
           <tbody>
             {refund.lines.map((l) => (
               <tr key={l.id} className="border-b border-slate-200">
-                <td className="px-4 py-2">{l.description}</td>
+                <td className="px-4 py-2">
+                  {l.description}
+                  {l.itemId && l.cost > 0n ? (
+                    <span className="ml-2 text-xs text-emerald-600">
+                      returned to stock · cost {formatAmount(l.cost, cur)}
+                    </span>
+                  ) : null}
+                </td>
                 <td className="px-4 py-2 text-right tabular-nums">{l.quantity.toString()}</td>
                 <td className="px-4 py-2 text-right tabular-nums">
                   {formatAmount(l.unitPrice, cur)}

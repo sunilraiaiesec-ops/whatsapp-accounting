@@ -51,7 +51,9 @@ export function CashSaleForm({
   defaults?: { partyId?: string };
 }) {
   const isSale = mode === "sales_receipt";
-  const showItems = isSale && items.length > 0;
+  // Both cash sales and refunds can involve inventory items: a sale ships
+  // stock out, a refund brings returned stock back in.
+  const showItems = items.length > 0;
 
   const [state, action, pending] = useActionState(
     isSale ? createSalesReceiptAction : createRefundReceiptAction,
@@ -121,7 +123,7 @@ export function CashSaleForm({
   const saveLabel = isSale ? "Save sales receipt" : "Save refund";
   const posting = isSale
     ? "Posts money into the account you choose and records the sale as income (stock items reduce inventory and post cost of goods sold)."
-    : "Pays the refund out of the account you choose and reverses the income.";
+    : "Pays the refund out of the account you choose and reverses the income (stock items are returned to inventory, reversing cost of goods sold).";
 
   return (
     <form action={action} className="space-y-6">

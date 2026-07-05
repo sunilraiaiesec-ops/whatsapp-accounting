@@ -476,9 +476,12 @@ model CreditNoteLine {
   unitPrice   BigInt
   lineTotal   BigInt
   accountId   String
+  itemId      String?
+  cost        BigInt  @default(0) // COGS reversed / stock value restored
 
-  note    CreditNote @relation(fields: [noteId], references: [id], onDelete: Cascade)
-  account Account    @relation(fields: [accountId], references: [id])
+  note    CreditNote     @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  account Account        @relation(fields: [accountId], references: [id])
+  item    InventoryItem? @relation(fields: [itemId], references: [id])
 
   @@index([noteId])
   @@map("credit_note_lines")
@@ -544,6 +547,8 @@ model InventoryItem {
   adjustmentLines  InventoryAdjustmentLine[]
   salesInvoiceLines SalesInvoiceLine[]
   salesReceiptLines SalesReceiptLine[]
+  creditNoteLines   CreditNoteLine[]
+  refundReceiptLines RefundReceiptLine[]
   paymentLines     PaymentLine[]
 
   @@unique([orgId, code])
@@ -756,9 +761,12 @@ model RefundReceiptLine {
   unitPrice   BigInt
   lineTotal   BigInt
   accountId   String
+  itemId      String?
+  cost        BigInt  @default(0) // COGS reversed / stock value restored
 
-  refund  RefundReceipt @relation(fields: [refundId], references: [id], onDelete: Cascade)
-  account Account       @relation(fields: [accountId], references: [id])
+  refund  RefundReceipt  @relation(fields: [refundId], references: [id], onDelete: Cascade)
+  account Account        @relation(fields: [accountId], references: [id])
+  item    InventoryItem? @relation(fields: [itemId], references: [id])
 
   @@index([refundId])
   @@map("refund_receipt_lines")

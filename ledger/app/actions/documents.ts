@@ -117,6 +117,7 @@ function parseInvoiceLines(formData: FormData, currency: string) {
     quantity?: string;
     unitPrice?: string;
     accountId?: string;
+    itemId?: string;
   }[];
   try {
     raw = JSON.parse(String(formData.get("lines") || "[]"));
@@ -130,6 +131,7 @@ function parseInvoiceLines(formData: FormData, currency: string) {
       quantity: (l.quantity ?? "1").trim() || "1",
       unitPrice: parseAmount(l.unitPrice ?? "0", currency),
       accountId: l.accountId as string,
+      itemId: l.itemId || null,
     }));
 }
 

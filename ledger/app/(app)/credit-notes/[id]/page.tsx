@@ -71,6 +71,11 @@ export default async function CreditNoteViewPage({
                 <td className="px-4 py-2">
                   {l.description}
                   <span className="ml-2 text-xs text-slate-400">{l.account.name}</span>
+                  {l.itemId && l.cost > 0n ? (
+                    <span className="ml-2 text-xs text-emerald-600">
+                      returned to stock · cost {formatAmount(l.cost, cur)}
+                    </span>
+                  ) : null}
                 </td>
                 <td className="px-4 py-2 text-right tabular-nums">
                   {l.quantity.toString()}
