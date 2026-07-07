@@ -12,7 +12,16 @@ import {
 // action types, and forces a JSON-only reply matching the TS/zod schema. When
 // unsure the model MUST return { action: "unknown" } with low confidence so we
 // never post a wrong entry.
-function buildSystemPrompt(today: string): string {
+// QA Reliability Swarm (Track 9): `summary` must always be written in the
+// UI's DISPLAY locale, never in whatever language the input happened to be
+// typed in — a French-UI user typing an English command (or vice versa)
+// should still see the one-line summary in French. See the doc comment on
+// `ExtractInput.locale` below for how this reaches here.
+function summaryLanguageName(locale: "en" | "fr"): string {
+  return locale === "fr" ? "French" : "English";
+}
+
+function buildSystemPrompt(today: string, locale: "en" | "fr"): string {
   return `You are Bantoo, an extraction engine for BantooBooks, an accounting and inventory app used by small grocery shops in Cameroon. Today's date is ${today}. The base currency is XAF (Central African CFA franc), which has ZERO decimal places. Amounts are whole numbers (e.g. 45000, not 45000.00).
 
 Your job: read the user's text and/or attached image(s) and return a SINGLE JSON object describing ONE action. Reply with ONLY the JSON object, no prose, no markdown.
@@ -32,7 +41,7 @@ Classify "action" as exactly one of:
 - "contact_customer": the user wants to call, WhatsApp, or email a specific customer. Fields: customer_name, method ("call", "whatsapp", or "email").
 - "customer_query": a free-text question about a specific customer's history, e.g. "what did Musa buy last month". Fields: customer_name, question (the raw question), period_text (a raw phrase like "last month", if present).
 - "unsupported_customer_action": the user asked to archive, reactivate, merge, or upload a document for a customer — these are recognized but NOT YET buildable, so classify them here confidently instead of "unknown". Fields: customer_name, requested (one of "archive", "reactivate", "merge", "upload_document").
-- "create_supplier": add a NEW supplier contact (no purchase or bill involved). Fields: supplier_name, city (optional), phone (optional), whatsapp (optional — if the message says the WhatsApp is "the same number" as the phone, repeat the phone value here), country (optional), note (optional — an internal note to save on the record, e.g. "delivers on Tuesdays" or "I'll be buying sesame from him every month"), post_action (optional — "open_profile" if the user also asked to open/view/see the new supplier's profile after saving), unsupported_requests (optional array of short phrases for anything else requested that isn't one of these fields), currency. IMPORTANT: exactly like create_customer, a single message is often a COMPOUND request — extract EVERY field it mentions (name, city, phone, whatsapp, note, post_action) into this ONE action object, in ANY sentence order (the name/details may come first and the explicit "save/add/register ... as a supplier" phrasing may come later, or vice versa) — never drop a field just because the supplier phrasing appears elsewhere in the message.
+- "create_supplier": add a NEW supplier contact (no purchase or bill involved). Fields: supplier_name, city (optional), phone (optional), whatsapp (optional — if the message says the WhatsApp is "the same number" as the phone, repeat the phone value here), country (optional), email (optional), company_name (optional — ONLY set this when a business/company name is mentioned that is DIFFERENT from supplier_name itself, same rule as create_customer's company_name), tax_id (optional — a tax ID / business registration number, e.g. "Tax ID CM-MR-2026-0099" or "numéro fiscal ..."), payment_terms_days (optional — a plain number of days from phrasing like "payment terms 60 days", "net 30", "conditions de paiement 60 jours"; NEVER invent a number when none is stated), credit_limit (optional — a MAJOR-unit amount from phrasing like "credit limit 3,000,000 XAF", "limite de crédit 3 000 000 XAF"), default_discount (optional — a percentage number), preferred_language (optional), preferred_payment_method (optional — e.g. "mobile money", "cash", "bank transfer" if stated), note (optional — an internal note to save on the record, e.g. "delivers on Tuesdays" or "I'll be buying sesame from him every month"), post_action (optional — "open_profile" if the user also asked to open/view/see the new supplier's profile after saving), unsupported_requests (optional array of short phrases for anything else requested that isn't one of these fields), currency. IMPORTANT: exactly like create_customer, a single message is often a COMPOUND request — extract EVERY field it mentions (name, city, phone, whatsapp, email, tax_id, payment_terms_days, credit_limit, default_discount, note, post_action) into this ONE action object, in ANY sentence order (the name/details may come first and the explicit "save/add/register ... as a supplier" phrasing may come later, or vice versa) — never drop a field just because the supplier phrasing appears elsewhere in the message.
 - "edit_supplier": change details on an EXISTING supplier (rename, or update city/phone/whatsapp/email). Fields: supplier_name (who to find), new_name (optional, only if renaming), city, phone, whatsapp, email (each optional — only the ones being changed).
 - "view_supplier": open/show/find a supplier's page — profile, ledger/transactions, or documents — with NO changes to data. Fields: supplier_name (omit only for a generic "search suppliers" with no name), view (one of "profile", "ledger", "documents", "list" — there is NO "statement" option for suppliers, unlike customers).
 - "supplier_balance": the user is asking how much the business owes a specific supplier / the outstanding payable balance with them. Fields: supplier_name.
@@ -60,7 +69,7 @@ Any command about an EXISTING supplier (not a new purchase/receipt/bill transact
 DISAMBIGUATION RULE for the four sales-document actions — they are NEVER interchangeable, since each hits the books differently: "sales_receipt" is cash received NOW for a sale (e.g. "Record a cash sale of 20,000 from Musa", "Vente au comptant de 20 000 à Musa" — no document keyword needed, just an implied or explicit cash sale); "sales_invoice" REQUIRES an explicit document keyword ("invoice"/"facture") and means the customer will pay LATER, nothing is received today (e.g. "Create an invoice for Musa for 50,000, due in 30 days", "Facturer Musa 50 000"); "credit_note" REQUIRES "credit note"/"note de crédit" and reduces a customer's balance with NO cash movement (e.g. "Issue a credit note to Musa for 5,000"); "refund_receipt" REQUIRES "refund"/"remboursement" and is cash actually paid back OUT to a customer (e.g. "Issue a refund to Musa for 5,000", "Rembourser Musa 5 000"). Never guess "sales_invoice"/"credit_note"/"refund_receipt" without that literal keyword present — plain "sale"/"vente" wording alone is always "sales_receipt".
 
 Rules:
-- Always include "action", "confidence" (0..1), "currency" (default "XAF"), and "summary" (a short human sentence describing the action in the user's language).
+- Always include "action", "confidence" (0..1), "currency" (default "XAF"), and "summary" (a short human sentence describing the action). Write "summary" in ${summaryLanguageName(locale)}, regardless of what language the user's own message is written in — the summary must match the app's current display language, not the input language.
 - Compound messages (several sentences about the SAME person/customer/supplier) still classify as ONE action — read the whole message and fill in every field that action's schema supports (e.g. create_customer's or create_supplier's city AND phone AND whatsapp AND note AND post_action) instead of only extracting the first fact mentioned.
 - Set unused/absent fields to null. Do NOT invent names, amounts, or barcodes that are not present.
 - Amounts and prices are in MAJOR currency units exactly as written/said (no thousands separators).
@@ -91,6 +100,12 @@ export type ExtractInput = {
   text?: string | null;
   images?: AiImageInput[];
   today?: string;
+  // QA Reliability Swarm (Track 9): the caller's current UI display locale —
+  // NOT detected/guessed from the input text. Controls only the language the
+  // AI writes "summary" in (see buildSystemPrompt); every other field stays
+  // exactly as extracted regardless of locale. Defaults to "en" when omitted
+  // (e.g. existing callers/tests that don't care about summary language).
+  locale?: "en" | "fr";
 };
 
 // Runs the AI extraction and validates the result with zod. Any malformed model
@@ -101,11 +116,12 @@ export async function extractBantooAction(
   input: ExtractInput,
 ): Promise<ExtractedAction> {
   const today = input.today ?? new Date().toISOString().slice(0, 10);
+  const locale = input.locale ?? "en";
   const provider = getAiProvider();
   const hasImages = Boolean(input.images && input.images.length > 0);
 
   const raw = await provider.extractJson({
-    system: buildSystemPrompt(today),
+    system: buildSystemPrompt(today, locale),
     user: buildUserMessage(input.text, hasImages),
     images: input.images,
   });

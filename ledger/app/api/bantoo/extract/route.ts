@@ -9,6 +9,7 @@ import {
 } from "@/lib/ai/provider";
 import { consumeAiCredit } from "@/lib/billing/ai-credits";
 import { ruleBasedExtract, blendExtraction } from "@/lib/bantoo/fallback";
+import { resolveUiLocale } from "@/lib/bantoo/locale";
 import { resolveExtraction } from "@/lib/bantoo/resolve";
 import { rateLimit, RATE_LIMITS } from "@/lib/bantoo/rate-limit";
 import type { ExtractedAction } from "@/lib/ai/actions";
@@ -32,6 +33,8 @@ export async function POST(request: Request) {
   if (!ctx) {
     return NextResponse.json({ error: "Please sign in again." }, { status: 401 });
   }
+
+  const locale = await resolveUiLocale();
 
   let formData: FormData;
   try {
@@ -132,7 +135,7 @@ export async function POST(request: Request) {
       aiFallback = true;
     } else {
       try {
-        action = await extractBantooAction({ text: combinedText, images });
+        action = await extractBantooAction({ text: combinedText, images, locale });
         if (hasText) {
           action = blendExtraction(combinedText, action);
         }

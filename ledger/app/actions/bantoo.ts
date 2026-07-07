@@ -16,6 +16,7 @@ import {
 } from "@/lib/documents";
 import { createInventoryItem, receiveGoods } from "@/lib/inventory";
 import { MATCH_HIGH } from "@/lib/bantoo/match";
+import { resolveUiLocale, tCommand } from "@/lib/bantoo/locale";
 import { formatAmount, parseAmount } from "@/lib/money";
 import { createParty, findPossiblePartyDuplicates, updateParty, updatePartyNotes } from "@/lib/parties";
 import { getPartyBalance } from "@/lib/party-ledger";
@@ -100,6 +101,9 @@ const draftSchema = z.object({
   amount: z.string().max(50).default(""),
   partyName: z.string().max(200).default(""),
   city: z.string().max(200).default(""),
+  // QA Reliability Swarm (Track 1): see the doc comment on BantooDraft.country
+  // in lib/bantoo/types.ts for why this was silently dropped before.
+  country: z.string().max(200).default(""),
   paymentMethod: z.string().max(100).default(""),
   description: z.string().max(500).default(""),
   date: z.string().max(40).default(""),
@@ -176,6 +180,7 @@ async function ensurePartyId(
     city?: string | null;
     phone?: string | null;
     whatsapp?: string | null;
+    country?: string | null;
     // Skips the fuzzy-match safety net below and always creates a brand-new
     // party. ONLY set this when the user has already been shown the
     // possible-duplicate-customer prompt (resolve.ts's duplicateCandidate)
@@ -218,7 +223,41 @@ async function ensurePartyId(
         name: input.partyName,
       });
       const highConfidence = duplicates.find((d) => d.score >= MATCH_HIGH);
-      if (highConfidence) return highConfidence.id;
+      if (highConfidence) {
+        // QA Reliability Swarm (Track 3/10) fix: this safety net is
+        // type-UNAWARE by design (it matches on phone/WhatsApp too, which
+        // don't carry a role), so e.g. a create_supplier request can
+        // silently reuse an existing CUSTOMER-only party. Before this fix,
+        // the id was returned as-is: `type` was never upgraded to "both",
+        // so the party stayed invisible to the new role's own lists/lookups
+        // forever, and — because this early return skips createParty()
+        // below entirely — city/phone/whatsapp/country from THIS request
+        // were silently discarded even though execute() reported success.
+        // This isn't limited to the dual-role case: a SAME-type high-
+        // confidence match (e.g. a supplier fuzzy-matching another supplier
+        // by phone) hits this exact same early return and had the identical
+        // silent-drop bug — see qa-swarm-10-persistence-nav.test.ts's "path
+        // (b)" case. The enrichment below always runs; only the `type: "both"`
+        // upgrade is conditional on the roles actually differing.
+        const upgrade: { type?: string; city?: string; phone?: string; whatsapp?: string; country?: string } = {};
+        if (highConfidence.type !== input.type && highConfidence.type !== "both") {
+          upgrade.type = "both";
+        }
+        // Never silently overwrite a value already on file — which of two
+        // conflicting values should "win" is a genuine, still-open product
+        // decision (see this file's module doc comment); only fill in
+        // fields the existing record doesn't have yet, so the common
+        // (non-conflicting) case is fixed without silently guessing an
+        // answer to that open question.
+        if (input.city?.trim() && !highConfidence.city) upgrade.city = input.city.trim();
+        if (input.phone?.trim() && !highConfidence.phone) upgrade.phone = input.phone.trim();
+        if (input.whatsapp?.trim() && !highConfidence.whatsapp) upgrade.whatsapp = input.whatsapp.trim();
+        if (input.country?.trim() && !highConfidence.country) upgrade.country = input.country.trim();
+        if (Object.keys(upgrade).length > 0) {
+          await updateParty(ctx.orgId, highConfidence.id, upgrade);
+        }
+        return highConfidence.id;
+      }
     }
 
     const created = await createParty(ctx.orgId, {
@@ -227,6 +266,7 @@ async function ensurePartyId(
       city: input.city?.trim() || null,
       phone: input.phone?.trim() || null,
       whatsapp: input.whatsapp?.trim() || null,
+      country: input.country?.trim() || null,
     });
     return created.id;
   }
@@ -281,6 +321,14 @@ export async function executeBantooAction(
   raw: ExecuteBantooInput,
 ): Promise<BantooExecuteResult> {
   const ctx = await requireContext();
+  // QA Reliability Swarm (Track 9): resolved once per call and reused by
+  // every t()-backed success/error string below, via the same
+  // cookie/header-based resolution the AI-extraction route and the page
+  // itself use — see lib/bantoo/locale.ts's doc comment for why this can't
+  // just call next-intl/server's getTranslations() directly (this action is
+  // invoked directly, with no request scope, by dozens of unit tests).
+  const locale = await resolveUiLocale();
+  const t = (key: string, params?: Record<string, string | number>) => tCommand(locale, key, params);
 
   const parsed = inputSchema.safeParse(raw);
   if (!parsed.success) {
@@ -534,6 +582,7 @@ export async function executeBantooAction(
             city?: string;
             phone?: string;
             whatsapp?: string;
+            country?: string;
             email?: string;
             companyName?: string;
             taxId?: string;
@@ -546,6 +595,7 @@ export async function executeBantooAction(
           if (draft.city.trim()) enrichment.city = draft.city;
           if (draft.phone.trim()) enrichment.phone = draft.phone;
           if (draft.whatsapp.trim()) enrichment.whatsapp = draft.whatsapp;
+          if (draft.country.trim()) enrichment.country = draft.country;
           if (draft.email.trim()) enrichment.email = draft.email;
           if (draft.companyName.trim()) enrichment.companyName = draft.companyName;
           if (draft.taxId.trim()) enrichment.taxId = draft.taxId;
@@ -584,6 +634,7 @@ export async function executeBantooAction(
           city: draft.city,
           phone: draft.phone,
           whatsapp: draft.whatsapp,
+          country: draft.country,
           // See ensurePartyId's forceCreate doc comment: only true when the
           // user explicitly chose "create as a new customer with the same
           // name" in the duplicate-review prompt this exact request already
@@ -664,6 +715,52 @@ export async function executeBantooAction(
             select: { id: true, name: true, notes: true },
           });
           if (!found) return { ok: false, error: "That supplier was not found." };
+
+          // QA Reliability Swarm (Track 2/10) fix: this "use existing
+          // supplier" branch used to only ever append the note — city,
+          // phone, WhatsApp, and every extended profile field submitted with
+          // THIS request were silently discarded whenever the party already
+          // existed, even though the confirmation plan showed them as
+          // "ready". Mirrors create_customer's enrichment block exactly
+          // (same "only non-empty submitted fields, never blank out
+          // something already on file" semantics).
+          const enrichment: {
+            city?: string;
+            phone?: string;
+            whatsapp?: string;
+            country?: string;
+            email?: string;
+            companyName?: string;
+            taxId?: string;
+            paymentTermsDays?: number;
+            creditLimit?: bigint;
+            defaultDiscount?: string;
+            preferredLanguage?: string;
+            preferredPaymentMethod?: string;
+          } = {};
+          if (draft.city.trim()) enrichment.city = draft.city;
+          if (draft.phone.trim()) enrichment.phone = draft.phone;
+          if (draft.whatsapp.trim()) enrichment.whatsapp = draft.whatsapp;
+          if (draft.country.trim()) enrichment.country = draft.country;
+          if (draft.email.trim()) enrichment.email = draft.email;
+          if (draft.companyName.trim()) enrichment.companyName = draft.companyName;
+          if (draft.taxId.trim()) enrichment.taxId = draft.taxId;
+          if (draft.paymentTermsDays.trim()) {
+            const days = Number(draft.paymentTermsDays);
+            if (Number.isFinite(days) && days > 0) enrichment.paymentTermsDays = days;
+          }
+          if (draft.creditLimit.trim()) {
+            const limit = parseAmount(draft.creditLimit, cur);
+            if (limit > 0n) enrichment.creditLimit = limit;
+          }
+          if (draft.defaultDiscount.trim()) enrichment.defaultDiscount = draft.defaultDiscount;
+          if (draft.preferredLanguage.trim()) enrichment.preferredLanguage = draft.preferredLanguage;
+          if (draft.preferredPaymentMethod.trim())
+            enrichment.preferredPaymentMethod = draft.preferredPaymentMethod;
+          if (Object.keys(enrichment).length > 0) {
+            await updateParty(ctx.orgId, found.id, enrichment);
+          }
+
           if (draft.note.trim()) {
             await appendPartyNote(ctx.orgId, found.id, found.notes, draft.note.trim(), date);
           }
@@ -683,6 +780,11 @@ export async function executeBantooAction(
           city: draft.city,
           phone: draft.phone,
           whatsapp: draft.whatsapp,
+          country: draft.country,
+          // See ensurePartyId's forceCreate doc comment and create_customer's
+          // identical usage above — same duplicate-choice-prompt contract,
+          // now ported to create_supplier (QA Reliability Swarm Track 4).
+          forceCreate: input.duplicateResolution === "create_new",
         });
         if (!supplierId) return { ok: false, error: "Enter the supplier name." };
 
@@ -691,6 +793,37 @@ export async function executeBantooAction(
           select: { id: true, name: true, notes: true },
         });
         if (!party) return { ok: false, error: "Could not save the supplier." };
+
+        // QA Reliability Swarm (Track 2) field-persistence parity fix —
+        // mirrors create_customer's profileFields block exactly, now that
+        // createSupplierSchema/BantooDraft carry the same extended fields.
+        const profileFields: {
+          email?: string;
+          companyName?: string;
+          taxId?: string;
+          paymentTermsDays?: number;
+          creditLimit?: bigint;
+          defaultDiscount?: string;
+          defaultCurrency?: string;
+          preferredLanguage?: string;
+          preferredPaymentMethod?: string;
+        } = { companyName: draft.companyName.trim() || party.name };
+        if (draft.email.trim()) profileFields.email = draft.email;
+        if (draft.taxId.trim()) profileFields.taxId = draft.taxId;
+        if (draft.paymentTermsDays.trim()) {
+          const days = Number(draft.paymentTermsDays);
+          if (Number.isFinite(days) && days > 0) profileFields.paymentTermsDays = days;
+        }
+        if (draft.creditLimit.trim()) {
+          const limit = parseAmount(draft.creditLimit, cur);
+          if (limit > 0n) profileFields.creditLimit = limit;
+        }
+        if (draft.defaultDiscount.trim()) profileFields.defaultDiscount = draft.defaultDiscount;
+        if (draft.currency.trim()) profileFields.defaultCurrency = draft.currency;
+        if (draft.preferredLanguage.trim()) profileFields.preferredLanguage = draft.preferredLanguage;
+        if (draft.preferredPaymentMethod.trim())
+          profileFields.preferredPaymentMethod = draft.preferredPaymentMethod;
+        await updateParty(ctx.orgId, party.id, profileFields);
 
         if (draft.note.trim()) {
           await appendPartyNote(ctx.orgId, party.id, party.notes, draft.note.trim(), date);
@@ -780,10 +913,10 @@ export async function executeBantooAction(
         const formatted = formatAmount(balance < 0n ? -balance : balance, cur);
         const message =
           balance > 0n
-            ? `${found.name} owes ${formatted} ${cur}.`
+            ? t("balanceCustomerOwes", { name: found.name, amount: formatted, currency: cur })
             : balance < 0n
-              ? `${found.name} has a credit balance of ${formatted} ${cur}.`
-              : `${found.name} has no outstanding balance.`;
+              ? t("balanceCustomerCredit", { name: found.name, amount: formatted, currency: cur })
+              : t("balanceCustomerNone", { name: found.name });
         return {
           ok: true,
           href: `/customers/${found.id}?tab=transactions`,
@@ -813,7 +946,7 @@ export async function executeBantooAction(
           href: `/customers/${found.id}?tab=notes`,
           number: found.name,
           kind: input.action,
-          message: `Note added for ${found.name}.`,
+          message: t("successNoteAdded", { number: found.name }),
         };
       }
 
@@ -863,10 +996,14 @@ export async function executeBantooAction(
         const periodSuffix = draft.periodText ? ` (${draft.periodText})` : "";
         const message =
           result.items.length > 0
-            ? `${found.name} bought${periodSuffix}: ${result.items
-                .map((i) => `${i.name} (${i.quantity}${i.unit ? ` ${i.unit}` : ""})`)
-                .join(", ")}.`
-            : `No purchases found for ${found.name}${periodSuffix}.`;
+            ? t("queryCustomerBought", {
+                name: found.name,
+                period: periodSuffix,
+                items: result.items
+                  .map((i) => `${i.name} (${i.quantity}${i.unit ? ` ${i.unit}` : ""})`)
+                  .join(", "),
+              })
+            : t("queryCustomerNone", { name: found.name, period: periodSuffix });
         return {
           ok: true,
           href: `/customers/${found.id}?tab=products`,
@@ -906,7 +1043,7 @@ export async function executeBantooAction(
           href: `/suppliers/${updated.id}`,
           number: updated.name,
           kind: input.action,
-          message: `${updated.name} was updated.`,
+          message: t("successCustomerUpdated", { number: updated.name }),
         };
       }
 
@@ -950,10 +1087,10 @@ export async function executeBantooAction(
         const formatted = formatAmount(balance < 0n ? -balance : balance, cur);
         const message =
           balance > 0n
-            ? `You owe ${found.name} ${formatted} ${cur}.`
+            ? t("balanceSupplierOwed", { name: found.name, amount: formatted, currency: cur })
             : balance < 0n
-              ? `${found.name} has a credit balance of ${formatted} ${cur} with you.`
-              : `You have no outstanding balance with ${found.name}.`;
+              ? t("balanceSupplierCredit", { name: found.name, amount: formatted, currency: cur })
+              : t("balanceSupplierNone", { name: found.name });
         return {
           ok: true,
           href: `/suppliers/${found.id}?tab=transactions`,
@@ -983,7 +1120,7 @@ export async function executeBantooAction(
           href: `/suppliers/${found.id}?tab=notes`,
           number: found.name,
           kind: input.action,
-          message: `Note added for ${found.name}.`,
+          message: t("successNoteAdded", { number: found.name }),
         };
       }
 
@@ -1033,10 +1170,14 @@ export async function executeBantooAction(
         const periodSuffix = draft.periodText ? ` (${draft.periodText})` : "";
         const message =
           result.items.length > 0
-            ? `You bought from ${found.name}${periodSuffix}: ${result.items
-                .map((i) => `${i.name} (${i.quantity}${i.unit ? ` ${i.unit}` : ""})`)
-                .join(", ")}.`
-            : `No purchases found from ${found.name}${periodSuffix}.`;
+            ? t("querySupplierBought", {
+                name: found.name,
+                period: periodSuffix,
+                items: result.items
+                  .map((i) => `${i.name} (${i.quantity}${i.unit ? ` ${i.unit}` : ""})`)
+                  .join(", "),
+              })
+            : t("querySupplierNone", { name: found.name, period: periodSuffix });
         return {
           ok: true,
           href: `/suppliers/${found.id}?tab=products`,

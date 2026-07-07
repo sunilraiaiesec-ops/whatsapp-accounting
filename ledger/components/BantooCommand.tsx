@@ -391,7 +391,17 @@ export function BantooCommand() {
   // instead of an in-app route.
   function successMessage(): string {
     if (!success) return "";
-    if (success.message) return success.message;
+    // QA Reliability Swarm (Track 9) fix: this used to check success.message
+    // FIRST, so any kind the server attached a message to (edit_supplier,
+    // add_supplier_note, the balance/query answers, ...) always rendered the
+    // server's raw string verbatim — bypassing next-intl entirely, so it
+    // never matched the current UI locale. Kinds with a client-side
+    // translation take priority now; success.message stays as the fallback
+    // below for content the server computes (amounts, purchase-history item
+    // lists, ...) that can't be derived client-side. The server itself
+    // renders that fallback text via the same locale (see
+    // executeBantooAction's `t`/tCommand usage), so it still matches the UI
+    // even when this fallback is hit.
     if (success.kind === "view_customer") {
       return success.number ? t("successFound", { number: success.number }) : t("successOpening");
     }
@@ -399,8 +409,13 @@ export function BantooCommand() {
       return success.number ? t("successFound", { number: success.number }) : t("successOpeningSupplierList");
     }
     if (success.kind === "view_sales_invoice") return t("successOpeningSalesInvoiceList");
-    if (success.kind === "edit_customer") return t("successCustomerUpdated", { number: success.number });
-    if (success.kind === "add_customer_note") return t("successNoteAdded", { number: success.number });
+    if (success.kind === "edit_customer" || success.kind === "edit_supplier") {
+      return t("successCustomerUpdated", { number: success.number });
+    }
+    if (success.kind === "add_customer_note" || success.kind === "add_supplier_note") {
+      return t("successNoteAdded", { number: success.number });
+    }
+    if (success.message) return success.message;
     return t("successSaved", { number: success.number });
   }
 
@@ -755,13 +770,18 @@ export function BantooCommand() {
   function duplicateChoiceBlock() {
     const dup = proposal?.duplicateCandidate;
     if (!dup) return null;
+    // QA Reliability Swarm (Track 4): this prompt now also fires for
+    // create_supplier (see resolve.ts's create_supplier case) — pick the
+    // matching translation namespace so a supplier duplicate is never worded
+    // as "an existing customer".
+    const ns = proposal?.partyType === "supplier" ? "duplicateSupplier" : "duplicateCustomer";
     return (
       <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
         <p className="text-sm font-semibold text-amber-900">
-          {t("duplicateCustomer.title", { name: dup.name })}
+          {t(`${ns}.title` as Parameters<typeof t>[0], { name: dup.name })}
         </p>
         <div className="mt-2 space-y-0.5 rounded-lg bg-white/70 p-2 text-xs text-slate-600">
-          <p className="font-medium text-slate-500">{t("duplicateCustomer.existingDetails")}</p>
+          <p className="font-medium text-slate-500">{t(`${ns}.existingDetails` as Parameters<typeof t>[0])}</p>
           {dup.city ? (
             <p>
               {t("city")}: {dup.city}
@@ -777,6 +797,11 @@ export function BantooCommand() {
               {t("whatsapp")}: {dup.whatsapp}
             </p>
           ) : null}
+          {dup.country ? (
+            <p>
+              {t("country")}: {dup.country}
+            </p>
+          ) : null}
         </div>
         <div className="mt-3 space-y-2">
           <label className="flex items-center gap-2 text-sm text-slate-800">
@@ -790,7 +815,7 @@ export function BantooCommand() {
                 setCreateParty(false);
               }}
             />
-            {t("duplicateCustomer.useExisting", { name: dup.name })}
+            {t(`${ns}.useExisting` as Parameters<typeof t>[0], { name: dup.name })}
           </label>
           <label className="flex items-center gap-2 text-sm text-slate-800">
             <input
@@ -803,7 +828,7 @@ export function BantooCommand() {
                 setCreateParty(true);
               }}
             />
-            {t("duplicateCustomer.createNew")}
+            {t(`${ns}.createNew` as Parameters<typeof t>[0])}
           </label>
         </div>
       </div>
