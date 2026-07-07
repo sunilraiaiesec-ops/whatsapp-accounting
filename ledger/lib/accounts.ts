@@ -34,24 +34,44 @@ export function moneyOutAccounts(orgId: string) {
 }
 
 // Accounts that can appear on receipt lines (money in → credit side).
+//
+// BUG FIX (QA Reliability Swarm, Track 8): this used to filter with a bare
+// `subtype: { notIn: ["bank", "cash"] } }` ANDed alongside the OR below.
+// Under standard SQL three-valued logic, `<col> NOT IN (...)` evaluates to
+// UNKNOWN (never TRUE) whenever `<col> IS NULL`, so Prisma's `notIn` silently
+// EXCLUDED every row whose `subtype` column is NULL — which is most default
+// INCOME/EXPENSE accounts (see lib/chart-of-accounts.ts; only a handful of
+// accounts have a non-null subtype at all). The nested `OR: [{ subtype: null
+// }, { subtype: { notIn: [...] } }]` below is the explicit, NULL-safe
+// equivalent of "subtype is not bank/cash (including when it's simply unset)".
 export function receiptCounterpartAccounts(orgId: string) {
   return prisma.account.findMany({
     where: {
       orgId,
-      subtype: { notIn: ["bank", "cash"] },
-      OR: [{ type: "INCOME" }, { subtype: "receivable", isControl: true }],
+      AND: [
+        { OR: [{ type: "INCOME" }, { subtype: "receivable", isControl: true }] },
+        { OR: [{ subtype: null }, { subtype: { notIn: ["bank", "cash"] } }] },
+      ],
     },
     orderBy: { code: "asc" },
   });
 }
 
 // Accounts that can appear on payment lines (money out → debit side).
+// See receiptCounterpartAccounts' doc comment above for the NULL-subtype
+// `notIn` bug this same shape fixes — this was the query responsible for the
+// "expense"/supplier-payment action failing with "Choose an expense account."
+// on every fresh organization still using the seeded default chart of
+// accounts (every default EXPENSE account except "5000 Cost of goods sold"
+// has a null `subtype`).
 export function paymentCounterpartAccounts(orgId: string) {
   return prisma.account.findMany({
     where: {
       orgId,
-      subtype: { notIn: ["bank", "cash"] },
-      OR: [{ type: "EXPENSE" }, { subtype: "payable", isControl: true }],
+      AND: [
+        { OR: [{ type: "EXPENSE" }, { subtype: "payable", isControl: true }] },
+        { OR: [{ subtype: null }, { subtype: { notIn: ["bank", "cash"] } }] },
+      ],
     },
     orderBy: { code: "asc" },
   });
