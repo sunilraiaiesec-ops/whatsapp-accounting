@@ -95,6 +95,48 @@ describe("ruleBasedExtract (no-AI text fallback)", () => {
     }
   });
 
+  // --- Multi-step Task Planning: rule-based phone/WhatsApp/post-action -----
+  it('extracts phone, WhatsApp ("same number"), and a post-save "open profile" from a simple compound sentence', () => {
+    const action = ruleBasedExtract(
+      "Add Elhaji Adamou as a customer in Garoua, his phone is 690123456, his WhatsApp is the same number, then open his profile.",
+    );
+    expect(action.action).toBe("create_customer");
+    if (action.action === "create_customer") {
+      expect(action.customer_name).toBe("Elhaji Adamou");
+      expect(action.city).toBe("Garoua");
+      expect(action.phone).toBe("690123456");
+      expect(action.whatsapp).toBe("690123456");
+      expect(action.post_action).toBe("open_profile");
+    }
+  });
+
+  it('extracts phone/WhatsApp/post-action from the French equivalent ("son téléphone", "même numéro", "ouvrir sa fiche")', () => {
+    const action = ruleBasedExtract(
+      "Ajouter Elhaji Adamou comme client à Garoua, son téléphone est 690123456, son whatsapp est le même numéro, puis ouvrir sa fiche.",
+    );
+    expect(action.action).toBe("create_customer");
+    if (action.action === "create_customer") {
+      expect(action.customer_name).toBe("Elhaji Adamou");
+      expect(action.city).toBe("Garoua");
+      expect(action.phone).toBe("690123456");
+      expect(action.whatsapp).toBe("690123456");
+      expect(action.post_action).toBe("open_profile");
+    }
+  });
+
+  it("simple 'add Musa as a customer' -> no regression: phone/whatsapp/note/post_action all stay null", () => {
+    const action = ruleBasedExtract("Add Musa as a customer");
+    expect(action.action).toBe("create_customer");
+    if (action.action === "create_customer") {
+      expect(action.customer_name).toBe("Musa");
+      expect(action.city).toBeNull();
+      expect(action.phone).toBeNull();
+      expect(action.whatsapp).toBeNull();
+      expect(action.post_action).toBeNull();
+      expect(action.unsupported_requests).toBeNull();
+    }
+  });
+
   it('maps "Add Tanha Abdullah as a customer" to create_customer', () => {
     const action = ruleBasedExtract("Add Tanha Abdullah as a customer");
     expect(action.action).toBe("create_customer");
@@ -298,6 +340,28 @@ describe("parseCommandText create_customer intent", () => {
     const parsed = parseBantooCommandText("ajouter un client nommé Tanha Abdullah");
     expect(parsed.intent).toBe("create_customer");
     expect(parsed.partyName).toBe("Tanha Abdullah");
+  });
+
+  it("extracts phone/whatsapp/postAction fields for a compound create_customer sentence", () => {
+    const parsed = parseBantooCommandText(
+      "Add Elhaji Adamou as a customer in Garoua, his phone is 690123456, his WhatsApp is the same number, then open his profile.",
+    );
+    expect(parsed.intent).toBe("create_customer");
+    expect(parsed.partyName).toBe("Elhaji Adamou");
+    expect(parsed.city).toBe("Garoua");
+    expect(parsed.phone).toBe("690123456");
+    expect(parsed.whatsapp).toBe("690123456");
+    expect(parsed.postAction).toBe("open_profile");
+  });
+
+  it("leaves phone/whatsapp/postAction null for a simple create_customer sentence (no regression)", () => {
+    const parsed = parseBantooCommandText("Add Musa as a customer in Garoua");
+    expect(parsed.intent).toBe("create_customer");
+    expect(parsed.partyName).toBe("Musa");
+    expect(parsed.city).toBe("Garoua");
+    expect(parsed.phone).toBeNull();
+    expect(parsed.whatsapp).toBeNull();
+    expect(parsed.postAction).toBeNull();
   });
 
   it('detects create_customer for "Add … as a client in …"', () => {

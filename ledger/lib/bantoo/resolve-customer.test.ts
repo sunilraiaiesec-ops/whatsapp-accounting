@@ -33,9 +33,13 @@ vi.mock("@/lib/command-patterns", () => ({
   dueDateFromTerms: vi.fn(),
 }));
 
-vi.mock("@/lib/parties", () => ({
-  getPartyContact: (...args: unknown[]) => getPartyContact(...args),
-}));
+vi.mock("@/lib/parties", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/parties")>();
+  return {
+    ...actual,
+    getPartyContact: (...args: unknown[]) => getPartyContact(...args),
+  };
+});
 
 const { resolveExtraction } = await import("@/lib/bantoo/resolve");
 

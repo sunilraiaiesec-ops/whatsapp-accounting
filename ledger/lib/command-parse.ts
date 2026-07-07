@@ -1105,7 +1105,7 @@ function extractCreateCustomerPhone(raw: string): string | null {
 
 function extractCreateCustomerWhatsapp(raw: string, phone: string | null): string | null {
   const m = raw.match(
-    /\bwhatsapp\b(?:\s+number|\s+num[ée]ro)?(?:\s+is|\s+est)?\s*:?\s*(?:le\s+)?(same(?:\s+number)?|m[êe]me(?:\s+num[ée]ro)?|[+\d][\d\s-]{5,})/i,
+    /\bwhatsapp\b(?:\s+number|\s+num[ée]ro)?(?:\s+is|\s+est)?\s*:?\s*(?:the\s+|le\s+)?(same(?:\s+number)?|m[êe]me(?:\s+num[ée]ro)?|[+\d][\d\s-]{5,})/i,
   );
   if (!m?.[1]) return null;
   if (/^(?:same|m[êe]me)/i.test(m[1])) return phone;
