@@ -61,7 +61,9 @@ export function createInventoryItem(
 
 // --- Goods receipt (buy stock) ----------------------------------------------
 
-type ReceiptLineInput = { itemId: string; quantity: string; unitCost: bigint };
+// Exported so lib/approvals/payloads.ts can type the exact staged-payload
+// shape for receiveGoods without re-declaring it.
+export type ReceiptLineInput = { itemId: string; quantity: string; unitCost: bigint };
 
 export async function receiveGoods(
   orgId: string,
@@ -241,7 +243,9 @@ export async function writeOffInventory(
 
 // --- Quantity adjustment (correct stock up or down) -------------------------
 
-type AdjustmentLineInput = { itemId: string; newQuantity: string };
+// Exported so lib/approvals/payloads.ts can type the exact staged-payload
+// shape for adjustInventory without re-declaring it.
+export type AdjustmentLineInput = { itemId: string; newQuantity: string };
 
 export async function adjustInventory(
   orgId: string,

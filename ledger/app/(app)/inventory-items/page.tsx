@@ -1,7 +1,9 @@
 import { requireContext } from "@/lib/auth/current";
 import { listInventoryItems } from "@/lib/inventory";
+import { listLowStockItems } from "@/lib/reorder";
 import { formatAmount } from "@/lib/money";
 import { InventoryItemForm } from "@/components/InventoryItemForm";
+import { LowStockReorderList, type LowStockItemVM } from "@/components/LowStockReorder";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatGrid, StatCard } from "@/components/ui/StatCards";
 import { ListView, type ListRow } from "@/components/ui/ListView";
@@ -9,7 +11,28 @@ import { ListView, type ListRow } from "@/components/ui/ListView";
 export default async function InventoryItemsPage() {
   const ctx = await requireContext();
   const cur = ctx.baseCurrency;
-  const items = await listInventoryItems(ctx.orgId);
+  const [items, lowStock] = await Promise.all([
+    listInventoryItems(ctx.orgId),
+    listLowStockItems(ctx.orgId),
+  ]);
+
+  const lowStockCards: LowStockItemVM[] = lowStock.map((it) => ({
+    id: it.id,
+    code: it.code,
+    name: it.name,
+    unit: it.unit ?? "units",
+    qtyOnHand: it.qtyOnHand,
+    reorderLevel: it.reorderLevel,
+    suggestedReorderQty: it.suggestedReorderQty,
+    supplier: it.supplier,
+    lastPurchase: it.lastPurchase
+      ? {
+          priceFormatted: formatAmount(it.lastPurchase.price, cur),
+          date: it.lastPurchase.date.toISOString().slice(0, 10),
+          partyName: it.lastPurchase.partyName,
+        }
+      : null,
+  }));
   const totalValue = items.reduce((s, it) => s + it.valueOnHand, 0n);
   const outOfStock = items.filter((it) => it.qtyOnHand.lte(0)).length;
   const belowReorder = items.filter(
@@ -43,6 +66,12 @@ export default async function InventoryItemsPage() {
         <StatCard icon="doc" tone="amber" label="Below reorder level" value={String(belowReorder)} />
         <StatCard icon="doc" tone="rose" label="Out of stock" value={String(outOfStock)} />
       </StatGrid>
+
+      {lowStockCards.length > 0 ? (
+        <div className="mt-6">
+          <LowStockReorderList items={lowStockCards} />
+        </div>
+      ) : null}
 
       <div className="mt-6">
         <InventoryItemForm currency={cur} />

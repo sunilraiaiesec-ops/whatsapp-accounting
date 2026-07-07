@@ -12,8 +12,10 @@ import {
 } from "@/lib/inventory";
 import { DocumentError } from "@/lib/documents";
 import { LedgerError } from "@/lib/ledger";
+import { checkPlanLimit } from "@/lib/billing/enforce";
+import { gateTransaction } from "@/lib/approvals/gate";
 
-export type InvState = { error?: string };
+export type InvState = { error?: string; info?: string };
 
 function parseDate(value: FormDataEntryValue | null, fallback = new Date()): Date {
   const s = String(value || "").trim();
@@ -38,6 +40,12 @@ export async function createInventoryItemAction(
   const taxRaw = String(formData.get("defaultTaxRate") || "").trim();
   const taxRate = taxRaw ? Number(taxRaw) : null;
   const reorderRaw = String(formData.get("reorderLevel") || "").trim();
+
+  const planCheck = await checkPlanLimit(ctx.orgId, "inventoryItem");
+  if (!planCheck.ok) {
+    return { error: planCheck.message };
+  }
+
   try {
     await createInventoryItem(ctx.orgId, {
       code: String(formData.get("code") || ""),
@@ -73,14 +81,20 @@ export async function createGoodsReceiptAction(
       unitCost: parseAmount(l.unitCost ?? "0", ctx.baseCurrency),
     }));
 
+  const payload = {
+    partyId: String(formData.get("partyId") || ""),
+    date: parseDate(formData.get("date")),
+    reference: String(formData.get("reference") || "") || null,
+    notes: String(formData.get("notes") || "") || null,
+    lines,
+  };
+
   try {
-    await receiveGoods(ctx.orgId, {
-      partyId: String(formData.get("partyId") || ""),
-      date: parseDate(formData.get("date")),
-      reference: String(formData.get("reference") || "") || null,
-      notes: String(formData.get("notes") || "") || null,
-      lines,
-    });
+    const gate = await gateTransaction(ctx, "stock_receipt", payload);
+    if (gate.gated) {
+      return { info: "Submitted for approval. It will post once reviewed." };
+    }
+    await receiveGoods(ctx.orgId, payload);
   } catch (err) {
     return fail(err);
   }
@@ -136,13 +150,19 @@ export async function createInventoryAdjustmentAction(
       newQuantity: String(l.newQuantity ?? "").trim(),
     }));
 
+  const payload = {
+    date: parseDate(formData.get("date")),
+    adjustmentAccountId: String(formData.get("adjustmentAccountId") || ""),
+    notes: String(formData.get("notes") || "") || null,
+    lines,
+  };
+
   try {
-    await adjustInventory(ctx.orgId, {
-      date: parseDate(formData.get("date")),
-      adjustmentAccountId: String(formData.get("adjustmentAccountId") || ""),
-      notes: String(formData.get("notes") || "") || null,
-      lines,
-    });
+    const gate = await gateTransaction(ctx, "inventory_adjustment", payload);
+    if (gate.gated) {
+      return { info: "Submitted for approval. It will post once reviewed." };
+    }
+    await adjustInventory(ctx.orgId, payload);
   } catch (err) {
     return fail(err);
   }
