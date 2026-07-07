@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { ruleBasedExtract } from "@/lib/bantoo/fallback";
+import { LOW_CONFIDENCE_THRESHOLD } from "@/lib/ai/actions";
+import { blendExtraction, ruleBasedExtract } from "@/lib/bantoo/fallback";
+import { parseBantooCommandText } from "@/lib/command-parse";
 
 describe("ruleBasedExtract (no-AI text fallback)", () => {
   it("maps a customer receipt to customer_payment", () => {
@@ -46,5 +48,88 @@ describe("ruleBasedExtract (no-AI text fallback)", () => {
   it("always defaults currency to XAF", () => {
     const action = ruleBasedExtract("Paid 1000 for fuel");
     expect(action.currency).toBe("XAF");
+  });
+
+  it('maps "Add Golu as a customer in Ngoundéré" to create_customer (BUG-005)', () => {
+    const action = ruleBasedExtract("Add Golu as a customer in Ngoundéré");
+    expect(action.action).toBe("create_customer");
+    expect(action.confidence).toBeGreaterThanOrEqual(LOW_CONFIDENCE_THRESHOLD);
+    if (action.action === "create_customer") {
+      expect(action.customer_name).toBe("Golu");
+      expect(action.city).toBe("Ngoundéré");
+    }
+  });
+
+  it('maps "Ajouter Golu comme client à Ngoundéré" to create_customer (French)', () => {
+    const action = ruleBasedExtract("Ajouter Golu comme client à Ngoundéré");
+    expect(action.action).toBe("create_customer");
+    expect(action.confidence).toBeGreaterThanOrEqual(LOW_CONFIDENCE_THRESHOLD);
+    if (action.action === "create_customer") {
+      expect(action.customer_name).toBe("Golu");
+      expect(action.city).toBe("Ngoundéré");
+    }
+  });
+
+  it('maps "Add customer John Doe" to create_customer', () => {
+    const action = ruleBasedExtract("Add customer John Doe");
+    expect(action.action).toBe("create_customer");
+    if (action.action === "create_customer") {
+      expect(action.customer_name).toBe("John Doe");
+    }
+  });
+});
+
+describe("parseCommandText create_customer intent", () => {
+  it("detects create_customer intent for English phrasing", () => {
+    const parsed = parseBantooCommandText("Add Golu as a customer in Ngoundéré");
+    expect(parsed.intent).toBe("create_customer");
+    expect(parsed.partyName).toBe("Golu");
+    expect(parsed.city).toBe("Ngoundéré");
+  });
+
+  it("detects create_customer intent for French phrasing", () => {
+    const parsed = parseBantooCommandText("Ajouter Golu comme client à Ngoundéré");
+    expect(parsed.intent).toBe("create_customer");
+    expect(parsed.partyName).toBe("Golu");
+    expect(parsed.city).toBe("Ngoundéré");
+  });
+});
+
+describe("blendExtraction (AI path reconciliation)", () => {
+  it("promotes rule-parser create_customer when AI returns unknown", () => {
+    const blended = blendExtraction("Add Golu as a customer in Ngoundéré", {
+      action: "unknown",
+      confidence: 0,
+      currency: "XAF",
+      summary: null,
+    });
+    expect(blended.action).toBe("create_customer");
+    expect(blended.confidence).toBeGreaterThanOrEqual(LOW_CONFIDENCE_THRESHOLD);
+  });
+
+  it("promotes French create_customer when AI returns unknown", () => {
+    const blended = blendExtraction("Ajouter Golu comme client à Ngoundéré", {
+      action: "unknown",
+      confidence: 0.2,
+      currency: "XAF",
+      summary: null,
+    });
+    expect(blended.action).toBe("create_customer");
+    expect(blended.confidence).toBeGreaterThanOrEqual(LOW_CONFIDENCE_THRESHOLD);
+  });
+
+  it("boosts low-confidence AI create_customer when rule parser agrees", () => {
+    const blended = blendExtraction("Add Golu as a customer in Ngoundéré", {
+      action: "create_customer",
+      customer_name: "Golu",
+      city: "Ngoundéré",
+      phone: null,
+      country: null,
+      confidence: 0.3,
+      currency: "XAF",
+      summary: null,
+    });
+    expect(blended.action).toBe("create_customer");
+    expect(blended.confidence).toBeGreaterThanOrEqual(LOW_CONFIDENCE_THRESHOLD);
   });
 });

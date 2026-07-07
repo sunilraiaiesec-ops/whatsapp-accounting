@@ -13,6 +13,7 @@ export const BANTOO_ACTION_TYPES = [
   "customer_payment",
   "expense",
   "sales_receipt",
+  "create_customer",
   "unknown",
 ] as const;
 
@@ -148,6 +149,16 @@ export const salesReceiptSchema = z.object({
   ...base,
 });
 
+export const createCustomerSchema = z.object({
+  action: z.literal("create_customer"),
+  customer_name: ntext,
+  city: ntext,
+  phone: ntext,
+  country: ntext,
+  currency,
+  ...base,
+});
+
 export const unknownSchema = z.object({
   action: z.literal("unknown"),
   currency,
@@ -161,6 +172,7 @@ export const extractedActionSchema = z.discriminatedUnion("action", [
   customerPaymentSchema,
   expenseSchema,
   salesReceiptSchema,
+  createCustomerSchema,
   unknownSchema,
 ]);
 
@@ -171,6 +183,7 @@ export type SupplierPurchaseAction = z.infer<typeof supplierPurchaseSchema>;
 export type CustomerPaymentAction = z.infer<typeof customerPaymentSchema>;
 export type ExpenseAction = z.infer<typeof expenseSchema>;
 export type SalesReceiptAction = z.infer<typeof salesReceiptSchema>;
+export type CreateCustomerAction = z.infer<typeof createCustomerSchema>;
 export type UnknownAction = z.infer<typeof unknownSchema>;
 
 // Confidence below this is treated as "not sure" — the UI must warn the user and

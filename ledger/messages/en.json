@@ -205,6 +205,7 @@
     "reorderLevel": "Reorder level",
     "createItem": "Create new item: {name}",
     "customer": "Customer",
+    "city": "City",
     "payee": "Paid to (optional)",
     "paymentMethod": "Payment method",
     "takePhoto": "Take a photo",
@@ -225,6 +226,7 @@
     "actionCustomerPayment": "Record customer payment",
     "actionExpense": "Record expense",
     "actionSalesReceipt": "Record cash sale",
+    "actionCreateCustomer": "Create customer",
     "actionUnknown": "Not sure",
     "aiUnavailable": "Photo and voice need AI setup (OPENAI_API_KEY). You can still type your request below.",
     "aiFallbackNote": "AI was unavailable, so we used basic text parsing. Please double-check the details below.",
@@ -257,6 +259,7 @@
       "noExpenseAccount": "No expense account found — add one first.",
       "enterSaleAmount": "Enter the sale amount.",
       "noIncomeAccount": "No income account found — add one first.",
+      "enterCustomerName": "Enter the customer name before saving.",
       "lowConfidence": "I'm not sure. Please confirm or edit these details."
     },
     "fieldReasons": {

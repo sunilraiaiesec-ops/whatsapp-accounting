@@ -8,7 +8,7 @@ import {
   type AiImageInput,
 } from "@/lib/ai/provider";
 import { consumeAiCredit } from "@/lib/billing/ai-credits";
-import { ruleBasedExtract } from "@/lib/bantoo/fallback";
+import { ruleBasedExtract, blendExtraction } from "@/lib/bantoo/fallback";
 import { resolveExtraction } from "@/lib/bantoo/resolve";
 import { rateLimit, RATE_LIMITS } from "@/lib/bantoo/rate-limit";
 import type { ExtractedAction } from "@/lib/ai/actions";
@@ -133,6 +133,9 @@ export async function POST(request: Request) {
     } else {
       try {
         action = await extractBantooAction({ text: combinedText, images });
+        if (hasText) {
+          action = blendExtraction(combinedText, action);
+        }
       } catch (err) {
         // A HARD AI failure (auth/quota/model-not-enabled/network) — distinct from
         // a legitimate low-confidence "unknown", which returns normally without

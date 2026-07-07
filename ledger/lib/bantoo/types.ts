@@ -73,6 +73,7 @@ export type BantooWarningCode =
   | "noExpenseAccount"
   | "enterSaleAmount"
   | "noIncomeAccount"
+  | "enterCustomerName"
   | "lowConfidence";
 
 export type BantooWarning = {
@@ -139,6 +140,7 @@ export type BantooDraft = {
   reorderLevel: string;
   amount: string;
   partyName: string;
+  city: string;
   paymentMethod: string;
   description: string;
   date: string;
@@ -210,6 +212,7 @@ export function emptyDraft(): BantooDraft {
     reorderLevel: "",
     amount: "",
     partyName: "",
+    city: "",
     paymentMethod: "",
     description: "",
     date: "",

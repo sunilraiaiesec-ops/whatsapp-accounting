@@ -773,6 +773,13 @@ export function BantooCommand() {
             {dateField()}
           </>
         );
+      case "create_customer":
+        return (
+          <>
+            {partyBlock(t("customer"), t("createParty"))}
+            {field(t("city"), draft.city, (v) => updateDraft("city", v))}
+          </>
+        );
       default:
         return <p className="text-sm text-slate-600">{t("unknownAction")}</p>;
     }
@@ -785,6 +792,7 @@ export function BantooCommand() {
     customer_payment: "actionCustomerPayment",
     expense: "actionExpense",
     sales_receipt: "actionSalesReceipt",
+    create_customer: "actionCreateCustomer",
     unknown: "actionUnknown",
   };
 

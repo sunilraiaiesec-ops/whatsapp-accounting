@@ -24,6 +24,7 @@ Classify "action" as exactly one of:
 - "customer_payment": money RECEIVED from a named customer (paying what they owe). Fields: customer_name, amount, payment_method, description, date, currency.
 - "expense": money PAID OUT for a business cost (rent, fuel, transport, salaries, fees, utilities...). Fields: amount, description, category, supplier_name (vendor, optional), payment_method, date, currency.
 - "sales_receipt": a cash SALE to a customer (money received now for goods sold). Fields: amount, customer_name (optional), description, payment_method, date, currency.
+- "create_customer": add a NEW customer contact (no payment or sale). Fields: customer_name, city (optional), phone (optional), country (optional), currency.
 - "unknown": you cannot confidently tell what the user wants.
 
 Rules:

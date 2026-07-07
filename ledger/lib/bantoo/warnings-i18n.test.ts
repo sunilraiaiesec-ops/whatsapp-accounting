@@ -26,6 +26,7 @@ const WARNING_CODES: BantooWarningCode[] = [
   "noExpenseAccount",
   "enterSaleAmount",
   "noIncomeAccount",
+  "enterCustomerName",
   "lowConfidence",
 ];
 

@@ -130,4 +130,26 @@ describe("resolveExtraction warnings (BUG-002)", () => {
     expect(proposal.fieldReasons.supplier?.params?.name).toBe("Supplier A");
     expect(proposal.fieldReasons.supplier).not.toHaveProperty("text");
   });
+
+  it("resolves create_customer with high confidence and populated draft (BUG-005)", async () => {
+    const action: ExtractedAction = {
+      action: "create_customer",
+      customer_name: "Golu",
+      city: "Ngoundéré",
+      phone: null,
+      country: null,
+      currency: "XAF",
+      confidence: 0.75,
+      summary: null,
+    };
+
+    const proposal = await resolveExtraction(ctx, action);
+
+    expect(proposal.action).toBe("create_customer");
+    expect(proposal.lowConfidence).toBe(false);
+    expect(proposal.draft.partyName).toBe("Golu");
+    expect(proposal.draft.city).toBe("Ngoundéré");
+    expect(proposal.partyType).toBe("customer");
+    expect(proposal.createParty).toBe(true);
+  });
 });

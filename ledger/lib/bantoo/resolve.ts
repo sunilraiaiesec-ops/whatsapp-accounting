@@ -584,6 +584,20 @@ export async function resolveExtraction(
       }
       break;
     }
+
+    case "create_customer": {
+      draft.partyName = action.customer_name ?? "";
+      draft.city = action.city ?? "";
+      proposal.partyType = "customer";
+      proposal.needsParty = true;
+
+      const party = await resolveParty(draft.partyName, "customer");
+      proposal.partyOptions = party.options;
+      proposal.partyId = party.id;
+      proposal.createParty = party.create;
+      if (!draft.partyName) warn("enterCustomerName");
+      break;
+    }
   }
 
   if (!draft.date) draft.date = today();

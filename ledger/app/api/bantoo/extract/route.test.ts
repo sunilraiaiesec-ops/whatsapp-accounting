@@ -108,6 +108,17 @@ describe("POST /api/bantoo/extract resilience", () => {
     expect(data.aiFallback).toBe(false);
     expect(data.proposal.action).toBe("customer_payment");
   });
+
+  it("blends AI unknown into create_customer for add-customer phrasing (BUG-005)", async () => {
+    extractBantooAction.mockResolvedValue({ action: "unknown", confidence: 0, currency: "XAF", summary: null });
+
+    const res = await POST(makeRequest({ text: "Add Golu as a customer in Ngoundéré" }));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.proposal.action).toBe("create_customer");
+    expect(data.proposal.lowConfidence).toBe(false);
+  });
 });
 
 describe("POST /api/bantoo/extract — AI credit metering", () => {

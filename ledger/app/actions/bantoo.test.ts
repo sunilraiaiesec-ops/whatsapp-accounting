@@ -70,6 +70,7 @@ function draft(overrides: Record<string, string> = {}) {
     reorderLevel: "",
     amount: "",
     partyName: "",
+    city: "",
     paymentMethod: "",
     description: "",
     date: "2026-01-05",
@@ -145,7 +146,11 @@ describe("ensurePartyId duplicate-prevention safety net (via executeBantooAction
 
     const result = await executeBantooAction(input);
     expect(result.ok).toBe(true);
-    expect(createPartySpy).toHaveBeenCalledWith("org_A", { name: "Elhaji Adoum", type: "supplier" });
+    expect(createPartySpy).toHaveBeenCalledWith("org_A", {
+      name: "Elhaji Adoum",
+      type: "supplier",
+      city: null,
+    });
     expect(createPayment).toHaveBeenCalledWith(
       "org_A",
       expect.objectContaining({ partyId: "new_party_1" }),
@@ -229,5 +234,35 @@ describe("executeBantooAction org trust boundary", () => {
     const result = await executeBantooAction(input);
     expect(result).toEqual({ ok: false, error: "That account was not found." });
     expect(createPayment).not.toHaveBeenCalled();
+  });
+
+  it("creates a customer with name and city for create_customer action", async () => {
+    createPartySpy.mockResolvedValue({ id: "cust_new", name: "Golu" });
+    partyFindMany.mockResolvedValue([]);
+    partyFindFirst.mockResolvedValue({ id: "cust_new", name: "Golu" });
+
+    const input: ExecuteBantooInput = {
+      action: "create_customer",
+      draft: draft({ partyName: "Golu", city: "Ngoundéré" }),
+      partyId: null,
+      createParty: true,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    };
+
+    const result = await executeBantooAction(input);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.href).toBe("/customers/cust_new");
+      expect(result.number).toBe("Golu");
+      expect(result.kind).toBe("create_customer");
+    }
+    expect(createPartySpy).toHaveBeenCalledWith("org_A", {
+      name: "Golu",
+      type: "customer",
+      city: "Ngoundéré",
+    });
   });
 });

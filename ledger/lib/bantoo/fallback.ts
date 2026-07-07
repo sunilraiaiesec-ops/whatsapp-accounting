@@ -1,12 +1,13 @@
 import type { ExtractedAction } from "@/lib/ai/actions";
-import { humanizeDescription, parseCommandText } from "@/lib/command-parse";
+import { LOW_CONFIDENCE_THRESHOLD } from "@/lib/ai/actions";
+import { humanizeDescription, parseBantooCommandText } from "@/lib/command-parse";
 
 // Rule-based fallback used when no AI provider is configured (missing API key)
 // and the input is plain text. Reuses the existing regex parser so the classic
 // text flow keeps working without any AI, mapping its result into the same
 // ExtractedAction shape the AI path produces. Photos/voice still require AI.
 export function ruleBasedExtract(text: string): ExtractedAction {
-  const parsed = parseCommandText(text);
+  const parsed = parseBantooCommandText(text);
   const currency = "XAF";
   const amount = parsed.amountText ? Number(parsed.amountText) : null;
   const confidence = 0.75;
@@ -84,5 +85,37 @@ export function ruleBasedExtract(text: string): ExtractedAction {
     };
   }
 
+  if (parsed.intent === "create_customer") {
+    return {
+      action: "create_customer",
+      customer_name: parsed.partyName,
+      city: parsed.city,
+      phone: null,
+      country: null,
+      currency,
+      confidence,
+      summary: null,
+    };
+  }
+
   return { action: "unknown", currency, confidence: 0, summary: null };
+}
+
+// When the AI returns unknown or low-confidence, prefer a confident rule-parser
+// hit so obvious structured commands (e.g. "Add Golu as a customer") still
+// promote to the right workflow.
+export function blendExtraction(text: string, action: ExtractedAction): ExtractedAction {
+  const rule = ruleBasedExtract(text);
+  if (action.action === "unknown" && rule.action !== "unknown") {
+    return rule;
+  }
+  if (
+    action.action !== "unknown" &&
+    action.confidence < LOW_CONFIDENCE_THRESHOLD &&
+    rule.action === action.action &&
+    rule.confidence >= LOW_CONFIDENCE_THRESHOLD
+  ) {
+    return { ...action, confidence: rule.confidence };
+  }
+  return action;
 }

@@ -204,6 +204,7 @@
     "reorderLevel": "Seuil de réappro.",
     "createItem": "Créer un nouvel article : {name}",
     "customer": "Client",
+    "city": "Ville",
     "payee": "Payé à (optionnel)",
     "paymentMethod": "Mode de paiement",
     "takePhoto": "Prendre une photo",
@@ -224,6 +225,7 @@
     "actionCustomerPayment": "Enregistrer un paiement client",
     "actionExpense": "Enregistrer une dépense",
     "actionSalesReceipt": "Enregistrer une vente au comptant",
+    "actionCreateCustomer": "Créer un client",
     "actionUnknown": "Incertain",
     "aiUnavailable": "La photo et la voix nécessitent la configuration de l'IA (OPENAI_API_KEY). Vous pouvez toujours écrire votre demande ci-dessous.",
     "aiFallbackNote": "L'IA était indisponible ; nous avons utilisé une analyse de texte basique. Veuillez vérifier les détails ci-dessous.",
@@ -256,6 +258,7 @@
       "noExpenseAccount": "Aucun compte de dépenses trouvé — ajoutez-en un d'abord.",
       "enterSaleAmount": "Saisissez le montant de la vente.",
       "noIncomeAccount": "Aucun compte de revenus trouvé — ajoutez-en un d'abord.",
+      "enterCustomerName": "Saisissez le nom du client avant d'enregistrer.",
       "lowConfidence": "Je ne suis pas sûr. Veuillez confirmer ou modifier ces détails."
     },
     "fieldReasons": {

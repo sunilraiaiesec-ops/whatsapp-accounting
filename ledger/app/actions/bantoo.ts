@@ -94,6 +94,7 @@ const draftSchema = z.object({
   reorderLevel: z.string().max(50).default(""),
   amount: z.string().max(50).default(""),
   partyName: z.string().max(200).default(""),
+  city: z.string().max(200).default(""),
   paymentMethod: z.string().max(100).default(""),
   description: z.string().max(500).default(""),
   date: z.string().max(40).default(""),
@@ -138,7 +139,13 @@ async function nextItemCode(orgId: string): Promise<string> {
 // Create the named party when the user asked to, otherwise return the chosen id.
 async function ensurePartyId(
   ctx: CurrentContext,
-  input: { partyId: string | null; createParty: boolean; partyName: string; type: "customer" | "supplier" },
+  input: {
+    partyId: string | null;
+    createParty: boolean;
+    partyName: string;
+    type: "customer" | "supplier";
+    city?: string | null;
+  },
 ): Promise<string | null> {
   if (input.partyId) {
     // Never trust a client-supplied id: confirm it belongs to this org so a
@@ -168,6 +175,7 @@ async function ensurePartyId(
     const created = await createParty(ctx.orgId, {
       name: input.partyName.trim(),
       type: input.type,
+      city: input.city?.trim() || null,
     });
     return created.id;
   }
@@ -432,6 +440,47 @@ export async function executeBantooAction(
           ok: true,
           href: `/sales-receipts/${receipt.id}`,
           number: receipt.number,
+          kind: input.action,
+        };
+      }
+
+      case "create_customer": {
+        const name = draft.partyName.trim();
+        if (!name) return { ok: false, error: "Enter the customer name." };
+
+        if (input.partyId) {
+          const found = await prisma.party.findFirst({
+            where: { id: input.partyId, orgId: ctx.orgId, type: { in: ["customer", "both"] } },
+            select: { id: true, name: true },
+          });
+          if (!found) return { ok: false, error: "That customer was not found." };
+          return {
+            ok: true,
+            href: `/customers/${found.id}`,
+            number: found.name,
+            kind: input.action,
+          };
+        }
+
+        const customerId = await ensurePartyId(ctx, {
+          partyId: null,
+          createParty: input.createParty,
+          partyName: name,
+          type: "customer",
+          city: draft.city,
+        });
+        if (!customerId) return { ok: false, error: "Enter the customer name." };
+
+        const party = await prisma.party.findFirst({
+          where: { id: customerId, orgId: ctx.orgId },
+          select: { id: true, name: true },
+        });
+        if (!party) return { ok: false, error: "Could not save the customer." };
+
+        return {
+          ok: true,
+          href: `/customers/${party.id}`,
+          number: party.name,
           kind: input.action,
         };
       }

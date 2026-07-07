@@ -2,6 +2,7 @@ export type CommandIntent =
   | "create_receipt"
   | "create_payment"
   | "create_goods_receipt"
+  | "create_customer"
   | "unknown";
 
 export type PaymentCategory = "supplier" | "expense";
@@ -14,6 +15,23 @@ export type ParsedCommand = {
   quantityUnit: string | null;
   itemDescription: string | null;
   partyName: string | null;
+  city: string | null;
+  expenseDescription: string | null;
+  paymentCategory: PaymentCategory | null;
+  receiptCategory: ReceiptCategory | null;
+  raw: string;
+};
+
+export type LegacyCommandIntent = Exclude<CommandIntent, "create_customer">;
+
+export type LegacyParsedCommand = {
+  intent: LegacyCommandIntent;
+  amountText: string | null;
+  quantityText: string | null;
+  quantityUnit: string | null;
+  itemDescription: string | null;
+  partyName: string | null;
+  city: string | null;
   expenseDescription: string | null;
   paymentCategory: PaymentCategory | null;
   receiptCategory: ReceiptCategory | null;
@@ -60,8 +78,17 @@ const TO_PARTY_PATTERN =
 
 const FOR_REASON_PATTERN = /\b(?:for|pour)\s+(.+)$/i;
 
+const CREATE_CUSTOMER_PATTERNS = [
+  /\b(?:add|create|new)\s+(?:a\s+)?customer\b/i,
+  /\b(?:ajouter|créer|creer|nouveau)\s+(?:un\s+)?client\b/i,
+  /\b(?:add|ajouter)\s+.+\s+(?:as\s+(?:a\s+)?customer|comme\s+client)\b/i,
+];
+
 function detectIntent(text: string): CommandIntent {
   const lower = text.toLowerCase();
+  const isCreateCustomer = CREATE_CUSTOMER_PATTERNS.some((p) => p.test(lower));
+  if (isCreateCustomer) return "create_customer";
+
   const isReceipt = RECEIPT_PATTERNS.some((p) => p.test(lower));
   const isPayment = PAYMENT_PATTERNS.some((p) => p.test(lower));
   const isStockReceipt = STOCK_RECEIPT_PATTERNS.some((p) => p.test(lower));
@@ -249,13 +276,36 @@ function extractPartyName(text: string, intent: CommandIntent): string | null {
   return null;
 }
 
-export function parseCommandText(text: string): ParsedCommand {
+function extractCreateCustomerDetails(text: string): { name: string | null; city: string | null } {
+  const asCustomer = text.match(
+    /\b(?:add|ajouter)\s+(.+?)\s+(?:as\s+(?:a\s+)?customer|comme\s+client)\b(?:\s+(?:in|à|a)\s+(.+?))?$/i,
+  );
+  if (asCustomer?.[1]) {
+    const name = cleanLabel(asCustomer[1]);
+    const city = asCustomer[2] ? cleanLabel(asCustomer[2]) : null;
+    if (name.length >= 2) return { name, city: city && city.length >= 2 ? city : null };
+  }
+
+  const prefixed = text.match(
+    /\b(?:add|create|new|ajouter|créer|creer|nouveau)\s+(?:a\s+)?(?:customer|client|un\s+client)\s+(.+?)(?:\s+(?:in|à|a)\s+(.+?))?$/i,
+  );
+  if (prefixed?.[1]) {
+    const name = cleanLabel(prefixed[1]);
+    const city = prefixed[2] ? cleanLabel(prefixed[2]) : null;
+    if (name.length >= 2) return { name, city: city && city.length >= 2 ? city : null };
+  }
+
+  return { name: null, city: null };
+}
+
+function parseCommandTextFull(text: string): ParsedCommand {
   const raw = text.trim();
   const intent = detectIntent(raw);
   const quantityMatch = intent === "create_goods_receipt" ? extractQuantity(raw) : null;
   const amountText = intent === "create_goods_receipt" ? null : extractAmount(raw);
 
   let partyName: string | null = null;
+  let city: string | null = null;
   let expenseDescription: string | null = null;
   let paymentCategory: PaymentCategory | null = null;
   let receiptCategory: ReceiptCategory | null = null;
@@ -264,6 +314,10 @@ export function parseCommandText(text: string): ParsedCommand {
   if (intent === "create_goods_receipt") {
     itemDescription = extractItemDescription(raw);
     partyName = extractPartyName(raw, "create_receipt");
+  } else if (intent === "create_customer") {
+    const details = extractCreateCustomerDetails(raw);
+    partyName = details.name;
+    city = details.city;
   } else if (intent === "create_payment") {
     partyName = extractPartyName(raw, intent);
     const forReason = extractForReason(raw);
@@ -297,9 +351,24 @@ export function parseCommandText(text: string): ParsedCommand {
     quantityUnit: quantityMatch?.unit ?? null,
     itemDescription,
     partyName,
+    city,
     expenseDescription,
     paymentCategory,
     receiptCategory,
     raw,
   };
+}
+
+/** Full intent detection for Ask Bantoo (includes create_customer). */
+export function parseBantooCommandText(text: string): ParsedCommand {
+  return parseCommandTextFull(text);
+}
+
+/** Legacy command bar parser; create_customer is treated as unknown. */
+export function parseCommandText(text: string): LegacyParsedCommand {
+  const parsed = parseCommandTextFull(text);
+  if (parsed.intent === "create_customer") {
+    return { ...parsed, intent: "unknown" };
+  }
+  return parsed as LegacyParsedCommand;
 }
