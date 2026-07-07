@@ -37,6 +37,13 @@ const WARNING_CODES: BantooWarningCode[] = [
   "missingWhatsapp",
   "missingEmail",
   "notYetAvailable",
+  // --- Supplier & Purchasing Intelligence Sprint -------------------------
+  "supplierNotFound",
+  "supplierAmbiguous",
+  "enterSupplierName",
+  "supplierMissingPhone",
+  "supplierMissingWhatsapp",
+  "supplierMissingEmail",
 ];
 
 const FIELD_REASON_CODES: BantooFieldReasonCode[] = [

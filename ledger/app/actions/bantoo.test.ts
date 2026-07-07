@@ -106,6 +106,7 @@ function draft(overrides: Record<string, string> = {}) {
     dateTo: "",
     contactMethod: "",
     requestedAction: "",
+    postAction: "",
     ...overrides,
   };
 }
@@ -184,6 +185,8 @@ describe("ensurePartyId duplicate-prevention safety net (via executeBantooAction
       name: "Elhaji Adoum",
       type: "supplier",
       city: null,
+      phone: null,
+      whatsapp: null,
     });
     expect(createPayment).toHaveBeenCalledWith(
       "org_A",
@@ -297,6 +300,8 @@ describe("executeBantooAction org trust boundary", () => {
       name: "Golu",
       type: "customer",
       city: "Ngoundéré",
+      phone: null,
+      whatsapp: null,
     });
   });
 });
@@ -656,6 +661,370 @@ describe("executeBantooAction — Customer Intelligence Sprint", () => {
       partyId: "cust_1",
       createParty: false,
       partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(result).toEqual({ ok: false, error: "This action is not available yet." });
+  });
+});
+
+describe("executeBantooAction — Supplier & Purchasing Intelligence Sprint", () => {
+  it("edit_supplier: updates an in-org party and returns its profile link", async () => {
+    partyFindFirst.mockResolvedValue({ id: "sup_1" });
+    updatePartySpy.mockResolvedValue({ id: "sup_1", name: "Elhaji Adoum" });
+
+    const input: ExecuteBantooInput = {
+      action: "edit_supplier",
+      draft: draft({ partyName: "Elhaji", newName: "Elhaji Adoum", phone: "690123456" }),
+      partyId: "sup_1",
+      createParty: false,
+      partyType: "supplier",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    };
+
+    const result = await executeBantooAction(input);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.href).toBe("/suppliers/sup_1");
+      expect(result.kind).toBe("edit_supplier");
+    }
+    expect(updatePartySpy).toHaveBeenCalledWith("org_A", "sup_1", {
+      name: "Elhaji Adoum",
+      phone: "690123456",
+      whatsapp: "",
+      email: "",
+      city: "",
+    });
+  });
+
+  it("edit_supplier: rejects a cross-org partyId", async () => {
+    partyFindFirst.mockResolvedValue(null);
+
+    const input: ExecuteBantooInput = {
+      action: "edit_supplier",
+      draft: draft({ partyName: "Elhaji", phone: "690123456" }),
+      partyId: "sup_other_org",
+      createParty: false,
+      partyType: "supplier",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    };
+
+    const result = await executeBantooAction(input);
+    expect(result).toEqual({ ok: false, error: "That supplier was not found." });
+    expect(updatePartySpy).not.toHaveBeenCalled();
+  });
+
+  it("edit_supplier: requires a resolved supplier before saving", async () => {
+    const input: ExecuteBantooInput = {
+      action: "edit_supplier",
+      draft: draft({ partyName: "Elhaji", phone: "690123456" }),
+      partyId: null,
+      createParty: false,
+      partyType: "supplier",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    };
+
+    const result = await executeBantooAction(input);
+    expect(result).toEqual({ ok: false, error: "Choose the supplier to edit." });
+    expect(updatePartySpy).not.toHaveBeenCalled();
+  });
+
+  it("view_supplier: profile navigates straight to the supplier page", async () => {
+    partyFindFirst.mockResolvedValue({ id: "sup_1", name: "Elhaji" });
+
+    const input: ExecuteBantooInput = {
+      action: "view_supplier",
+      draft: draft({ view: "profile" }),
+      partyId: "sup_1",
+      createParty: false,
+      partyType: "supplier",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    };
+
+    const result = await executeBantooAction(input);
+    expect(result).toEqual({ ok: true, href: "/suppliers/sup_1", number: "Elhaji", kind: "view_supplier" });
+  });
+
+  it("view_supplier: ledger and documents deep-link to the right tab", async () => {
+    partyFindFirst.mockResolvedValue({ id: "sup_1", name: "Elhaji" });
+
+    const ledger = await executeBantooAction({
+      action: "view_supplier",
+      draft: draft({ view: "ledger" }),
+      partyId: "sup_1",
+      createParty: false,
+      partyType: "supplier",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(ledger).toMatchObject({ ok: true, href: "/suppliers/sup_1?tab=transactions" });
+
+    const documents = await executeBantooAction({
+      action: "view_supplier",
+      draft: draft({ view: "documents" }),
+      partyId: "sup_1",
+      createParty: false,
+      partyType: "supplier",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(documents).toMatchObject({ ok: true, href: "/suppliers/sup_1?tab=documents" });
+  });
+
+  it("view_supplier: list opens the supplier list without resolving a party", async () => {
+    const result = await executeBantooAction({
+      action: "view_supplier",
+      draft: draft({ view: "list" }),
+      partyId: null,
+      createParty: false,
+      partyType: "supplier",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(result).toEqual({ ok: true, href: "/suppliers", number: "", kind: "view_supplier" });
+    expect(partyFindFirst).not.toHaveBeenCalled();
+  });
+
+  it("view_supplier: rejects a cross-org partyId", async () => {
+    partyFindFirst.mockResolvedValue(null);
+    const result = await executeBantooAction({
+      action: "view_supplier",
+      draft: draft({ view: "profile" }),
+      partyId: "sup_other_org",
+      createParty: false,
+      partyType: "supplier",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(result).toEqual({ ok: false, error: "That supplier was not found." });
+  });
+
+  it("supplier_balance: positive balance means the org owes the supplier", async () => {
+    partyFindFirst.mockResolvedValue({ id: "sup_1", name: "Elhaji" });
+    getPartyBalanceSpy.mockResolvedValue(25000n);
+
+    const result = await executeBantooAction({
+      action: "supplier_balance",
+      draft: draft(),
+      partyId: "sup_1",
+      createParty: false,
+      partyType: "supplier",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(getPartyBalanceSpy).toHaveBeenCalledWith("org_A", "sup_1", "supplier");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.message).toContain("You owe Elhaji");
+      expect(result.message).toContain("25,000");
+    }
+  });
+
+  it("supplier_balance: negative balance means the supplier owes us a credit", async () => {
+    partyFindFirst.mockResolvedValue({ id: "sup_1", name: "Elhaji" });
+    getPartyBalanceSpy.mockResolvedValue(-5000n);
+
+    const result = await executeBantooAction({
+      action: "supplier_balance",
+      draft: draft(),
+      partyId: "sup_1",
+      createParty: false,
+      partyType: "supplier",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.message).toBe("Elhaji has a credit balance of 5,000 XAF with you.");
+    }
+  });
+
+  it("supplier_balance: reports no outstanding balance when zero", async () => {
+    partyFindFirst.mockResolvedValue({ id: "sup_1", name: "Elhaji" });
+    getPartyBalanceSpy.mockResolvedValue(0n);
+
+    const result = await executeBantooAction({
+      action: "supplier_balance",
+      draft: draft(),
+      partyId: "sup_1",
+      createParty: false,
+      partyType: "supplier",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.message).toBe("You have no outstanding balance with Elhaji.");
+  });
+
+  it("add_supplier_note: appends a dated note to any existing notes", async () => {
+    partyFindFirst.mockResolvedValue({ id: "sup_1", name: "Elhaji", notes: "Existing note" });
+    updatePartyNotesSpy.mockResolvedValue({ id: "sup_1" });
+
+    const result = await executeBantooAction({
+      action: "add_supplier_note",
+      draft: draft({ note: "delivers on Tuesdays" }),
+      partyId: "sup_1",
+      createParty: false,
+      partyType: "supplier",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(result.ok).toBe(true);
+    expect(updatePartyNotesSpy).toHaveBeenCalledWith(
+      "org_A",
+      "sup_1",
+      expect.stringMatching(/^Existing note\n\[\d{4}-\d{2}-\d{2}\] delivers on Tuesdays$/),
+    );
+  });
+
+  it("add_supplier_note: rejects empty note text", async () => {
+    partyFindFirst.mockResolvedValue({ id: "sup_1", name: "Elhaji", notes: null });
+    const result = await executeBantooAction({
+      action: "add_supplier_note",
+      draft: draft({ note: "  " }),
+      partyId: "sup_1",
+      createParty: false,
+      partyType: "supplier",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(result).toEqual({ ok: false, error: "Enter the note text." });
+    expect(updatePartyNotesSpy).not.toHaveBeenCalled();
+  });
+
+  it("contact_supplier: call produces a tel: link from the party's phone", async () => {
+    partyFindFirst.mockResolvedValue({ id: "sup_1", name: "Elhaji", phone: "690123456", whatsapp: null, email: null });
+    const result = await executeBantooAction({
+      action: "contact_supplier",
+      draft: draft({ contactMethod: "call" }),
+      partyId: "sup_1",
+      createParty: false,
+      partyType: "supplier",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(result).toEqual({ ok: true, href: "tel:690123456", number: "Elhaji", kind: "contact_supplier" });
+  });
+
+  it("contact_supplier: whatsapp produces a wa.me link with digits only", async () => {
+    partyFindFirst.mockResolvedValue({
+      id: "sup_1",
+      name: "Elhaji",
+      phone: null,
+      whatsapp: "+237 690 12 34 56",
+      email: null,
+    });
+    const result = await executeBantooAction({
+      action: "contact_supplier",
+      draft: draft({ contactMethod: "whatsapp" }),
+      partyId: "sup_1",
+      createParty: false,
+      partyType: "supplier",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(result).toEqual({
+      ok: true,
+      href: "https://wa.me/237690123456",
+      number: "Elhaji",
+      kind: "contact_supplier",
+    });
+  });
+
+  it("contact_supplier: email without one on file asks to add it rather than inventing one", async () => {
+    partyFindFirst.mockResolvedValue({ id: "sup_1", name: "Elhaji", phone: null, whatsapp: null, email: null });
+    const result = await executeBantooAction({
+      action: "contact_supplier",
+      draft: draft({ contactMethod: "email" }),
+      partyId: "sup_1",
+      createParty: false,
+      partyType: "supplier",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(result).toEqual({
+      ok: false,
+      error: "This supplier has no email on file. Add one first.",
+    });
+  });
+
+  it("supplier_query: answers with what was bought from the supplier in the resolved period", async () => {
+    partyFindFirst.mockResolvedValue({ id: "sup_1", name: "Elhaji" });
+    getPartyPurchaseHistoryInRangeSpy.mockResolvedValue({
+      items: [{ name: "Rice 50kg", quantity: "10", unit: "bag" }],
+      orderCount: 2,
+    });
+
+    const result = await executeBantooAction({
+      action: "supplier_query",
+      draft: draft({ periodText: "last month", dateFrom: "2026-06-01", dateTo: "2026-06-30" }),
+      partyId: "sup_1",
+      createParty: false,
+      partyType: "supplier",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(getPartyPurchaseHistoryInRangeSpy).toHaveBeenCalledWith(
+      "org_A",
+      "sup_1",
+      "supplier",
+      "2026-06-01",
+      "2026-06-30",
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.message).toContain("Elhaji");
+      expect(result.message).toContain("Rice 50kg");
+    }
+  });
+
+  it("supplier_query: reports no purchases found instead of guessing", async () => {
+    partyFindFirst.mockResolvedValue({ id: "sup_1", name: "Elhaji" });
+    getPartyPurchaseHistoryInRangeSpy.mockResolvedValue({ items: [], orderCount: 0 });
+
+    const result = await executeBantooAction({
+      action: "supplier_query",
+      draft: draft({}),
+      partyId: "sup_1",
+      createParty: false,
+      partyType: "supplier",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.message).toBe("No purchases found from Elhaji.");
+  });
+
+  it("unsupported_supplier_action: never silently succeeds, always reports not-available", async () => {
+    const result = await executeBantooAction({
+      action: "unsupported_supplier_action",
+      draft: draft({ requestedAction: "archive" }),
+      partyId: "sup_1",
+      createParty: false,
+      partyType: "supplier",
       itemId: null,
       bankAccountId: null,
       lineAccountId: null,

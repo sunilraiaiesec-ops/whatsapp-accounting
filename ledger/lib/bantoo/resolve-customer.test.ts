@@ -87,6 +87,9 @@ describe("resolveExtraction — Customer Intelligence Sprint", () => {
       phone: "690123456",
       whatsapp: null,
       email: null,
+      note: null,
+      post_action: null,
+      unsupported_requests: null,
       ...baseFields(),
     };
 
@@ -124,6 +127,9 @@ describe("resolveExtraction — Customer Intelligence Sprint", () => {
       phone: null,
       whatsapp: null,
       email: null,
+      note: null,
+      post_action: null,
+      unsupported_requests: null,
       ...baseFields(),
     };
 
@@ -141,6 +147,9 @@ describe("resolveExtraction — Customer Intelligence Sprint", () => {
       phone: null,
       whatsapp: null,
       email: null,
+      note: null,
+      post_action: null,
+      unsupported_requests: null,
       ...baseFields(),
     };
 
@@ -169,6 +178,9 @@ describe("resolveExtraction — Customer Intelligence Sprint", () => {
       phone: null,
       whatsapp: null,
       email: null,
+      note: null,
+      post_action: null,
+      unsupported_requests: null,
       ...baseFields(),
     };
 
@@ -368,6 +380,365 @@ describe("resolveExtraction — Customer Intelligence Sprint", () => {
       expect(proposal.warnings.some((w) => w.code === "lowConfidence")).toBe(false);
       expect(proposal.action).toBe("unsupported_customer_action");
     }
+  });
+
+  // --- Safety fix: silent customer identity merging (create_customer) ------
+  describe("create_customer: possible-duplicate safety fix", () => {
+    it("exact match, no conflicting details -> safe to auto-associate, no duplicate warning", async () => {
+      loadEntityCandidates.mockResolvedValue([{ id: "party_elhaji", label: "Elhaji Adamou", text: "Elhaji Adamou" }]);
+      getPartyContact.mockResolvedValue({
+        id: "party_elhaji",
+        name: "Elhaji Adamou",
+        phone: null,
+        whatsapp: null,
+        email: null,
+        city: null,
+        country: null,
+        notes: null,
+      });
+
+      const action: ExtractedAction = {
+        action: "create_customer",
+        customer_name: "Elhaji Adamou",
+        city: null,
+        phone: null,
+        whatsapp: null,
+        country: null,
+        note: null,
+        post_action: null,
+        unsupported_requests: null,
+        ...baseFields(),
+      };
+
+      const proposal = await resolveExtraction(ctx, action);
+      expect(proposal.partyId).toBe("party_elhaji");
+      expect(proposal.createParty).toBe(false);
+      expect(proposal.duplicateCandidate).toBeNull();
+      expect(proposal.warnings.some((w) => w.code === "possibleDuplicateCustomer")).toBe(false);
+    });
+
+    it("match found but new request has a different city than the existing record -> requires disambiguation", async () => {
+      loadEntityCandidates.mockResolvedValue([{ id: "party_elhaji", label: "Elhaji Adamou", text: "Elhaji Adamou" }]);
+      getPartyContact.mockResolvedValue({
+        id: "party_elhaji",
+        name: "Elhaji Adamou",
+        phone: null,
+        whatsapp: null,
+        email: null,
+        city: "Douala",
+        country: null,
+        notes: null,
+      });
+
+      const action: ExtractedAction = {
+        action: "create_customer",
+        customer_name: "Elhaji Adamou",
+        city: "Garoua",
+        phone: null,
+        whatsapp: null,
+        country: null,
+        note: null,
+        post_action: null,
+        unsupported_requests: null,
+        ...baseFields(),
+      };
+
+      const proposal = await resolveExtraction(ctx, action);
+      // Never silently reused or overwritten — the client must choose.
+      expect(proposal.partyId).toBeNull();
+      expect(proposal.createParty).toBe(false);
+      expect(proposal.duplicateCandidate).toEqual({
+        id: "party_elhaji",
+        name: "Elhaji Adamou",
+        city: "Douala",
+        phone: null,
+        whatsapp: null,
+      });
+      expect(
+        proposal.warnings.some((w) => w.code === "possibleDuplicateCustomer" && w.params?.name === "Elhaji Adamou"),
+      ).toBe(true);
+      // The new (conflicting) city is still shown in the editable draft for
+      // review, but is NOT what's stored against the existing party's id —
+      // partyId stays null until the user explicitly chooses.
+      expect(proposal.draft.city).toBe("Garoua");
+    });
+
+    it("match found but new request has a different phone than the existing record -> requires disambiguation", async () => {
+      loadEntityCandidates.mockResolvedValue([{ id: "party_elhaji", label: "Elhaji Adamou", text: "Elhaji Adamou" }]);
+      getPartyContact.mockResolvedValue({
+        id: "party_elhaji",
+        name: "Elhaji Adamou",
+        phone: "699000000",
+        whatsapp: null,
+        email: null,
+        city: null,
+        country: null,
+        notes: null,
+      });
+
+      const action: ExtractedAction = {
+        action: "create_customer",
+        customer_name: "Elhaji Adamou",
+        city: null,
+        phone: "690123456",
+        whatsapp: null,
+        country: null,
+        note: null,
+        post_action: null,
+        unsupported_requests: null,
+        ...baseFields(),
+      };
+
+      const proposal = await resolveExtraction(ctx, action);
+      expect(proposal.partyId).toBeNull();
+      expect(proposal.duplicateCandidate?.phone).toBe("699000000");
+      expect(proposal.warnings.some((w) => w.code === "possibleDuplicateCustomer")).toBe(true);
+    });
+
+    it("no match -> proceeds as a genuinely new customer, no duplicate warning", async () => {
+      loadEntityCandidates.mockResolvedValue([]);
+      const action: ExtractedAction = {
+        action: "create_customer",
+        customer_name: "Brand New Person",
+        city: "Garoua",
+        phone: "690123456",
+        whatsapp: null,
+        country: null,
+        note: null,
+        post_action: null,
+        unsupported_requests: null,
+        ...baseFields(),
+      };
+
+      const proposal = await resolveExtraction(ctx, action);
+      expect(proposal.partyId).toBeNull();
+      expect(proposal.createParty).toBe(true);
+      expect(proposal.duplicateCandidate).toBeNull();
+      expect(proposal.warnings.some((w) => w.code === "possibleDuplicateCustomer")).toBe(false);
+      expect(getPartyContact).not.toHaveBeenCalled();
+    });
+
+    it("never overwrites the existing customer's stored details when a conflict is detected", async () => {
+      loadEntityCandidates.mockResolvedValue([{ id: "party_elhaji", label: "Elhaji Adamou", text: "Elhaji Adamou" }]);
+      const existing = {
+        id: "party_elhaji",
+        name: "Elhaji Adamou",
+        phone: "699000000",
+        whatsapp: "699000000",
+        email: null,
+        city: "Douala",
+        country: null,
+        notes: null,
+      };
+      getPartyContact.mockResolvedValue(existing);
+
+      const action: ExtractedAction = {
+        action: "create_customer",
+        customer_name: "Elhaji Adamou",
+        city: "Garoua",
+        phone: "690123456",
+        whatsapp: "690123456",
+        country: null,
+        note: null,
+        post_action: null,
+        unsupported_requests: null,
+        ...baseFields(),
+      };
+
+      const proposal = await resolveExtraction(ctx, action);
+      // The existing record's own details are surfaced unchanged for
+      // comparison — proving nothing was merged/overwritten server-side.
+      expect(proposal.duplicateCandidate).toEqual({
+        id: existing.id,
+        name: existing.name,
+        city: existing.city,
+        phone: existing.phone,
+        whatsapp: existing.whatsapp,
+      });
+      expect(proposal.partyId).toBeNull();
+    });
+  });
+
+  // --- Multi-step Task Planning: plan checklist -----------------------------
+  describe("create_customer / edit_customer: plan checklist", () => {
+    it("simple 'add Musa as a customer' -> plan has just [createCustomer]", async () => {
+      loadEntityCandidates.mockResolvedValue([]);
+      const action: ExtractedAction = {
+        action: "create_customer",
+        customer_name: "Musa",
+        city: null,
+        phone: null,
+        whatsapp: null,
+        country: null,
+        note: null,
+        post_action: null,
+        unsupported_requests: null,
+        ...baseFields(),
+      };
+
+      const proposal = await resolveExtraction(ctx, action);
+      expect(proposal.plan).toEqual([
+        { code: "createCustomer", status: "ready", params: { name: "Musa" } },
+      ]);
+    });
+
+    it("'add Musa as a customer in Garoua' -> plan has [createCustomer, setCity]", async () => {
+      loadEntityCandidates.mockResolvedValue([]);
+      const action: ExtractedAction = {
+        action: "create_customer",
+        customer_name: "Musa",
+        city: "Garoua",
+        phone: null,
+        whatsapp: null,
+        country: null,
+        note: null,
+        post_action: null,
+        unsupported_requests: null,
+        ...baseFields(),
+      };
+
+      const proposal = await resolveExtraction(ctx, action);
+      expect(proposal.plan).toEqual([
+        { code: "createCustomer", status: "ready", params: { name: "Musa" } },
+        { code: "setCity", status: "ready", params: { value: "Garoua" } },
+      ]);
+    });
+
+    it("Elhaji Adamou example: compound request populates every field AND the full plan (not just the name)", async () => {
+      loadEntityCandidates.mockResolvedValue([]);
+      const action: ExtractedAction = {
+        action: "create_customer",
+        customer_name: "Elhaji Adamou",
+        city: "Garoua",
+        phone: "690123456",
+        whatsapp: "690123456",
+        country: null,
+        note: "He usually pays every Friday after Jummah",
+        post_action: "open_profile",
+        unsupported_requests: null,
+        ...baseFields(),
+      };
+
+      const proposal = await resolveExtraction(ctx, action);
+      expect(proposal.draft.city).toBe("Garoua");
+      expect(proposal.draft.phone).toBe("690123456");
+      expect(proposal.draft.whatsapp).toBe("690123456");
+      expect(proposal.draft.note).toBe("He usually pays every Friday after Jummah");
+      expect(proposal.draft.postAction).toBe("open_profile");
+      expect(proposal.plan).toEqual([
+        { code: "createCustomer", status: "ready", params: { name: "Elhaji Adamou" } },
+        { code: "setCity", status: "ready", params: { value: "Garoua" } },
+        { code: "setPhone", status: "ready", params: { value: "690123456" } },
+        { code: "setWhatsapp", status: "ready", params: { value: "690123456" } },
+        { code: "setNote", status: "ready", params: { value: "He usually pays every Friday after Jummah" } },
+        { code: "openProfile", status: "ready" },
+      ]);
+    });
+
+    it("a trailing unsupported request is shown as an unavailable plan step, never crashes or blocks supported steps", async () => {
+      loadEntityCandidates.mockResolvedValue([]);
+      const action: ExtractedAction = {
+        action: "create_customer",
+        customer_name: "Musa",
+        city: null,
+        phone: null,
+        whatsapp: null,
+        country: null,
+        note: null,
+        post_action: null,
+        unsupported_requests: ["then invoice him for 25 bags of rice", "then email the invoice"],
+        ...baseFields(),
+      };
+
+      const proposal = await resolveExtraction(ctx, action);
+      expect(proposal.plan[0]).toEqual({ code: "createCustomer", status: "ready", params: { name: "Musa" } });
+      expect(proposal.plan.slice(1)).toEqual([
+        { code: "unsupportedStep", status: "unavailable", params: { request: "then invoice him for 25 bags of rice" } },
+        { code: "unsupportedStep", status: "unavailable", params: { request: "then email the invoice" } },
+      ]);
+      // The supported step is still fully executable — createParty stays true.
+      expect(proposal.createParty).toBe(true);
+    });
+
+    it("combined with the safety fix: a compound multi-field request still requires disambiguation when it conflicts with an existing customer", async () => {
+      loadEntityCandidates.mockResolvedValue([{ id: "party_elhaji", label: "Elhaji Adamou", text: "Elhaji Adamou" }]);
+      getPartyContact.mockResolvedValue({
+        id: "party_elhaji",
+        name: "Elhaji Adamou",
+        phone: null,
+        whatsapp: null,
+        email: null,
+        city: "Douala",
+        country: null,
+        notes: null,
+      });
+
+      const action: ExtractedAction = {
+        action: "create_customer",
+        customer_name: "Elhaji Adamou",
+        city: "Garoua",
+        phone: "690123456",
+        whatsapp: "690123456",
+        country: null,
+        note: "Pays every Friday",
+        post_action: "open_profile",
+        unsupported_requests: null,
+        ...baseFields(),
+      };
+
+      const proposal = await resolveExtraction(ctx, action);
+      expect(proposal.partyId).toBeNull();
+      expect(proposal.duplicateCandidate?.id).toBe("party_elhaji");
+      expect(proposal.warnings.some((w) => w.code === "possibleDuplicateCustomer")).toBe(true);
+      // The plan is still built in full — disambiguation gates Confirm & Save
+      // client-side, it doesn't hide what will happen once resolved.
+      expect(proposal.plan.map((s) => s.code)).toEqual([
+        "createCustomer",
+        "setCity",
+        "setPhone",
+        "setWhatsapp",
+        "setNote",
+        "openProfile",
+      ]);
+    });
+
+    it("edit_customer: plan reflects only the fields actually requested to change, not values merely pre-filled from the current record", async () => {
+      loadEntityCandidates.mockResolvedValue([MUSA]);
+      getPartyContact.mockResolvedValue({
+        id: "party_musa",
+        name: "Musa",
+        phone: "690000000",
+        whatsapp: "690000000",
+        email: "musa@example.com",
+        city: "Maroua",
+        country: null,
+        notes: null,
+      });
+
+      const action: ExtractedAction = {
+        action: "edit_customer",
+        customer_name: "Musa",
+        new_name: null,
+        city: null,
+        phone: "690123456",
+        whatsapp: null,
+        email: null,
+        note: "Prefers evening delivery",
+        post_action: null,
+        unsupported_requests: null,
+        ...baseFields(),
+      };
+
+      const proposal = await resolveExtraction(ctx, action);
+      // Phone was explicitly requested to change, and a note was added — but
+      // whatsapp/city/email were only pre-filled from the current record, so
+      // they must NOT show up as plan steps (nothing was actually asked).
+      expect(proposal.plan).toEqual([
+        { code: "editCustomer", status: "ready", params: { name: "Musa" } },
+        { code: "setPhone", status: "ready", params: { value: "690123456" } },
+        { code: "setNote", status: "ready", params: { value: "Prefers evening delivery" } },
+      ]);
+    });
   });
 
   it("never leaks candidates across orgs: resolveParty is always called with the caller's ctx", async () => {
