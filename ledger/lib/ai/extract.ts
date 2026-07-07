@@ -25,7 +25,18 @@ Classify "action" as exactly one of:
 - "expense": money PAID OUT for a business cost (rent, fuel, transport, salaries, fees, utilities...). Fields: amount, description, category, supplier_name (vendor, optional), payment_method, date, currency.
 - "sales_receipt": a cash SALE to a customer (money received now for goods sold). Fields: amount, customer_name (optional), description, payment_method, date, currency.
 - "create_customer": add a NEW customer contact (no payment or sale). Fields: customer_name, city (optional), phone (optional), country (optional), currency.
+- "edit_customer": change details on an EXISTING customer (rename, or update city/phone/whatsapp/email). Fields: customer_name (who to find), new_name (optional, only if renaming), city, phone, whatsapp, email (each optional — only the ones being changed).
+- "view_customer": open/show/find a customer's page — profile, ledger/transactions, statement, or documents — with NO changes to data. Fields: customer_name (omit only for a generic "search customers" with no name), view (one of "profile", "ledger", "statement", "documents", "list"), period_text (a raw phrase like "June" or "last month", only for a statement request that mentions a period).
+- "customer_balance": the user is asking how much a specific customer owes / their outstanding balance. Fields: customer_name.
+- "add_customer_note": add a note/internal comment to a customer's record. Fields: customer_name, note (the note text).
+- "contact_customer": the user wants to call, WhatsApp, or email a specific customer. Fields: customer_name, method ("call", "whatsapp", or "email").
+- "customer_query": a free-text question about a specific customer's history, e.g. "what did Musa buy last month". Fields: customer_name, question (the raw question), period_text (a raw phrase like "last month", if present).
+- "unsupported_customer_action": the user asked to archive, reactivate, merge, or upload a document for a customer — these are recognized but NOT YET buildable, so classify them here confidently instead of "unknown". Fields: customer_name, requested (one of "archive", "reactivate", "merge", "upload_document").
 - "unknown": you cannot confidently tell what the user wants.
+
+Add-client phrasing is ALWAYS "create_customer" (never "unknown") when a person/shop name is present, e.g. "Add Tanha Abdullah as a customer", "Add Golu as a client in Ngoundéré", "ajouter un client nommé Tanha Abdullah", "Ajouter Golu comme client à Ngoundéré". Put the person's or shop's name in customer_name.
+
+Any command about an EXISTING customer (not creating a new one) — editing, viewing/opening/finding their profile/ledger/statement/documents, asking their balance, adding a note, calling/WhatsApp/emailing them, asking what they bought, or archiving/reactivating/merging them — is ALWAYS one of the customer_* / view_customer / contact_customer / unsupported_customer_action actions above (never "unknown"), in English OR French (e.g. "Modifier le client Musa", "Ouvrir la fiche client de Musa", "Quel est le solde impayé de Musa ?", "Appeler le client Musa", "Archiver le client Musa"). Only use "unknown" when no customer/client keyword or clear intent is present at all. A "supplier"/"fournisseur" command is NEVER one of these customer actions.
 
 Rules:
 - Always include "action", "confidence" (0..1), "currency" (default "XAF"), and "summary" (a short human sentence describing the action in the user's language).

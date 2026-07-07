@@ -74,7 +74,16 @@ export type BantooWarningCode =
   | "enterSaleAmount"
   | "noIncomeAccount"
   | "enterCustomerName"
-  | "lowConfidence";
+  | "lowConfidence"
+  // --- Customer Intelligence Sprint --------------------------------------
+  | "customerNotFound"
+  | "customerAmbiguous"
+  | "noChangesToSave"
+  | "enterNoteText"
+  | "missingPhone"
+  | "missingWhatsapp"
+  | "missingEmail"
+  | "notYetAvailable";
 
 export type BantooWarning = {
   code: BantooWarningCode;
@@ -148,6 +157,31 @@ export type BantooDraft = {
   // supplier_purchase (posts to PurchaseInvoice.dueDate); empty otherwise.
   dueDate: string;
   currency: string;
+  // --- Customer Intelligence Sprint --------------------------------------
+  // edit_customer: contact fields, pre-filled from the resolved party and
+  // editable before saving. New name is separate from partyName (which is
+  // used to search/resolve WHO to edit).
+  newName: string;
+  phone: string;
+  whatsapp: string;
+  email: string;
+  // add_customer_note: text appended to the party's existing notes.
+  note: string;
+  // view_customer: which page to open once the party (or none, for "list")
+  // is resolved. One of "" | "profile" | "ledger" | "statement" |
+  // "documents" | "list" — plain string (like every other draft field) so
+  // it maps directly onto a form control without a cast.
+  view: string;
+  // Raw period phrase ("June", "last month") for display, resolved to an
+  // actual [dateFrom, dateTo] range server-side for the statement/query views.
+  periodText: string;
+  dateFrom: string;
+  dateTo: string;
+  // contact_customer: which channel to use. One of "" | "call" | "whatsapp" | "email".
+  contactMethod: string;
+  // unsupported_customer_action: which recognized-but-unbuilt action was
+  // requested, purely for potential debugging/analytics — never executed.
+  requestedAction: string;
 };
 
 // The proposal returned to the client after AI extraction + org-scoped
@@ -195,7 +229,7 @@ export type ExecuteBantooInput = {
 };
 
 export type BantooExecuteResult =
-  | { ok: true; href: string; number: string; kind: BantooActionType }
+  | { ok: true; href: string; number: string; kind: BantooActionType; message?: string }
   | { ok: false; error: string };
 
 export function emptyDraft(): BantooDraft {
@@ -218,5 +252,16 @@ export function emptyDraft(): BantooDraft {
     date: "",
     dueDate: "",
     currency: "XAF",
+    newName: "",
+    phone: "",
+    whatsapp: "",
+    email: "",
+    note: "",
+    view: "",
+    periodText: "",
+    dateFrom: "",
+    dateTo: "",
+    contactMethod: "",
+    requestedAction: "",
   };
 }

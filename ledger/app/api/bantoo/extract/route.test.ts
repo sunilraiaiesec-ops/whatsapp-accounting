@@ -119,6 +119,22 @@ describe("POST /api/bantoo/extract resilience", () => {
     expect(data.proposal.action).toBe("create_customer");
     expect(data.proposal.lowConfidence).toBe(false);
   });
+
+  it("blends AI unknown + French summary into create_customer (production regression)", async () => {
+    extractBantooAction.mockResolvedValue({
+      action: "unknown",
+      confidence: 0.2,
+      currency: "XAF",
+      summary: "L'utilisateur souhaite ajouter un client nommé Tanha Abdullah.",
+    });
+
+    const res = await POST(makeRequest({ text: "Tanha Abdullah" }));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.proposal.action).toBe("create_customer");
+    expect(data.proposal.lowConfidence).toBe(false);
+  });
 });
 
 describe("POST /api/bantoo/extract — AI credit metering", () => {

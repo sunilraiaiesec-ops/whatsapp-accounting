@@ -505,6 +505,53 @@ function patternReasonIsApproximate(reason: import("@/lib/bantoo/types").BantooP
 }
 
 // ---------------------------------------------------------------------------
+// Ask Bantoo "customer_query" answers (e.g. "what did Musa buy last month").
+// Read-only: reuses the same product-line fetch as the Overview/AI Memory
+// tabs, just filtered to an explicit [from, to] date range (inclusive,
+// YYYY-MM-DD) instead of the full history. A null bound means "no limit on
+// that side" so a query with no recognized period still returns an answer
+// covering all-time history rather than an empty one.
+// ---------------------------------------------------------------------------
+
+export type PartyPurchaseQueryItem = {
+  name: string;
+  quantity: string;
+  unit: string | null;
+};
+
+export type PartyPurchaseQueryResult = {
+  items: PartyPurchaseQueryItem[];
+  orderCount: number;
+};
+
+export async function getPartyPurchaseHistoryInRange(
+  orgId: string,
+  partyId: string,
+  kind: PartyKind,
+  from: string | null,
+  to: string | null,
+): Promise<PartyPurchaseQueryResult> {
+  const lines =
+    kind === "customer"
+      ? await productLinesForCustomer(orgId, partyId)
+      : await productLinesForSupplier(orgId, partyId);
+
+  const filtered = lines.filter((line) => {
+    const key = line.date.toISOString().slice(0, 10);
+    if (from && key < from) return false;
+    if (to && key > to) return false;
+    return true;
+  });
+
+  const products = await aggregateProducts(orgId, filtered);
+
+  return {
+    items: products.map((p) => ({ name: p.name, quantity: p.totalQuantity, unit: p.unit })),
+    orderCount: filtered.length,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Ask Bantoo gentle-enrichment suggestions. Purely a reader — never writes
 // anything itself; each suggestion carries an explicit `accept` action the
 // UI wires to a real update (see acceptPartyEnrichmentSuggestion in

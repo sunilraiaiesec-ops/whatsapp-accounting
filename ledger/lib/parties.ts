@@ -114,6 +114,37 @@ export async function updatePartyNotes(orgId: string, id: string, notes: string 
   return prisma.party.update({ where: { id }, data: { notes: trimOrNull(notes) } });
 }
 
+// Org-scoped read of the contact fields Ask Bantoo needs for edit/contact
+// flows (lib/bantoo/resolve.ts, app/actions/bantoo.ts) — never trusts a
+// caller-supplied party without checking orgId first, same as every other
+// lookup in this module.
+export type PartyContactInfo = {
+  id: string;
+  name: string;
+  phone: string | null;
+  whatsapp: string | null;
+  email: string | null;
+  city: string | null;
+  country: string | null;
+  notes: string | null;
+};
+
+export async function getPartyContact(orgId: string, id: string): Promise<PartyContactInfo | null> {
+  return prisma.party.findFirst({
+    where: { orgId, id },
+    select: {
+      id: true,
+      name: true,
+      phone: true,
+      whatsapp: true,
+      email: true,
+      city: true,
+      country: true,
+      notes: true,
+    },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Duplicate-contact detection (used by quick-add, the profile page, and Ask
 // Bantoo's create-new-party flow). Reuses the shared Ask Bantoo fuzzy matcher

@@ -14,6 +14,13 @@ export const BANTOO_ACTION_TYPES = [
   "expense",
   "sales_receipt",
   "create_customer",
+  "edit_customer",
+  "view_customer",
+  "customer_balance",
+  "add_customer_note",
+  "contact_customer",
+  "customer_query",
+  "unsupported_customer_action",
   "unknown",
 ] as const;
 
@@ -159,6 +166,92 @@ export const createCustomerSchema = z.object({
   ...base,
 });
 
+// Update fields on an EXISTING customer. `customer_name` identifies who to
+// resolve (fuzzy-matched, org-scoped, same as every other party lookup);
+// every other field is an optional change to apply — null/absent means
+// "leave unchanged". No amounts/money involved, so no currency needed beyond
+// the shared base shape's requirement.
+export const editCustomerSchema = z.object({
+  action: z.literal("edit_customer"),
+  customer_name: ntext,
+  new_name: ntext,
+  city: ntext,
+  phone: ntext,
+  whatsapp: ntext,
+  email: ntext,
+  currency,
+  ...base,
+});
+
+const customerViewTarget = z
+  .enum(["profile", "ledger", "statement", "documents", "list"])
+  .catch("profile");
+
+// Navigation-only: resolve a customer (or none, for "list") and hand back
+// enough to deep-link into the existing customer pages. Never writes
+// anything. `period_text` carries a raw phrase like "June" or "last month"
+// for the statement view; the caller resolves it to a concrete date range.
+export const viewCustomerSchema = z.object({
+  action: z.literal("view_customer"),
+  customer_name: ntext,
+  view: customerViewTarget,
+  period_text: ntext,
+  currency,
+  ...base,
+});
+
+export const customerBalanceSchema = z.object({
+  action: z.literal("customer_balance"),
+  customer_name: ntext,
+  currency,
+  ...base,
+});
+
+export const addCustomerNoteSchema = z.object({
+  action: z.literal("add_customer_note"),
+  customer_name: ntext,
+  note: ntext,
+  currency,
+  ...base,
+});
+
+const contactMethod = z.enum(["call", "whatsapp", "email"]).catch("call");
+
+export const contactCustomerSchema = z.object({
+  action: z.literal("contact_customer"),
+  customer_name: ntext,
+  method: contactMethod,
+  currency,
+  ...base,
+});
+
+// Read-only, free-text question about a specific customer's history (e.g.
+// "what did Musa buy last month"). Answered from existing org-scoped party
+// data (lib/party-insights.ts) — never writes anything.
+export const customerQuerySchema = z.object({
+  action: z.literal("customer_query"),
+  customer_name: ntext,
+  question: ntext,
+  period_text: ntext,
+  currency,
+  ...base,
+});
+
+const unsupportedCustomerRequest = z
+  .enum(["archive", "reactivate", "merge", "upload_document"])
+  .catch("archive");
+
+// Recognized-but-not-yet-buildable customer commands (archive/reactivate/
+// merge/upload document) — classified confidently so the UI shows the
+// standard "not available yet" message instead of a misleading "not sure".
+export const unsupportedCustomerActionSchema = z.object({
+  action: z.literal("unsupported_customer_action"),
+  customer_name: ntext,
+  requested: unsupportedCustomerRequest,
+  currency,
+  ...base,
+});
+
 export const unknownSchema = z.object({
   action: z.literal("unknown"),
   currency,
@@ -173,6 +266,13 @@ export const extractedActionSchema = z.discriminatedUnion("action", [
   expenseSchema,
   salesReceiptSchema,
   createCustomerSchema,
+  editCustomerSchema,
+  viewCustomerSchema,
+  customerBalanceSchema,
+  addCustomerNoteSchema,
+  contactCustomerSchema,
+  customerQuerySchema,
+  unsupportedCustomerActionSchema,
   unknownSchema,
 ]);
 
@@ -184,6 +284,13 @@ export type CustomerPaymentAction = z.infer<typeof customerPaymentSchema>;
 export type ExpenseAction = z.infer<typeof expenseSchema>;
 export type SalesReceiptAction = z.infer<typeof salesReceiptSchema>;
 export type CreateCustomerAction = z.infer<typeof createCustomerSchema>;
+export type EditCustomerAction = z.infer<typeof editCustomerSchema>;
+export type ViewCustomerAction = z.infer<typeof viewCustomerSchema>;
+export type CustomerBalanceAction = z.infer<typeof customerBalanceSchema>;
+export type AddCustomerNoteAction = z.infer<typeof addCustomerNoteSchema>;
+export type ContactCustomerAction = z.infer<typeof contactCustomerSchema>;
+export type CustomerQueryAction = z.infer<typeof customerQuerySchema>;
+export type UnsupportedCustomerActionAction = z.infer<typeof unsupportedCustomerActionSchema>;
 export type UnknownAction = z.infer<typeof unknownSchema>;
 
 // Confidence below this is treated as "not sure" — the UI must warn the user and

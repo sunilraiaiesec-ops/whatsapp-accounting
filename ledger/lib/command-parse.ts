@@ -3,7 +3,50 @@ export type CommandIntent =
   | "create_payment"
   | "create_goods_receipt"
   | "create_customer"
+  | "customer_action"
   | "unknown";
+
+// Every non-creation customer workflow Ask Bantoo can recognize by rule. The
+// "unsupported_*" members exist so archive/reactivate/merge/upload-document
+// commands are classified confidently (not "unknown") and routed to the
+// standard "not available yet" response, instead of surfacing a misleading
+// low-confidence guess.
+export type CustomerActionKind =
+  | "edit"
+  | "view_profile"
+  | "view_ledger"
+  | "view_statement"
+  | "view_documents"
+  | "view_list"
+  | "balance"
+  | "add_note"
+  | "contact_call"
+  | "contact_whatsapp"
+  | "contact_email"
+  | "query"
+  | "unsupported_archive"
+  | "unsupported_reactivate"
+  | "unsupported_merge"
+  | "unsupported_upload_document";
+
+export type ParsedCustomerAction = {
+  kind: CustomerActionKind;
+  customerName: string | null;
+  // Only set for "unsupported_merge" — the second party to merge into/with.
+  secondCustomerName: string | null;
+  // Only set for "add_note".
+  note: string | null;
+  // Only set for "edit" — updates to apply, when present in the command text.
+  phone: string | null;
+  whatsapp: string | null;
+  email: string | null;
+  city: string | null;
+  // Only set for "view_statement" and "query" — raw phrase like "June" or
+  // "last month", resolved to an actual date range by resolvePeriodToRange.
+  periodText: string | null;
+  // Only set for "query" — the free-text question, for the summary/answer.
+  question: string | null;
+};
 
 export type PaymentCategory = "supplier" | "expense";
 export type ReceiptCategory = "customer" | "sales";
@@ -19,10 +62,12 @@ export type ParsedCommand = {
   expenseDescription: string | null;
   paymentCategory: PaymentCategory | null;
   receiptCategory: ReceiptCategory | null;
+  // Populated only when intent === "customer_action".
+  customerAction: ParsedCustomerAction | null;
   raw: string;
 };
 
-export type LegacyCommandIntent = Exclude<CommandIntent, "create_customer">;
+export type LegacyCommandIntent = Exclude<CommandIntent, "create_customer" | "customer_action">;
 
 export type LegacyParsedCommand = {
   intent: LegacyCommandIntent;
@@ -79,15 +124,403 @@ const TO_PARTY_PATTERN =
 const FOR_REASON_PATTERN = /\b(?:for|pour)\s+(.+)$/i;
 
 const CREATE_CUSTOMER_PATTERNS = [
-  /\b(?:add|create|new)\s+(?:a\s+)?customer\b/i,
-  /\b(?:ajouter|créer|creer|nouveau)\s+(?:un\s+)?client\b/i,
-  /\b(?:add|ajouter)\s+.+\s+(?:as\s+(?:a\s+)?customer|comme\s+client)\b/i,
+  /\b(?:add|create|new)\s+(?:a\s+)?customers?\b/i,
+  /\b(?:ajouter|créer|creer|nouveau)\s+(?:un\s+)?clients?\b/i,
+  /\b(?:add|ajouter)\s+.+\s+(?:as\s+(?:a\s+)?(?:customer|client)|comme\s+client)\b/i,
+  /\b(?:add|ajouter)\s+clients?\s+\S/i,
+  /\bclients?\s+(?:nommé|nomme|named|called|appelé|appele|appellé)\b/i,
 ];
+
+const CUSTOMER_NAME_LEAD =
+  /^(?:nommé|nomme|named|called|appelé|appele|appellé)\s+/i;
+
+// ---------------------------------------------------------------------------
+// Customer-action detection (Ask Bantoo Customer Intelligence Sprint).
+// Every pattern below deliberately requires the literal word
+// "customer"/"client" so a parallel supplier command (e.g. "Call supplier
+// Adamou") never gets misclassified — see the "customer vs supplier
+// confusion" regression tests. Patterns are tried in priority order (most
+// specific first) so e.g. "merge" is never swallowed by the generic
+// edit/view patterns.
+// ---------------------------------------------------------------------------
+
+const PERIOD_TAIL = /\s+(?:for|pour)\s+(.+)$/i;
+
+function stripTrailingPunctuation(text: string): string {
+  return text.replace(/[?.!]+\s*$/g, "").trim();
+}
+
+function cleanCustomerName(raw: string): string {
+  let s = raw.trim();
+  s = s.replace(/^[:,-]+/, "").trim();
+  s = s.replace(/['’]s$/i, "").trim();
+  s = stripTrailingPunctuation(s);
+  return cleanLabel(s);
+}
+
+// Splits a captured tail like "Musa for June" into { name: "Musa", period:
+// "June" }. When there is no " for "/" pour " clause, period is null.
+function splitNameAndPeriod(tail: string): { name: string; period: string | null } {
+  const m = tail.match(PERIOD_TAIL);
+  if (m?.[1]) {
+    return {
+      name: cleanCustomerName(tail.slice(0, m.index)),
+      period: stripTrailingPunctuation(m[1]),
+    };
+  }
+  return { name: cleanCustomerName(tail), period: null };
+}
+
+function parseEditTail(tail: string): {
+  name: string;
+  phone: string | null;
+  whatsapp: string | null;
+  email: string | null;
+  city: string | null;
+} {
+  const colonIndex = tail.indexOf(":");
+  const namePart = colonIndex >= 0 ? tail.slice(0, colonIndex) : tail;
+  const fieldsText = colonIndex >= 0 ? tail.slice(colonIndex + 1).trim() : "";
+  const name = cleanCustomerName(namePart);
+
+  let phone: string | null = null;
+  let whatsapp: string | null = null;
+  let email: string | null = null;
+  let city: string | null = null;
+
+  if (fieldsText) {
+    const emailMatch = fieldsText.match(/\bemail\s+([^\s,;]+@[^\s,;]+)/i);
+    if (emailMatch?.[1]) email = emailMatch[1].trim();
+
+    const waMatch = fieldsText.match(/\bwhatsapp\s+([+\d][\d\s-]{4,}?)(?:[,;]|$)/i);
+    if (waMatch?.[1]) whatsapp = waMatch[1].trim();
+
+    const phoneMatch = fieldsText.match(/\b(?:phone|t[ée]l[ée]phone|tel)\s+([+\d][\d\s-]{4,}?)(?:[,;]|$)/i);
+    if (phoneMatch?.[1]) phone = phoneMatch[1].trim();
+
+    const cityMatch = fieldsText.match(/\b(?:city|ville)\s+([^,;]+?)(?:[,;]|$)/i);
+    if (cityMatch?.[1]) city = cityMatch[1].trim();
+  }
+
+  return { name, phone, whatsapp, email, city };
+}
+
+// Ordered most-specific-first: merge/archive/reactivate/upload before the
+// generic edit/view/search patterns so they never get shadowed.
+const CUSTOMER_UNSUPPORTED_MERGE = [
+  /\bmerge\s+(?:duplicate\s+)?customers?\s+(.+?)\s+(?:and|with)\s+(.+)$/i,
+  /\bfusionner\s+(?:les\s+)?clients?\s+(.+?)\s+(?:et|avec)\s+(.+)$/i,
+];
+
+const CUSTOMER_UNSUPPORTED_ARCHIVE = [
+  /\barchive\s+customer\s+(.+)$/i,
+  /\barchiver\s+(?:le\s+)?client\s+(.+)$/i,
+];
+
+const CUSTOMER_UNSUPPORTED_REACTIVATE = [
+  /\breactivate\s+customer\s+(.+)$/i,
+  /\br[ée]activer\s+(?:le\s+)?client\s+(.+)$/i,
+];
+
+const CUSTOMER_UNSUPPORTED_UPLOAD = [
+  /\bupload\s+(?:a\s+)?document\s+(?:for|to)\s+customer\s+(.+)$/i,
+  /\b(?:t[ée]l[ée]verser|t[ée]l[ée]charger|importer)\s+(?:un\s+)?document\s+(?:pour|au)\s+client\s+(.+)$/i,
+];
+
+const CUSTOMER_ADD_NOTE = [
+  /\badd\s+(?:a\s+)?note\s+(?:to|for)\s+customer\s+(.+?)\s*:\s*(.+)$/i,
+  /\bajouter\s+(?:une\s+)?note\s+(?:au|pour\s+le|pour)\s+client\s+(.+?)\s*:\s*(.+)$/i,
+];
+
+const CUSTOMER_BALANCE = [
+  /\bwhat(?:'s|\s+is)\s+(.+?)'s\s+outstanding\s+balance\b/i,
+  /\bhow\s+much\s+does\s+(.+?)\s+owe\b/i,
+  /\b(?:show|view|get)\s+outstanding\s+balance\s+for\s+customer\s+(.+)$/i,
+  /\bquel\s+est\s+le\s+solde\s+impay[ée]\s+de\s+(.+?)\s*\??$/i,
+  /\bcombien\s+(.+?)\s+doit(?:-il|-elle)?\s*\??$/i,
+];
+
+const CUSTOMER_STATEMENT = [
+  /\bshow\s+(.+?)'s\s+statement(?:\s+for\s+(.+))?$/i,
+  /\bgenerate\s+(?:customer\s+)?statement\s+for\s+(?:customer\s+)?(.+)$/i,
+  /\bcustomer\s+statement\s+for\s+(.+)$/i,
+  /\bg[ée]n[ée]rer\s+le\s+relev[ée]\s+(?:client\s+)?de\s+(.+)$/i,
+  /\brelev[ée]\s+client\s+de\s+(.+)$/i,
+];
+
+const CUSTOMER_LEDGER = [
+  /\bshow\s+(.+?)'s\s+ledger\b/i,
+  /\b(?:open|view)\s+customer\s+ledger\s+for\s+(.+)$/i,
+  /\bview\s+(.+?)'s\s+transactions\b/i,
+  /\bafficher\s+le\s+grand\s+livre\s+(?:client\s+)?de\s+(.+)$/i,
+  /\bvoir\s+les\s+transactions\s+de\s+(.+)$/i,
+];
+
+const CUSTOMER_DOCUMENTS = [
+  /\bshow\s+documents\s+for\s+customer\s+(.+)$/i,
+  /\bopen\s+(.+?)'s\s+documents\b/i,
+  /\bafficher\s+les\s+documents\s+du\s+client\s+(.+)$/i,
+];
+
+const CUSTOMER_PROFILE = [
+  /\bopen\s+(.+?)'s\s+profile\b/i,
+  /\bshow\s+customer\s+profile\s+for\s+(.+)$/i,
+  /\bview\s+customer\s+(.+)$/i,
+  /\bouvrir\s+la\s+fiche\s+client\s+de\s+(.+)$/i,
+  /\bafficher\s+le\s+profil\s+(?:du\s+client\s+|de\s+)(.+)$/i,
+];
+
+const CUSTOMER_SEARCH_NAMED = [
+  /\b(?:search|find)\s+customer\s+(.+)$/i,
+  /\b(?:rechercher|chercher)\s+(?:le\s+)?client\s+(.+)$/i,
+];
+
+const CUSTOMER_SEARCH_BARE = [
+  /^\s*search\s+customers?\s*$/i,
+  /^\s*(?:rechercher|chercher)\s+(?:des\s+)?clients?\s*$/i,
+];
+
+const CUSTOMER_CALL = [
+  /\bcall\s+customer\s+(.+)$/i,
+  /\bappeler\s+(?:le\s+)?client\s+(.+)$/i,
+];
+
+const CUSTOMER_WHATSAPP = [
+  /\b(?:whatsapp|send\s+(?:a\s+)?whatsapp(?:\s+message)?\s+to)\s+customer\s+(.+)$/i,
+  /\bwhatsapp\s+client\s+(.+)$/i,
+  /\benvoyer\s+un\s+whatsapp\s+(?:au|à\s+la|à)\s+client\s+(.+)$/i,
+];
+
+const CUSTOMER_EMAIL = [
+  /\b(?:email|send\s+(?:an\s+)?email\s+to)\s+customer\s+(.+)$/i,
+  /\bemail\s+client\s+(.+)$/i,
+  /\benvoyer\s+un\s+email\s+au\s+client\s+(.+)$/i,
+];
+
+const CUSTOMER_EDIT = [
+  /\b(?:edit|update|modify)\s+customer\s+(.+)$/i,
+  /\b(?:modifier|mettre\s+à\s+jour|mettre\s+a\s+jour)\s+(?:le\s+)?client\s+(.+)$/i,
+];
+
+const CUSTOMER_QUERY = [
+  /\bwhat\s+did\s+(.+?)\s+buy\s+(.+?)\??$/i,
+  /\bwhat\s+has\s+(.+?)\s+purchased\s+(.+?)\??$/i,
+  /\bqu['’]est-ce\s+que\s+(.+?)\s+a\s+achet[ée]\s+(.+?)\??$/i,
+];
+
+function firstMatch(patterns: RegExp[], text: string): RegExpMatchArray | null {
+  for (const p of patterns) {
+    const m = text.match(p);
+    if (m) return m;
+  }
+  return null;
+}
+
+function detectCustomerAction(raw: string): ParsedCustomerAction | null {
+  let m = firstMatch(CUSTOMER_UNSUPPORTED_MERGE, raw);
+  if (m?.[1] && m[2]) {
+    return {
+      kind: "unsupported_merge",
+      customerName: cleanCustomerName(m[1]),
+      secondCustomerName: cleanCustomerName(m[2]),
+      note: null,
+      phone: null,
+      whatsapp: null,
+      email: null,
+      city: null,
+      periodText: null,
+      question: null,
+    };
+  }
+
+  const emptyExtras = {
+    secondCustomerName: null,
+    note: null,
+    phone: null,
+    whatsapp: null,
+    email: null,
+    city: null,
+    periodText: null,
+    question: null,
+  } as const;
+
+  m = firstMatch(CUSTOMER_UNSUPPORTED_ARCHIVE, raw);
+  if (m?.[1]) {
+    return { kind: "unsupported_archive", customerName: cleanCustomerName(m[1]), ...emptyExtras };
+  }
+
+  m = firstMatch(CUSTOMER_UNSUPPORTED_REACTIVATE, raw);
+  if (m?.[1]) {
+    return { kind: "unsupported_reactivate", customerName: cleanCustomerName(m[1]), ...emptyExtras };
+  }
+
+  m = firstMatch(CUSTOMER_UNSUPPORTED_UPLOAD, raw);
+  if (m?.[1]) {
+    return { kind: "unsupported_upload_document", customerName: cleanCustomerName(m[1]), ...emptyExtras };
+  }
+
+  m = firstMatch(CUSTOMER_ADD_NOTE, raw);
+  if (m?.[1] && m[2]) {
+    return {
+      kind: "add_note",
+      customerName: cleanCustomerName(m[1]),
+      note: stripTrailingPunctuation(m[2]),
+      secondCustomerName: null,
+      phone: null,
+      whatsapp: null,
+      email: null,
+      city: null,
+      periodText: null,
+      question: null,
+    };
+  }
+
+  m = firstMatch(CUSTOMER_BALANCE, raw);
+  if (m?.[1]) {
+    return { kind: "balance", customerName: cleanCustomerName(m[1]), ...emptyExtras };
+  }
+
+  m = firstMatch(CUSTOMER_STATEMENT, raw);
+  if (m?.[1]) {
+    const { name, period } = splitNameAndPeriod(m[2] ? `${m[1]} for ${m[2]}` : m[1]);
+    return { kind: "view_statement", customerName: name, ...emptyExtras, periodText: period };
+  }
+
+  m = firstMatch(CUSTOMER_LEDGER, raw);
+  if (m?.[1]) {
+    return { kind: "view_ledger", customerName: cleanCustomerName(m[1]), ...emptyExtras };
+  }
+
+  m = firstMatch(CUSTOMER_DOCUMENTS, raw);
+  if (m?.[1]) {
+    return { kind: "view_documents", customerName: cleanCustomerName(m[1]), ...emptyExtras };
+  }
+
+  m = firstMatch(CUSTOMER_QUERY, raw);
+  if (m?.[1]) {
+    return {
+      kind: "query",
+      customerName: cleanCustomerName(m[1]),
+      ...emptyExtras,
+      periodText: m[2] ? stripTrailingPunctuation(m[2]) : null,
+      question: raw.trim(),
+    };
+  }
+
+  m = firstMatch(CUSTOMER_CALL, raw);
+  if (m?.[1]) {
+    return { kind: "contact_call", customerName: cleanCustomerName(m[1]), ...emptyExtras };
+  }
+
+  m = firstMatch(CUSTOMER_WHATSAPP, raw);
+  if (m?.[1]) {
+    return { kind: "contact_whatsapp", customerName: cleanCustomerName(m[1]), ...emptyExtras };
+  }
+
+  m = firstMatch(CUSTOMER_EMAIL, raw);
+  if (m?.[1]) {
+    return { kind: "contact_email", customerName: cleanCustomerName(m[1]), ...emptyExtras };
+  }
+
+  m = firstMatch(CUSTOMER_EDIT, raw);
+  if (m?.[1]) {
+    const parsed = parseEditTail(m[1]);
+    return {
+      kind: "edit",
+      customerName: parsed.name,
+      ...emptyExtras,
+      phone: parsed.phone,
+      whatsapp: parsed.whatsapp,
+      email: parsed.email,
+      city: parsed.city,
+    };
+  }
+
+  m = firstMatch(CUSTOMER_PROFILE, raw);
+  if (m?.[1]) {
+    return { kind: "view_profile", customerName: cleanCustomerName(m[1]), ...emptyExtras };
+  }
+
+  m = firstMatch(CUSTOMER_SEARCH_NAMED, raw);
+  if (m?.[1]) {
+    return { kind: "view_profile", customerName: cleanCustomerName(m[1]), ...emptyExtras };
+  }
+
+  if (firstMatch(CUSTOMER_SEARCH_BARE, raw)) {
+    return { kind: "view_list", customerName: null, ...emptyExtras };
+  }
+
+  return null;
+}
+
+const MONTH_NAMES: { names: string[]; index: number }[] = [
+  { names: ["january", "janvier"], index: 0 },
+  { names: ["february", "février", "fevrier"], index: 1 },
+  { names: ["march", "mars"], index: 2 },
+  { names: ["april", "avril"], index: 3 },
+  { names: ["may", "mai"], index: 4 },
+  { names: ["june", "juin"], index: 5 },
+  { names: ["july", "juillet"], index: 6 },
+  { names: ["august", "août", "aout"], index: 7 },
+  { names: ["september", "septembre"], index: 8 },
+  { names: ["october", "octobre"], index: 9 },
+  { names: ["november", "novembre"], index: 10 },
+  { names: ["december", "décembre", "decembre"], index: 11 },
+];
+
+function monthRange(year: number, monthIndex0: number): { from: string; to: string } {
+  const from = new Date(Date.UTC(year, monthIndex0, 1));
+  const to = new Date(Date.UTC(year, monthIndex0 + 1, 0));
+  return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) };
+}
+
+// Resolves a raw period phrase ("June", "last month", "le mois dernier") into
+// a concrete [from, to] date range (inclusive, YYYY-MM-DD). A bare month name
+// with no year resolves to the most recent occurrence of that month (this
+// year, or last year if that month hasn't happened yet). Unrecognized phrases
+// return { from: null, to: null } — the caller falls back to "all time".
+export function resolvePeriodToRange(
+  periodText: string | null,
+  reference: Date = new Date(),
+): { from: string | null; to: string | null } {
+  if (!periodText) return { from: null, to: null };
+  const p = normalizeText(periodText);
+  if (!p) return { from: null, to: null };
+
+  if (/\b(last month|mois dernier)\b/.test(p)) {
+    const ref = new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth() - 1, 1));
+    return monthRange(ref.getUTCFullYear(), ref.getUTCMonth());
+  }
+  if (/\b(this month|ce mois)\b/.test(p)) {
+    return monthRange(reference.getUTCFullYear(), reference.getUTCMonth());
+  }
+
+  const yearMatch = p.match(/\b(20\d{2})\b/);
+  for (const entry of MONTH_NAMES) {
+    if (entry.names.some((name) => p.includes(name))) {
+      let year = yearMatch ? Number(yearMatch[1]) : reference.getUTCFullYear();
+      if (!yearMatch && entry.index > reference.getUTCMonth()) year -= 1;
+      return monthRange(year, entry.index);
+    }
+  }
+
+  return { from: null, to: null };
+}
+
+function normalizeText(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
 
 function detectIntent(text: string): CommandIntent {
   const lower = text.toLowerCase();
   const isCreateCustomer = CREATE_CUSTOMER_PATTERNS.some((p) => p.test(lower));
   if (isCreateCustomer) return "create_customer";
+
+  if (detectCustomerAction(text)) return "customer_action";
 
   const isReceipt = RECEIPT_PATTERNS.some((p) => p.test(lower));
   const isPayment = PAYMENT_PATTERNS.some((p) => p.test(lower));
@@ -276,22 +709,44 @@ function extractPartyName(text: string, intent: CommandIntent): string | null {
   return null;
 }
 
+function stripCustomerNameLead(text: string): string {
+  return cleanLabel(text.replace(CUSTOMER_NAME_LEAD, "").replace(/[.,]\s*$/, ""));
+}
+
 function extractCreateCustomerDetails(text: string): { name: string | null; city: string | null } {
-  const asCustomer = text.match(
-    /\b(?:add|ajouter)\s+(.+?)\s+(?:as\s+(?:a\s+)?customer|comme\s+client)\b(?:\s+(?:in|à|a)\s+(.+?))?$/i,
+  const asRole = text.match(
+    /\b(?:add|ajouter)\s+(.+?)\s+(?:as\s+(?:a\s+)?(?:customer|client)|comme\s+client)\b(?:\s+(?:in|à|a|en)\s+(.+?))?$/i,
   );
-  if (asCustomer?.[1]) {
-    const name = cleanLabel(asCustomer[1]);
-    const city = asCustomer[2] ? cleanLabel(asCustomer[2]) : null;
+  if (asRole?.[1]) {
+    const name = stripCustomerNameLead(asRole[1]);
+    const city = asRole[2] ? cleanLabel(asRole[2]) : null;
+    if (name.length >= 2) return { name, city: city && city.length >= 2 ? city : null };
+  }
+
+  const namedRole = text.match(
+    /\b(?:client|customer|un\s+client)\s+(?:nommé|nomme|named|called|appelé|appele|appellé)\s+(.+?)(?:\s+(?:in|à|a|en)\s+(.+?))?$/i,
+  );
+  if (namedRole?.[1]) {
+    const name = stripCustomerNameLead(namedRole[1]);
+    const city = namedRole[2] ? cleanLabel(namedRole[2]) : null;
     if (name.length >= 2) return { name, city: city && city.length >= 2 ? city : null };
   }
 
   const prefixed = text.match(
-    /\b(?:add|create|new|ajouter|créer|creer|nouveau)\s+(?:a\s+)?(?:customer|client|un\s+client)\s+(.+?)(?:\s+(?:in|à|a)\s+(.+?))?$/i,
+    /\b(?:add|create|new|ajouter|créer|creer|nouveau)\s+(?:a\s+)?(?:customers?|clients?|un\s+client)\s+(.+?)(?:\s+(?:in|à|a|en)\s+(.+?))?$/i,
   );
   if (prefixed?.[1]) {
-    const name = cleanLabel(prefixed[1]);
+    const name = stripCustomerNameLead(prefixed[1]);
     const city = prefixed[2] ? cleanLabel(prefixed[2]) : null;
+    if (name.length >= 2) return { name, city: city && city.length >= 2 ? city : null };
+  }
+
+  const bareClient = text.match(
+    /\b(?:add|ajouter)\s+clients?\s+(.+?)(?:\s+(?:in|à|a|en)\s+(.+?))?$/i,
+  );
+  if (bareClient?.[1]) {
+    const name = stripCustomerNameLead(bareClient[1]);
+    const city = bareClient[2] ? cleanLabel(bareClient[2]) : null;
     if (name.length >= 2) return { name, city: city && city.length >= 2 ? city : null };
   }
 
@@ -310,6 +765,7 @@ function parseCommandTextFull(text: string): ParsedCommand {
   let paymentCategory: PaymentCategory | null = null;
   let receiptCategory: ReceiptCategory | null = null;
   let itemDescription: string | null = null;
+  let customerAction: ParsedCustomerAction | null = null;
 
   if (intent === "create_goods_receipt") {
     itemDescription = extractItemDescription(raw);
@@ -318,6 +774,10 @@ function parseCommandTextFull(text: string): ParsedCommand {
     const details = extractCreateCustomerDetails(raw);
     partyName = details.name;
     city = details.city;
+  } else if (intent === "customer_action") {
+    customerAction = detectCustomerAction(raw);
+    partyName = customerAction?.customerName ?? null;
+    city = customerAction?.city ?? null;
   } else if (intent === "create_payment") {
     partyName = extractPartyName(raw, intent);
     const forReason = extractForReason(raw);
@@ -355,6 +815,7 @@ function parseCommandTextFull(text: string): ParsedCommand {
     expenseDescription,
     paymentCategory,
     receiptCategory,
+    customerAction,
     raw,
   };
 }
@@ -364,10 +825,10 @@ export function parseBantooCommandText(text: string): ParsedCommand {
   return parseCommandTextFull(text);
 }
 
-/** Legacy command bar parser; create_customer is treated as unknown. */
+/** Legacy command bar parser; create_customer and customer_action are treated as unknown. */
 export function parseCommandText(text: string): LegacyParsedCommand {
   const parsed = parseCommandTextFull(text);
-  if (parsed.intent === "create_customer") {
+  if (parsed.intent === "create_customer" || parsed.intent === "customer_action") {
     return { ...parsed, intent: "unknown" };
   }
   return parsed as LegacyParsedCommand;

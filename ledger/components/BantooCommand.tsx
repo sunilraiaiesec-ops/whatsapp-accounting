@@ -77,7 +77,12 @@ export function BantooCommand() {
   const [transcribing, setTranscribing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [proposal, setProposal] = useState<BantooProposal | null>(null);
-  const [success, setSuccess] = useState<{ href: string; number: string } | null>(null);
+  const [success, setSuccess] = useState<{
+    href: string;
+    number: string;
+    kind: string;
+    message?: string;
+  } | null>(null);
   // Set when the server had to use the rule-based parser because the AI path
   // errored (key/quota/model). Text still works; we just note it was basic.
   const [aiNote, setAiNote] = useState<string | null>(null);
@@ -366,7 +371,48 @@ export function BantooCommand() {
       setError(result.error);
       return;
     }
-    setSuccess({ href: result.href, number: result.number });
+    setSuccess({ href: result.href, number: result.number, kind: result.kind, message: result.message });
+  }
+
+  // Read-only "answer" actions (balance/query) have nothing to navigate to
+  // that matters more than the message itself; navigation actions open the
+  // right page; contact actions launch the tel:/wa.me/mailto: link directly
+  // instead of an in-app route.
+  function successMessage(): string {
+    if (!success) return "";
+    if (success.message) return success.message;
+    if (success.kind === "view_customer") {
+      return success.number ? t("successFound", { number: success.number }) : t("successOpening");
+    }
+    if (success.kind === "edit_customer") return t("successCustomerUpdated", { number: success.number });
+    if (success.kind === "add_customer_note") return t("successNoteAdded", { number: success.number });
+    return t("successSaved", { number: success.number });
+  }
+
+  function successButtonLabel(): string {
+    if (!success) return t("viewDocument");
+    if (success.href.startsWith("tel:")) return t("callNow");
+    if (success.href.startsWith("https://wa.me/")) return t("openWhatsapp");
+    if (success.href.startsWith("mailto:")) return t("sendEmailAction");
+    if (success.kind === "view_customer" || success.kind === "customer_balance" || success.kind === "customer_query") {
+      return t("openAction");
+    }
+    return t("viewDocument");
+  }
+
+  function handleSuccessAction() {
+    if (!success) return;
+    if (
+      success.href.startsWith("tel:") ||
+      success.href.startsWith("mailto:") ||
+      success.href.startsWith("https://wa.me/")
+    ) {
+      window.open(success.href, success.href.startsWith("tel:") ? "_self" : "_blank");
+      closeDialog();
+      return;
+    }
+    router.push(success.href);
+    closeDialog();
   }
 
   function goBackToInput() {
@@ -374,7 +420,20 @@ export function BantooCommand() {
     setError(null);
   }
 
-  const canConfirm = proposal && proposal.action !== "unknown";
+  // "unsupported_customer_action" is recognized confidently but genuinely not
+  // buildable yet — there is nothing to confirm/save, so no confirm button.
+  const canConfirm =
+    proposal && proposal.action !== "unknown" && proposal.action !== "unsupported_customer_action";
+
+  // Read-only/navigation actions don't "save" anything, so the primary
+  // button says so — "Confirm & save" would be misleading for e.g. opening
+  // a ledger or asking a customer's balance.
+  const confirmLabelKeyByAction: Record<string, string> = {
+    view_customer: "openAction",
+    customer_balance: "showAnswerAction",
+    customer_query: "showAnswerAction",
+    contact_customer: "continueAction",
+  };
 
   // --- Small render helpers -------------------------------------------------
 
@@ -505,8 +564,9 @@ export function BantooCommand() {
     );
   }
 
-  function partyBlock(label: string, createLabel: string) {
+  function partyBlock(label: string, createLabel: string, opts?: { allowCreate?: boolean }) {
     if (!proposal) return null;
+    const allowCreate = opts?.allowCreate ?? true;
     const type: EntitySearchType = proposal.partyType === "customer" ? "customer" : "supplier";
     const reasonKey: keyof BantooProposal["fieldReasons"] =
       proposal.partyType === "customer" ? "customer" : "supplier";
@@ -519,6 +579,7 @@ export function BantooCommand() {
           options={proposal.partyOptions}
           onSearch={makeEntitySearch(type)}
           placeholder={t("searchOrType")}
+          allowCreate={allowCreate}
           createLabel={() => createLabel}
           onSelectExisting={(opt) => {
             if (opt.id) {
@@ -528,18 +589,25 @@ export function BantooCommand() {
             } else {
               setPartyId(null);
               updateDraft("partyName", opt.label);
-              setCreateParty(true);
+              setCreateParty(allowCreate);
             }
           }}
           onTextChange={(v) => {
             updateDraft("partyName", v);
             setPartyId(null);
-            setCreateParty(Boolean(v.trim()));
+            setCreateParty(allowCreate && Boolean(v.trim()));
           }}
         />
         {reasonHint(reasonKey)}
       </div>
     );
+  }
+
+  // Used by every "existing customer" workflow (edit/view/balance/note/
+  // contact/query) — never offers "create new", since these all act on a
+  // customer that must already exist.
+  function existingCustomerBlock() {
+    return partyBlock(t("customer"), "", { allowCreate: false });
   }
 
   // Searchable unit picker (units are free text on items; suggestions come from
@@ -780,6 +848,75 @@ export function BantooCommand() {
             {field(t("city"), draft.city, (v) => updateDraft("city", v))}
           </>
         );
+      case "edit_customer":
+        return (
+          <>
+            {existingCustomerBlock()}
+            {field(t("newName"), draft.newName, (v) => updateDraft("newName", v), {
+              placeholder: t("newNamePlaceholder"),
+            })}
+            {field(t("phone"), draft.phone, (v) => updateDraft("phone", v))}
+            {field(t("whatsapp"), draft.whatsapp, (v) => updateDraft("whatsapp", v))}
+            {field(t("email"), draft.email, (v) => updateDraft("email", v))}
+            {field(t("city"), draft.city, (v) => updateDraft("city", v))}
+          </>
+        );
+      case "view_customer":
+        return (
+          <>
+            {draft.view === "list" ? (
+              <p className="text-sm text-slate-600">{t("viewCustomerListHint")}</p>
+            ) : (
+              <>
+                {existingCustomerBlock()}
+                {draft.view === "statement" ? (
+                  <p className="text-xs text-[var(--muted)]">
+                    {draft.periodText
+                      ? t("statementPeriodHint", { period: draft.periodText })
+                      : t("statementAllTimeHint")}
+                  </p>
+                ) : null}
+              </>
+            )}
+          </>
+        );
+      case "customer_balance":
+        return <>{existingCustomerBlock()}</>;
+      case "add_customer_note":
+        return (
+          <>
+            {existingCustomerBlock()}
+            {field(t("noteText"), draft.note, (v) => updateDraft("note", v), {
+              placeholder: t("noteTextPlaceholder"),
+            })}
+          </>
+        );
+      case "contact_customer":
+        return (
+          <>
+            {existingCustomerBlock()}
+            <p className="text-xs text-[var(--muted)]">
+              {t(
+                draft.contactMethod === "whatsapp"
+                  ? "contactViaWhatsapp"
+                  : draft.contactMethod === "email"
+                    ? "contactViaEmail"
+                    : "contactViaCall",
+              )}
+            </p>
+          </>
+        );
+      case "customer_query":
+        return (
+          <>
+            {existingCustomerBlock()}
+            {draft.periodText ? (
+              <p className="text-xs text-[var(--muted)]">{t("statementPeriodHint", { period: draft.periodText })}</p>
+            ) : null}
+          </>
+        );
+      case "unsupported_customer_action":
+        return null;
       default:
         return <p className="text-sm text-slate-600">{t("unknownAction")}</p>;
     }
@@ -793,6 +930,13 @@ export function BantooCommand() {
     expense: "actionExpense",
     sales_receipt: "actionSalesReceipt",
     create_customer: "actionCreateCustomer",
+    edit_customer: "actionEditCustomer",
+    view_customer: "actionViewCustomer",
+    customer_balance: "actionCustomerBalance",
+    add_customer_note: "actionAddCustomerNote",
+    contact_customer: "actionContactCustomer",
+    customer_query: "actionCustomerQuery",
+    unsupported_customer_action: "actionUnsupportedCustomer",
     unknown: "actionUnknown",
   };
 
@@ -836,18 +980,9 @@ export function BantooCommand() {
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-4 max-md:px-4">
           {success ? (
             <div className="rounded-xl border border-[var(--brand)]/20 bg-[var(--brand)]/5 p-4">
-              <p className="font-medium text-slate-900">
-                {t("successSaved", { number: success.number })}
-              </p>
-              <button
-                type="button"
-                onClick={() => {
-                  router.push(success.href);
-                  closeDialog();
-                }}
-                className="btn-brand mt-3 w-full"
-              >
-                {t("viewDocument")}
+              <p className="font-medium text-slate-900">{successMessage()}</p>
+              <button type="button" onClick={handleSuccessAction} className="btn-brand mt-3 w-full">
+                {successButtonLabel()}
               </button>
             </div>
           ) : proposal ? (
@@ -1034,7 +1169,9 @@ export function BantooCommand() {
                   disabled={executing}
                   className="btn-brand flex-1 py-3"
                 >
-                  {executing ? t("confirming") : t("confirm")}
+                  {executing
+                    ? t("confirming")
+                    : t(proposal ? (confirmLabelKeyByAction[proposal.action] ?? "confirm") : "confirm")}
                 </button>
               ) : null}
             </div>

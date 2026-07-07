@@ -13,8 +13,10 @@ import {
 } from "@/lib/documents";
 import { createInventoryItem, receiveGoods } from "@/lib/inventory";
 import { MATCH_HIGH } from "@/lib/bantoo/match";
-import { parseAmount } from "@/lib/money";
-import { createParty, findPossiblePartyDuplicates } from "@/lib/parties";
+import { formatAmount, parseAmount } from "@/lib/money";
+import { createParty, findPossiblePartyDuplicates, updateParty, updatePartyNotes } from "@/lib/parties";
+import { getPartyBalance } from "@/lib/party-ledger";
+import { getPartyPurchaseHistoryInRange } from "@/lib/party-insights";
 import { prisma } from "@/lib/prisma";
 import { BANTOO_ACTION_TYPES } from "@/lib/ai/actions";
 import { isAiConfigured } from "@/lib/ai/provider";
@@ -100,6 +102,17 @@ const draftSchema = z.object({
   date: z.string().max(40).default(""),
   dueDate: z.string().max(40).default(""),
   currency: z.string().max(8).default("XAF"),
+  newName: z.string().max(200).default(""),
+  phone: z.string().max(50).default(""),
+  whatsapp: z.string().max(50).default(""),
+  email: z.string().max(200).default(""),
+  note: z.string().max(2000).default(""),
+  view: z.string().max(20).default(""),
+  periodText: z.string().max(100).default(""),
+  dateFrom: z.string().max(40).default(""),
+  dateTo: z.string().max(40).default(""),
+  contactMethod: z.string().max(20).default(""),
+  requestedAction: z.string().max(40).default(""),
 });
 
 const inputSchema = z.object({
@@ -484,6 +497,176 @@ export async function executeBantooAction(
           kind: input.action,
         };
       }
+
+      // --- Customer Intelligence Sprint: existing-customer workflows -----
+      // Every case re-validates that partyId belongs to this org before
+      // reading/writing anything, mirroring ensurePartyId/assertOrgItemId
+      // above — the client-resolved id from resolve.ts is never trusted
+      // blindly at execute time either.
+
+      case "edit_customer": {
+        if (!input.partyId) return { ok: false, error: "Choose the customer to edit." };
+        const found = await prisma.party.findFirst({
+          where: { id: input.partyId, orgId: ctx.orgId, type: { in: ["customer", "both"] } },
+          select: { id: true },
+        });
+        if (!found) return { ok: false, error: "That customer was not found." };
+
+        const updated = await updateParty(ctx.orgId, found.id, {
+          name: draft.newName.trim() || undefined,
+          phone: draft.phone,
+          whatsapp: draft.whatsapp,
+          email: draft.email,
+          city: draft.city,
+        });
+        if (!updated) return { ok: false, error: "Could not update that customer." };
+        return {
+          ok: true,
+          href: `/customers/${updated.id}`,
+          number: updated.name,
+          kind: input.action,
+          message: `${updated.name} was updated.`,
+        };
+      }
+
+      case "view_customer": {
+        if (draft.view === "list") {
+          return { ok: true, href: "/customers", number: "", kind: input.action };
+        }
+        if (!input.partyId) return { ok: false, error: "Choose a customer." };
+        const found = await prisma.party.findFirst({
+          where: { id: input.partyId, orgId: ctx.orgId, type: { in: ["customer", "both"] } },
+          select: { id: true, name: true },
+        });
+        if (!found) return { ok: false, error: "That customer was not found." };
+
+        const statementParams = new URLSearchParams({ partyId: found.id });
+        if (draft.dateFrom) statementParams.set("from", draft.dateFrom);
+        if (draft.dateTo) statementParams.set("to", draft.dateTo);
+        const hrefByView: Record<string, string> = {
+          profile: `/customers/${found.id}`,
+          ledger: `/customers/${found.id}?tab=transactions`,
+          documents: `/customers/${found.id}?tab=documents`,
+          statement: `/reports/customer-statement?${statementParams.toString()}`,
+        };
+        return {
+          ok: true,
+          href: hrefByView[draft.view] ?? `/customers/${found.id}`,
+          number: found.name,
+          kind: input.action,
+        };
+      }
+
+      case "customer_balance": {
+        if (!input.partyId) return { ok: false, error: "Choose a customer." };
+        const found = await prisma.party.findFirst({
+          where: { id: input.partyId, orgId: ctx.orgId, type: { in: ["customer", "both"] } },
+          select: { id: true, name: true },
+        });
+        if (!found) return { ok: false, error: "That customer was not found." };
+
+        const balance = await getPartyBalance(ctx.orgId, found.id, "customer");
+        const formatted = formatAmount(balance < 0n ? -balance : balance, cur);
+        const message =
+          balance > 0n
+            ? `${found.name} owes ${formatted} ${cur}.`
+            : balance < 0n
+              ? `${found.name} has a credit balance of ${formatted} ${cur}.`
+              : `${found.name} has no outstanding balance.`;
+        return {
+          ok: true,
+          href: `/customers/${found.id}?tab=transactions`,
+          number: found.name,
+          kind: input.action,
+          message,
+        };
+      }
+
+      case "add_customer_note": {
+        if (!input.partyId) return { ok: false, error: "Choose a customer." };
+        const noteText = draft.note.trim();
+        if (!noteText) return { ok: false, error: "Enter the note text." };
+        const found = await prisma.party.findFirst({
+          where: { id: input.partyId, orgId: ctx.orgId, type: { in: ["customer", "both"] } },
+          select: { id: true, name: true, notes: true },
+        });
+        if (!found) return { ok: false, error: "That customer was not found." };
+
+        const stamp = date.toISOString().slice(0, 10);
+        const existing = found.notes?.trim();
+        const appended = existing ? `${existing}\n[${stamp}] ${noteText}` : `[${stamp}] ${noteText}`;
+        const updated = await updatePartyNotes(ctx.orgId, found.id, appended);
+        if (!updated) return { ok: false, error: "Could not save the note." };
+        return {
+          ok: true,
+          href: `/customers/${found.id}?tab=notes`,
+          number: found.name,
+          kind: input.action,
+          message: `Note added for ${found.name}.`,
+        };
+      }
+
+      case "contact_customer": {
+        if (!input.partyId) return { ok: false, error: "Choose a customer." };
+        const found = await prisma.party.findFirst({
+          where: { id: input.partyId, orgId: ctx.orgId, type: { in: ["customer", "both"] } },
+          select: { id: true, name: true, phone: true, whatsapp: true, email: true },
+        });
+        if (!found) return { ok: false, error: "That customer was not found." };
+
+        if (draft.contactMethod === "whatsapp") {
+          const wa = found.whatsapp || found.phone;
+          if (!wa) {
+            return { ok: false, error: "This customer has no WhatsApp number on file. Add one first." };
+          }
+          const digits = wa.replace(/[^\d]/g, "");
+          return { ok: true, href: `https://wa.me/${digits}`, number: found.name, kind: input.action };
+        }
+        if (draft.contactMethod === "email") {
+          if (!found.email) {
+            return { ok: false, error: "This customer has no email on file. Add one first." };
+          }
+          return { ok: true, href: `mailto:${found.email}`, number: found.name, kind: input.action };
+        }
+        if (!found.phone) {
+          return { ok: false, error: "This customer has no phone number on file. Add one first." };
+        }
+        return { ok: true, href: `tel:${found.phone}`, number: found.name, kind: input.action };
+      }
+
+      case "customer_query": {
+        if (!input.partyId) return { ok: false, error: "Choose a customer." };
+        const found = await prisma.party.findFirst({
+          where: { id: input.partyId, orgId: ctx.orgId, type: { in: ["customer", "both"] } },
+          select: { id: true, name: true },
+        });
+        if (!found) return { ok: false, error: "That customer was not found." };
+
+        const result = await getPartyPurchaseHistoryInRange(
+          ctx.orgId,
+          found.id,
+          "customer",
+          draft.dateFrom || null,
+          draft.dateTo || null,
+        );
+        const periodSuffix = draft.periodText ? ` (${draft.periodText})` : "";
+        const message =
+          result.items.length > 0
+            ? `${found.name} bought${periodSuffix}: ${result.items
+                .map((i) => `${i.name} (${i.quantity}${i.unit ? ` ${i.unit}` : ""})`)
+                .join(", ")}.`
+            : `No purchases found for ${found.name}${periodSuffix}.`;
+        return {
+          ok: true,
+          href: `/customers/${found.id}?tab=products`,
+          number: found.name,
+          kind: input.action,
+          message,
+        };
+      }
+
+      case "unsupported_customer_action":
+        return { ok: false, error: "This action is not available yet." };
 
       default:
         return { ok: false, error: "This action can't be saved automatically yet." };

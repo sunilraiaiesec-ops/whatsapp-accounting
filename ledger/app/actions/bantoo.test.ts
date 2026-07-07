@@ -14,6 +14,10 @@ const receiveGoods = vi.fn();
 const createInventoryItem = vi.fn();
 const createPayment = vi.fn();
 const createPartySpy = vi.fn();
+const updatePartySpy = vi.fn();
+const updatePartyNotesSpy = vi.fn();
+const getPartyBalanceSpy = vi.fn();
+const getPartyPurchaseHistoryInRangeSpy = vi.fn();
 
 vi.mock("@/lib/auth/current", () => ({
   requireContext: vi.fn(async () => ({
@@ -41,7 +45,22 @@ vi.mock("@/lib/prisma", () => ({
 // have been created without touching the DB.
 vi.mock("@/lib/parties", async (importActual) => {
   const actual = await importActual<typeof import("@/lib/parties")>();
-  return { ...actual, createParty: createPartySpy };
+  return {
+    ...actual,
+    createParty: createPartySpy,
+    updateParty: updatePartySpy,
+    updatePartyNotes: updatePartyNotesSpy,
+  };
+});
+
+vi.mock("@/lib/party-ledger", async (importActual) => {
+  const actual = await importActual<typeof import("@/lib/party-ledger")>();
+  return { ...actual, getPartyBalance: getPartyBalanceSpy };
+});
+
+vi.mock("@/lib/party-insights", async (importActual) => {
+  const actual = await importActual<typeof import("@/lib/party-insights")>();
+  return { ...actual, getPartyPurchaseHistoryInRange: getPartyPurchaseHistoryInRangeSpy };
 });
 
 vi.mock("@/lib/inventory", async (importActual) => {
@@ -76,6 +95,17 @@ function draft(overrides: Record<string, string> = {}) {
     date: "2026-01-05",
     dueDate: "",
     currency: "XAF",
+    newName: "",
+    phone: "",
+    whatsapp: "",
+    email: "",
+    note: "",
+    view: "",
+    periodText: "",
+    dateFrom: "",
+    dateTo: "",
+    contactMethod: "",
+    requestedAction: "",
     ...overrides,
   };
 }
@@ -96,6 +126,10 @@ beforeEach(() => {
     type: data.type,
     phone: null,
   }));
+  updatePartySpy.mockReset();
+  updatePartyNotesSpy.mockReset();
+  getPartyBalanceSpy.mockReset();
+  getPartyPurchaseHistoryInRangeSpy.mockReset();
 });
 
 describe("ensurePartyId duplicate-prevention safety net (via executeBantooAction)", () => {
@@ -264,5 +298,368 @@ describe("executeBantooAction org trust boundary", () => {
       type: "customer",
       city: "Ngoundéré",
     });
+  });
+});
+
+describe("executeBantooAction — Customer Intelligence Sprint", () => {
+  it("edit_customer: updates an in-org party and returns its profile link", async () => {
+    partyFindFirst.mockResolvedValue({ id: "cust_1" });
+    updatePartySpy.mockResolvedValue({ id: "cust_1", name: "Musa Ibrahim" });
+
+    const input: ExecuteBantooInput = {
+      action: "edit_customer",
+      draft: draft({ partyName: "Musa", newName: "Musa Ibrahim", phone: "690123456" }),
+      partyId: "cust_1",
+      createParty: false,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    };
+
+    const result = await executeBantooAction(input);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.href).toBe("/customers/cust_1");
+      expect(result.kind).toBe("edit_customer");
+    }
+    expect(updatePartySpy).toHaveBeenCalledWith("org_A", "cust_1", {
+      name: "Musa Ibrahim",
+      phone: "690123456",
+      whatsapp: "",
+      email: "",
+      city: "",
+    });
+  });
+
+  it("edit_customer: rejects a cross-org partyId", async () => {
+    partyFindFirst.mockResolvedValue(null);
+
+    const input: ExecuteBantooInput = {
+      action: "edit_customer",
+      draft: draft({ partyName: "Musa", phone: "690123456" }),
+      partyId: "cust_other_org",
+      createParty: false,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    };
+
+    const result = await executeBantooAction(input);
+    expect(result).toEqual({ ok: false, error: "That customer was not found." });
+    expect(updatePartySpy).not.toHaveBeenCalled();
+  });
+
+  it("edit_customer: requires a resolved customer before saving", async () => {
+    const input: ExecuteBantooInput = {
+      action: "edit_customer",
+      draft: draft({ partyName: "Musa", phone: "690123456" }),
+      partyId: null,
+      createParty: false,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    };
+
+    const result = await executeBantooAction(input);
+    expect(result).toEqual({ ok: false, error: "Choose the customer to edit." });
+    expect(updatePartySpy).not.toHaveBeenCalled();
+  });
+
+  it("view_customer: profile navigates straight to the customer page", async () => {
+    partyFindFirst.mockResolvedValue({ id: "cust_1", name: "Musa" });
+
+    const input: ExecuteBantooInput = {
+      action: "view_customer",
+      draft: draft({ view: "profile" }),
+      partyId: "cust_1",
+      createParty: false,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    };
+
+    const result = await executeBantooAction(input);
+    expect(result).toEqual({ ok: true, href: "/customers/cust_1", number: "Musa", kind: "view_customer" });
+  });
+
+  it("view_customer: ledger and documents deep-link to the right tab", async () => {
+    partyFindFirst.mockResolvedValue({ id: "cust_1", name: "Musa" });
+
+    const ledger = await executeBantooAction({
+      action: "view_customer",
+      draft: draft({ view: "ledger" }),
+      partyId: "cust_1",
+      createParty: false,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(ledger).toMatchObject({ ok: true, href: "/customers/cust_1?tab=transactions" });
+
+    const documents = await executeBantooAction({
+      action: "view_customer",
+      draft: draft({ view: "documents" }),
+      partyId: "cust_1",
+      createParty: false,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(documents).toMatchObject({ ok: true, href: "/customers/cust_1?tab=documents" });
+  });
+
+  it("view_customer: statement includes the resolved date range in the report link", async () => {
+    partyFindFirst.mockResolvedValue({ id: "cust_1", name: "Musa" });
+
+    const result = await executeBantooAction({
+      action: "view_customer",
+      draft: draft({ view: "statement", dateFrom: "2026-06-01", dateTo: "2026-06-30" }),
+      partyId: "cust_1",
+      createParty: false,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      href: "/reports/customer-statement?partyId=cust_1&from=2026-06-01&to=2026-06-30",
+    });
+  });
+
+  it("view_customer: list opens the customer list without resolving a party", async () => {
+    const result = await executeBantooAction({
+      action: "view_customer",
+      draft: draft({ view: "list" }),
+      partyId: null,
+      createParty: false,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(result).toEqual({ ok: true, href: "/customers", number: "", kind: "view_customer" });
+    expect(partyFindFirst).not.toHaveBeenCalled();
+  });
+
+  it("view_customer: rejects a cross-org partyId", async () => {
+    partyFindFirst.mockResolvedValue(null);
+    const result = await executeBantooAction({
+      action: "view_customer",
+      draft: draft({ view: "profile" }),
+      partyId: "cust_other_org",
+      createParty: false,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(result).toEqual({ ok: false, error: "That customer was not found." });
+  });
+
+  it("customer_balance: reports how much a customer owes, org-scoped", async () => {
+    partyFindFirst.mockResolvedValue({ id: "cust_1", name: "Musa" });
+    getPartyBalanceSpy.mockResolvedValue(25000n);
+
+    const result = await executeBantooAction({
+      action: "customer_balance",
+      draft: draft(),
+      partyId: "cust_1",
+      createParty: false,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(getPartyBalanceSpy).toHaveBeenCalledWith("org_A", "cust_1", "customer");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.message).toContain("Musa");
+      expect(result.message).toContain("25,000");
+    }
+  });
+
+  it("customer_balance: reports no outstanding balance when zero", async () => {
+    partyFindFirst.mockResolvedValue({ id: "cust_1", name: "Musa" });
+    getPartyBalanceSpy.mockResolvedValue(0n);
+
+    const result = await executeBantooAction({
+      action: "customer_balance",
+      draft: draft(),
+      partyId: "cust_1",
+      createParty: false,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.message).toBe("Musa has no outstanding balance.");
+  });
+
+  it("add_customer_note: appends a dated note to any existing notes", async () => {
+    partyFindFirst.mockResolvedValue({ id: "cust_1", name: "Musa", notes: "Existing note" });
+    updatePartyNotesSpy.mockResolvedValue({ id: "cust_1" });
+
+    const result = await executeBantooAction({
+      action: "add_customer_note",
+      draft: draft({ note: "prefers morning delivery" }),
+      partyId: "cust_1",
+      createParty: false,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(result.ok).toBe(true);
+    expect(updatePartyNotesSpy).toHaveBeenCalledWith(
+      "org_A",
+      "cust_1",
+      expect.stringMatching(/^Existing note\n\[\d{4}-\d{2}-\d{2}\] prefers morning delivery$/),
+    );
+  });
+
+  it("add_customer_note: rejects empty note text", async () => {
+    partyFindFirst.mockResolvedValue({ id: "cust_1", name: "Musa", notes: null });
+    const result = await executeBantooAction({
+      action: "add_customer_note",
+      draft: draft({ note: "  " }),
+      partyId: "cust_1",
+      createParty: false,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(result).toEqual({ ok: false, error: "Enter the note text." });
+    expect(updatePartyNotesSpy).not.toHaveBeenCalled();
+  });
+
+  it("contact_customer: call produces a tel: link from the party's phone", async () => {
+    partyFindFirst.mockResolvedValue({ id: "cust_1", name: "Musa", phone: "690123456", whatsapp: null, email: null });
+    const result = await executeBantooAction({
+      action: "contact_customer",
+      draft: draft({ contactMethod: "call" }),
+      partyId: "cust_1",
+      createParty: false,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(result).toEqual({ ok: true, href: "tel:690123456", number: "Musa", kind: "contact_customer" });
+  });
+
+  it("contact_customer: whatsapp produces a wa.me link with digits only", async () => {
+    partyFindFirst.mockResolvedValue({
+      id: "cust_1",
+      name: "Musa",
+      phone: null,
+      whatsapp: "+237 690 12 34 56",
+      email: null,
+    });
+    const result = await executeBantooAction({
+      action: "contact_customer",
+      draft: draft({ contactMethod: "whatsapp" }),
+      partyId: "cust_1",
+      createParty: false,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(result).toEqual({
+      ok: true,
+      href: "https://wa.me/237690123456",
+      number: "Musa",
+      kind: "contact_customer",
+    });
+  });
+
+  it("contact_customer: email without one on file asks to add it rather than inventing one", async () => {
+    partyFindFirst.mockResolvedValue({ id: "cust_1", name: "Musa", phone: null, whatsapp: null, email: null });
+    const result = await executeBantooAction({
+      action: "contact_customer",
+      draft: draft({ contactMethod: "email" }),
+      partyId: "cust_1",
+      createParty: false,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(result).toEqual({
+      ok: false,
+      error: "This customer has no email on file. Add one first.",
+    });
+  });
+
+  it("customer_query: answers with the customer's purchases in the resolved period", async () => {
+    partyFindFirst.mockResolvedValue({ id: "cust_1", name: "Musa" });
+    getPartyPurchaseHistoryInRangeSpy.mockResolvedValue({
+      items: [{ name: "Rice 50kg", quantity: "10", unit: "bag" }],
+      orderCount: 2,
+    });
+
+    const result = await executeBantooAction({
+      action: "customer_query",
+      draft: draft({ periodText: "last month", dateFrom: "2026-06-01", dateTo: "2026-06-30" }),
+      partyId: "cust_1",
+      createParty: false,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(getPartyPurchaseHistoryInRangeSpy).toHaveBeenCalledWith(
+      "org_A",
+      "cust_1",
+      "customer",
+      "2026-06-01",
+      "2026-06-30",
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.message).toContain("Musa");
+      expect(result.message).toContain("Rice 50kg");
+    }
+  });
+
+  it("customer_query: reports no purchases found instead of guessing", async () => {
+    partyFindFirst.mockResolvedValue({ id: "cust_1", name: "Musa" });
+    getPartyPurchaseHistoryInRangeSpy.mockResolvedValue({ items: [], orderCount: 0 });
+
+    const result = await executeBantooAction({
+      action: "customer_query",
+      draft: draft({}),
+      partyId: "cust_1",
+      createParty: false,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.message).toBe("No purchases found for Musa.");
+  });
+
+  it("unsupported_customer_action: never silently succeeds, always reports not-available", async () => {
+    const result = await executeBantooAction({
+      action: "unsupported_customer_action",
+      draft: draft({ requestedAction: "archive" }),
+      partyId: "cust_1",
+      createParty: false,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(result).toEqual({ ok: false, error: "This action is not available yet." });
   });
 });

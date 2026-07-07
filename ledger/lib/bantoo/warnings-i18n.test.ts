@@ -28,6 +28,15 @@ const WARNING_CODES: BantooWarningCode[] = [
   "noIncomeAccount",
   "enterCustomerName",
   "lowConfidence",
+  // --- Customer Intelligence Sprint --------------------------------------
+  "customerNotFound",
+  "customerAmbiguous",
+  "noChangesToSave",
+  "enterNoteText",
+  "missingPhone",
+  "missingWhatsapp",
+  "missingEmail",
+  "notYetAvailable",
 ];
 
 const FIELD_REASON_CODES: BantooFieldReasonCode[] = [

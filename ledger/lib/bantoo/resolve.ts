@@ -19,6 +19,8 @@ import {
   getCommandPatternSuggestions,
   type EntityPatternCandidate,
 } from "@/lib/command-patterns";
+import { resolvePeriodToRange } from "@/lib/command-parse";
+import { getPartyContact } from "@/lib/parties";
 import {
   LOW_CONFIDENCE_THRESHOLD,
   type ExtractedAction,
@@ -242,6 +244,20 @@ export async function resolveExtraction(
     // Offer create-new when there is no confident (high) match yet.
     const create = Boolean(name && !autoId && name.trim().length >= 2);
     return { options, id: autoId, create };
+  }
+
+  // Shared warning trio for the "existing customer" workflows below: no name
+  // given, name given but nothing matched, or name given but ambiguous
+  // (no single confident match yet). Never "not sure" for these — always one
+  // of these precise, actionable codes instead.
+  function warnCustomerResolution(name: string, target: BantooProposal) {
+    if (!name.trim()) {
+      warn("enterCustomerName");
+    } else if (!target.partyId && target.partyOptions.length === 0) {
+      warn("customerNotFound", { name });
+    } else if (!target.partyId && target.partyOptions.length > 0) {
+      warn("customerAmbiguous", { name });
+    }
   }
 
   // Distinct free-text units already used in the org (there is no Unit table).
@@ -596,6 +612,154 @@ export async function resolveExtraction(
       proposal.partyId = party.id;
       proposal.createParty = party.create;
       if (!draft.partyName) warn("enterCustomerName");
+      break;
+    }
+
+    // --- Customer Intelligence Sprint: existing-customer workflows -------
+    // Every case below resolves an EXISTING customer (never offers
+    // "create new" — createParty stays false) and reports the same trio of
+    // warnings when the name is missing/unmatched/ambiguous, so the UI
+    // behaves identically across edit/view/balance/note/contact/query.
+
+    case "edit_customer": {
+      draft.partyName = action.customer_name ?? "";
+      proposal.partyType = "customer";
+      proposal.needsParty = true;
+
+      const party = await resolveParty(draft.partyName, "customer");
+      proposal.partyOptions = party.options;
+      proposal.partyId = party.id;
+      proposal.createParty = false;
+      warnCustomerResolution(draft.partyName, proposal);
+
+      // Pre-fill from the resolved party's current values so the form shows
+      // "what it is now"; any change already present in the command
+      // overrides that pre-filled value, ready to review before saving.
+      const current = proposal.partyId ? await getPartyContact(ctx.orgId, proposal.partyId) : null;
+      draft.newName = action.new_name?.trim() ?? "";
+      draft.phone = action.phone ?? current?.phone ?? "";
+      draft.whatsapp = action.whatsapp ?? current?.whatsapp ?? "";
+      draft.email = action.email ?? current?.email ?? "";
+      draft.city = action.city ?? current?.city ?? "";
+      if (
+        proposal.partyId &&
+        !draft.newName &&
+        !action.phone &&
+        !action.whatsapp &&
+        !action.email &&
+        !action.city
+      ) {
+        warn("noChangesToSave");
+      }
+      break;
+    }
+
+    case "view_customer": {
+      draft.view = action.view;
+      draft.periodText = action.period_text ?? "";
+      proposal.partyType = "customer";
+
+      if (action.view === "statement") {
+        const range = resolvePeriodToRange(action.period_text ?? null);
+        draft.dateFrom = range.from ?? "";
+        draft.dateTo = range.to ?? "";
+      }
+
+      if (action.view === "list") {
+        // Generic "search/list customers" — no single party to resolve.
+        break;
+      }
+
+      draft.partyName = action.customer_name ?? "";
+      proposal.needsParty = true;
+      const party = await resolveParty(draft.partyName, "customer");
+      proposal.partyOptions = party.options;
+      proposal.partyId = party.id;
+      proposal.createParty = false;
+      warnCustomerResolution(draft.partyName, proposal);
+      break;
+    }
+
+    case "customer_balance": {
+      draft.partyName = action.customer_name ?? "";
+      proposal.partyType = "customer";
+      proposal.needsParty = true;
+
+      const party = await resolveParty(draft.partyName, "customer");
+      proposal.partyOptions = party.options;
+      proposal.partyId = party.id;
+      proposal.createParty = false;
+      warnCustomerResolution(draft.partyName, proposal);
+      break;
+    }
+
+    case "add_customer_note": {
+      draft.partyName = action.customer_name ?? "";
+      draft.note = action.note ?? "";
+      proposal.partyType = "customer";
+      proposal.needsParty = true;
+
+      const party = await resolveParty(draft.partyName, "customer");
+      proposal.partyOptions = party.options;
+      proposal.partyId = party.id;
+      proposal.createParty = false;
+      warnCustomerResolution(draft.partyName, proposal);
+      if (!draft.note.trim()) warn("enterNoteText");
+      break;
+    }
+
+    case "contact_customer": {
+      draft.partyName = action.customer_name ?? "";
+      draft.contactMethod = action.method;
+      proposal.partyType = "customer";
+      proposal.needsParty = true;
+
+      const party = await resolveParty(draft.partyName, "customer");
+      proposal.partyOptions = party.options;
+      proposal.partyId = party.id;
+      proposal.createParty = false;
+      warnCustomerResolution(draft.partyName, proposal);
+
+      if (proposal.partyId) {
+        const current = await getPartyContact(ctx.orgId, proposal.partyId);
+        draft.phone = current?.phone ?? "";
+        draft.whatsapp = current?.whatsapp ?? "";
+        draft.email = current?.email ?? "";
+        // Never invent contact info — a missing channel is reported so the
+        // user can add it first, rather than silently failing at execute.
+        if (action.method === "call" && !draft.phone) warn("missingPhone");
+        if (action.method === "whatsapp" && !draft.whatsapp) warn("missingWhatsapp");
+        if (action.method === "email" && !draft.email) warn("missingEmail");
+      }
+      break;
+    }
+
+    case "customer_query": {
+      draft.partyName = action.customer_name ?? "";
+      draft.periodText = action.period_text ?? "";
+      const range = resolvePeriodToRange(action.period_text ?? null);
+      draft.dateFrom = range.from ?? "";
+      draft.dateTo = range.to ?? "";
+      proposal.partyType = "customer";
+      proposal.needsParty = true;
+
+      const party = await resolveParty(draft.partyName, "customer");
+      proposal.partyOptions = party.options;
+      proposal.partyId = party.id;
+      proposal.createParty = false;
+      warnCustomerResolution(draft.partyName, proposal);
+      break;
+    }
+
+    case "unsupported_customer_action": {
+      // Recognized confidently (never "not sure") but genuinely not
+      // buildable without new backend/UI — the exact translated message is
+      // rendered from this warning code; there is nothing to confirm/save,
+      // so the UI hides the confirm button for this action entirely.
+      draft.partyName = action.customer_name ?? "";
+      draft.requestedAction = action.requested;
+      proposal.partyType = "customer";
+      warn("notYetAvailable");
       break;
     }
   }
