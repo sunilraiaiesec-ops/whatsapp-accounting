@@ -208,6 +208,32 @@ function customerConflictsWithExisting(
   );
 }
 
+// Second half of the same safety fix: a field-conflict check alone still
+// silently auto-attaches create_customer to an unrelated existing party when
+// there is NO conflicting field to catch it — e.g. a bare "add Golu Transport
+// as a customer" (no city/phone/whatsapp mentioned at all) against an
+// existing "golu" record, where lib/bantoo/match.ts's substring-containment
+// rule scores "golu" vs "golu transport" as 90 (>= MATCH_HIGH), auto-selects
+// it, finds nothing to conflict with (the existing record and the new
+// request are both simply empty on every field), and silently returns
+// success against the WRONG, pre-existing "golu" party — never creating
+// "Golu Transport" at all and never telling the user any of this happened.
+// This is the live-user-reported "I added the client again and it doesn't
+// show in the customers list" bug.
+//
+// Fix: only treat a match as safe-to-auto-associate-silently when the name
+// itself is an exact match (case/accent/whitespace-insensitive) — the one
+// case where "this is obviously the same contact" needs no confirmation at
+// all. Any non-exact match (fuzzy typo, substring, token-subset — anything
+// that only cleared the MATCH_HIGH bucket without being textually identical)
+// is treated exactly like a field conflict: it always surfaces the
+// duplicateCandidate prompt so the user explicitly picks "use existing" or
+// "create new" (via the existing duplicateResolution/forceCreate mechanism)
+// instead of the system silently guessing.
+function isExactCustomerNameMatch(existingName: string, newName: string): boolean {
+  return normalizeText(existingName) === normalizeText(newName);
+}
+
 // --- Multi-step Task Planning ------------------------------------------------
 // Builds the ordered checklist shown in the preview from every field the
 // extracted action actually carries — see the BantooPlanStep doc comment in
@@ -715,9 +741,16 @@ export async function resolveExtraction(
       if (party.id) {
         // Safety fix: a name match is auto-selected here (MATCH_HIGH), but
         // never silently reused if the new request conflicts with what's
-        // already on file — force the user to explicitly choose instead.
+        // already on file, OR if the match itself isn't a genuinely exact
+        // name (see isExactCustomerNameMatch above for the "golu" vs "Golu
+        // Transport" substring-match regression this closes) — either way,
+        // force the user to explicitly choose instead.
         const existing = await getPartyContact(ctx.orgId, party.id);
-        if (existing && customerConflictsWithExisting(existing, draft)) {
+        if (
+          existing &&
+          (!isExactCustomerNameMatch(existing.name, draft.partyName) ||
+            customerConflictsWithExisting(existing, draft))
+        ) {
           proposal.partyId = null;
           proposal.createParty = false;
           proposal.duplicateCandidate = {
