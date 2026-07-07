@@ -409,7 +409,7 @@ export async function getPartyOverviewStats(
     kind === "customer"
       ? customerDaysToPay(orgId, partyId)
       : paymentTermsPatternForSupplier(orgId, partyId).then((p) =>
-          p ? { avgDays: p.value, count: p.count, approximate: p.reason.includes("approximate") } : null,
+          p ? { avgDays: p.value, count: p.count, approximate: p.reason.params?.approximate === 1 } : null,
         ),
   ]);
 
@@ -490,12 +490,18 @@ export async function getPartyAiMemory(
   return {
     usualProducts: products.slice(0, TOP_PRODUCTS_LIMIT),
     usualPaymentTermsDays: terms?.value ?? null,
-    usualPaymentTermsApproximate: terms ? String(terms.reason).includes("approximate") : false,
+    usualPaymentTermsApproximate: terms ? patternReasonIsApproximate(terms.reason) : false,
     usualPaymentTermsSampleSize: terms?.count ?? 0,
     mostCommonWeekday: modeWeekday(dates.dates),
     preferredPaymentMethod: paymentMethod,
     sampleSize: lines.length,
   };
+}
+
+
+function patternReasonIsApproximate(reason: import("@/lib/bantoo/types").BantooPatternReason | string): boolean {
+  if (typeof reason === "string") return reason.includes("approximate");
+  return reason.params?.approximate === 1;
 }
 
 // ---------------------------------------------------------------------------

@@ -13,14 +13,34 @@ import {
 } from "@/lib/parties";
 import { prisma } from "@/lib/prisma";
 import type { PartyEnrichmentSuggestion } from "@/lib/party-insights";
+import { checkPlanLimit } from "@/lib/billing/enforce";
 
 export type PartyState = {
   error?: string;
+  warning?: string;
   duplicates?: PartyDuplicateCandidate[];
   // Echoed back so the "possible duplicate" prompt can re-submit the exact
   // same values with confirmCreate=1 without losing what the user typed.
   pending?: { name: string; type: string; phone: string; whatsapp: string; country: string; city: string };
 };
+
+// A "both" contact counts against BOTH the customer and supplier plan
+// limits (it really is one of each) — block on whichever hits its limit
+// first, and surface whichever warning is more urgent (lowest remaining
+// headroom) if both are just warning-level.
+async function checkPartyPlanLimit(
+  orgId: string,
+  type: string,
+): Promise<{ ok: true; warning?: string } | { ok: false; message: string }> {
+  const resources = type === "both" ? (["customer", "supplier"] as const) : type === "supplier" ? (["supplier"] as const) : (["customer"] as const);
+  let warning: string | undefined;
+  for (const resource of resources) {
+    const result = await checkPlanLimit(orgId, resource);
+    if (!result.ok) return result;
+    if (result.warning) warning = result.warning;
+  }
+  return { ok: true, warning };
+}
 
 const quickAddSchema = z.object({
   name: z.string().trim().min(1, "Name is required"),
@@ -75,6 +95,21 @@ export async function createPartyAction(
         },
       };
     }
+  }
+
+  const planCheck = await checkPartyPlanLimit(ctx.orgId, data.type);
+  if (!planCheck.ok) {
+    return {
+      error: planCheck.message,
+      pending: {
+        name: data.name,
+        type: data.type,
+        phone: data.phone ?? "",
+        whatsapp: data.whatsapp ?? "",
+        country: data.country ?? "",
+        city: data.city ?? "",
+      },
+    };
   }
 
   await createParty(ctx.orgId, data);
