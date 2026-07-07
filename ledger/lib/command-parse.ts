@@ -156,6 +156,17 @@ export type ParsedCommand = {
   phone: string | null;
   whatsapp: string | null;
   postAction: "open_profile" | null;
+  // Launch Bug Fix Sprint: same best-effort English extraction as
+  // phone/whatsapp above, for the Party profile fields that were previously
+  // dropped entirely (see createCustomerSchema's doc comment in
+  // lib/ai/actions.ts). Only populated when intent is "create_customer".
+  email: string | null;
+  taxId: string | null;
+  paymentTermsDays: number | null;
+  // Raw digits, in MAJOR currency units — numberish (lib/ai/actions.ts)
+  // handles the final cleanup/coercion, same as every other numeric field.
+  creditLimit: string | null;
+  defaultDiscount: string | null;
   raw: string;
 };
 
@@ -1449,6 +1460,41 @@ function extractCreateCustomerWhatsapp(raw: string, phone: string | null): strin
   return digits.length >= 6 ? digits : null;
 }
 
+// Launch Bug Fix Sprint: rule-based (no-AI-configured) extraction of the
+// Party profile fields create_customer previously dropped entirely — see
+// createCustomerSchema's doc comment in lib/ai/actions.ts for the full
+// root-cause explanation. English-only, mirroring the deliberately simple
+// phone/whatsapp extractors above; richer/French phrasing is left to the AI
+// path exactly like notes/pronoun resolution already are.
+function extractCreateCustomerEmail(raw: string): string | null {
+  const m = raw.match(/\bemail\b(?:\s+is|\s+est)?\s*:?\s*([^\s,;]+@[^\s,;]+)/i);
+  const email = m?.[1]?.trim();
+  return email ? email.replace(/[.,;]+$/, "") : null;
+}
+
+function extractCreateCustomerTaxId(raw: string): string | null {
+  const m = raw.match(/\btax\s*id\b(?:\s+number)?(?:\s+is)?\s*:?\s*([A-Za-z0-9][A-Za-z0-9-]{2,})/i);
+  return m?.[1] ? m[1].trim().toUpperCase() : null;
+}
+
+function extractCreateCustomerPaymentTermsDays(raw: string): number | null {
+  const m = raw.match(/\bpayment\s+terms?\b(?:\s+of)?\s*:?\s*(\d+)\s*days?\b|\bnet\s*(\d+)\b/i);
+  const n = m ? Number(m[1] ?? m[2]) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function extractCreateCustomerCreditLimit(raw: string): string | null {
+  const m = raw.match(/\bcredit\s+limit\b(?:\s+of)?\s*:?\s*([\d\s,.'']+)/i);
+  if (!m?.[1]) return null;
+  const digits = m[1].replace(/[\s,.'']/g, "");
+  return digits && digits !== "0" ? digits : null;
+}
+
+function extractCreateCustomerDefaultDiscount(raw: string): string | null {
+  const m = raw.match(/\bdefault\s+discount\b(?:\s+of)?\s*:?\s*(\d+(?:\.\d+)?)\s*%?/i);
+  return m?.[1] ?? null;
+}
+
 // Only recognizes the literal "open profile" follow-up (EN/FR) — anything
 // else mentioned after saving (e.g. "then invoice him") is intentionally
 // left for the AI path via unsupported_requests; the rule-based fallback
@@ -1565,6 +1611,11 @@ function parseCommandTextFull(text: string): ParsedCommand {
   let phone: string | null = null;
   let whatsapp: string | null = null;
   let postAction: "open_profile" | null = null;
+  let email: string | null = null;
+  let taxId: string | null = null;
+  let paymentTermsDays: number | null = null;
+  let creditLimit: string | null = null;
+  let defaultDiscount: string | null = null;
 
   if (intent === "create_goods_receipt") {
     itemDescription = extractItemDescription(raw);
@@ -1576,6 +1627,11 @@ function parseCommandTextFull(text: string): ParsedCommand {
     phone = extractCreateCustomerPhone(raw);
     whatsapp = extractCreateCustomerWhatsapp(raw, phone);
     postAction = extractCreateCustomerPostAction(raw);
+    email = extractCreateCustomerEmail(raw);
+    taxId = extractCreateCustomerTaxId(raw);
+    paymentTermsDays = extractCreateCustomerPaymentTermsDays(raw);
+    creditLimit = extractCreateCustomerCreditLimit(raw);
+    defaultDiscount = extractCreateCustomerDefaultDiscount(raw);
   } else if (intent === "create_supplier") {
     const details = extractCreateSupplierDetails(stripTrailingClauses(raw));
     partyName = details.name;
@@ -1643,6 +1699,11 @@ function parseCommandTextFull(text: string): ParsedCommand {
     phone,
     whatsapp,
     postAction,
+    email,
+    taxId,
+    paymentTermsDays,
+    creditLimit,
+    defaultDiscount,
     raw,
   };
 }

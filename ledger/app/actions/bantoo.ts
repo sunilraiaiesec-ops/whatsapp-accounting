@@ -109,6 +109,13 @@ const draftSchema = z.object({
   phone: z.string().max(50).default(""),
   whatsapp: z.string().max(50).default(""),
   email: z.string().max(200).default(""),
+  companyName: z.string().max(200).default(""),
+  taxId: z.string().max(100).default(""),
+  paymentTermsDays: z.string().max(10).default(""),
+  creditLimit: z.string().max(30).default(""),
+  defaultDiscount: z.string().max(20).default(""),
+  preferredLanguage: z.string().max(20).default(""),
+  preferredPaymentMethod: z.string().max(100).default(""),
   note: z.string().max(2000).default(""),
   view: z.string().max(20).default(""),
   periodText: z.string().max(100).default(""),
@@ -521,11 +528,39 @@ export async function executeBantooAction(
           // record with any new field values actually submitted, rather than
           // silently discarding them because the party already existed. Only
           // non-empty draft values are applied — an empty field never clears
-          // something already on file.
-          const enrichment: { city?: string; phone?: string; whatsapp?: string } = {};
+          // something already on file (e.g. a pre-existing email is never
+          // blanked out just because THIS request didn't mention it).
+          const enrichment: {
+            city?: string;
+            phone?: string;
+            whatsapp?: string;
+            email?: string;
+            companyName?: string;
+            taxId?: string;
+            paymentTermsDays?: number;
+            creditLimit?: bigint;
+            defaultDiscount?: string;
+            preferredLanguage?: string;
+            preferredPaymentMethod?: string;
+          } = {};
           if (draft.city.trim()) enrichment.city = draft.city;
           if (draft.phone.trim()) enrichment.phone = draft.phone;
           if (draft.whatsapp.trim()) enrichment.whatsapp = draft.whatsapp;
+          if (draft.email.trim()) enrichment.email = draft.email;
+          if (draft.companyName.trim()) enrichment.companyName = draft.companyName;
+          if (draft.taxId.trim()) enrichment.taxId = draft.taxId;
+          if (draft.paymentTermsDays.trim()) {
+            const days = Number(draft.paymentTermsDays);
+            if (Number.isFinite(days) && days > 0) enrichment.paymentTermsDays = days;
+          }
+          if (draft.creditLimit.trim()) {
+            const limit = parseAmount(draft.creditLimit, cur);
+            if (limit > 0n) enrichment.creditLimit = limit;
+          }
+          if (draft.defaultDiscount.trim()) enrichment.defaultDiscount = draft.defaultDiscount;
+          if (draft.preferredLanguage.trim()) enrichment.preferredLanguage = draft.preferredLanguage;
+          if (draft.preferredPaymentMethod.trim())
+            enrichment.preferredPaymentMethod = draft.preferredPaymentMethod;
           if (Object.keys(enrichment).length > 0) {
             await updateParty(ctx.orgId, found.id, enrichment);
           }
@@ -562,6 +597,43 @@ export async function executeBantooAction(
           select: { id: true, name: true, notes: true },
         });
         if (!party) return { ok: false, error: "Could not save the customer." };
+
+        // Launch Bug Fix Sprint: persist every extracted profile field on
+        // the brand-new customer — previously dropped entirely because
+        // neither the extraction schema nor this execute() branch carried
+        // them through at all (see createCustomerSchema's doc comment in
+        // lib/ai/actions.ts). companyName defaults to the customer's own
+        // name when no DISTINCT company name was extracted (see the
+        // "Company name field appears blank" bug this closes) — every other
+        // field is applied only when actually present, same convention as
+        // city/phone/whatsapp above.
+        const profileFields: {
+          email?: string;
+          companyName?: string;
+          taxId?: string;
+          paymentTermsDays?: number;
+          creditLimit?: bigint;
+          defaultDiscount?: string;
+          defaultCurrency?: string;
+          preferredLanguage?: string;
+          preferredPaymentMethod?: string;
+        } = { companyName: draft.companyName.trim() || party.name };
+        if (draft.email.trim()) profileFields.email = draft.email;
+        if (draft.taxId.trim()) profileFields.taxId = draft.taxId;
+        if (draft.paymentTermsDays.trim()) {
+          const days = Number(draft.paymentTermsDays);
+          if (Number.isFinite(days) && days > 0) profileFields.paymentTermsDays = days;
+        }
+        if (draft.creditLimit.trim()) {
+          const limit = parseAmount(draft.creditLimit, cur);
+          if (limit > 0n) profileFields.creditLimit = limit;
+        }
+        if (draft.defaultDiscount.trim()) profileFields.defaultDiscount = draft.defaultDiscount;
+        if (draft.currency.trim()) profileFields.defaultCurrency = draft.currency;
+        if (draft.preferredLanguage.trim()) profileFields.preferredLanguage = draft.preferredLanguage;
+        if (draft.preferredPaymentMethod.trim())
+          profileFields.preferredPaymentMethod = draft.preferredPaymentMethod;
+        await updateParty(ctx.orgId, party.id, profileFields);
 
         if (draft.note.trim()) {
           await appendPartyNote(ctx.orgId, party.id, party.notes, draft.note.trim(), date);

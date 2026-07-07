@@ -990,6 +990,23 @@ export function BantooCommand() {
             {field(t("city"), draft.city, (v) => updateDraft("city", v))}
             {field(t("phone"), draft.phone, (v) => updateDraft("phone", v))}
             {field(t("whatsapp"), draft.whatsapp, (v) => updateDraft("whatsapp", v))}
+            {field(t("email"), draft.email, (v) => updateDraft("email", v))}
+            {field(t("companyName"), draft.companyName, (v) => updateDraft("companyName", v), {
+              placeholder: draft.partyName,
+            })}
+            {field(t("taxId"), draft.taxId, (v) => updateDraft("taxId", v))}
+            {field(t("paymentTermsDays"), draft.paymentTermsDays, (v) => updateDraft("paymentTermsDays", v), {
+              money: true,
+              placeholder: "30",
+            })}
+            {field(t("creditLimit"), draft.creditLimit, (v) => updateDraft("creditLimit", v), {
+              money: true,
+              placeholder: "0",
+            })}
+            {field(t("defaultDiscount"), draft.defaultDiscount, (v) => updateDraft("defaultDiscount", v), {
+              money: true,
+              placeholder: "0",
+            })}
             {field(t("noteText"), draft.note, (v) => updateDraft("note", v), {
               placeholder: t("noteTextPlaceholder"),
             })}

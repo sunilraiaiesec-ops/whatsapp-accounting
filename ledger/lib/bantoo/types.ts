@@ -140,6 +140,15 @@ export type BantooPlanStepCode =
   | "setPhone"
   | "setWhatsapp"
   | "setNote"
+  // --- Launch Bug Fix Sprint: create_customer-only plan rows, added so the
+  // confirmation checklist shows EVERY field Bantoo intends to save, not just
+  // city/phone/whatsapp/note — see buildPartyPlan in resolve.ts.
+  | "setEmail"
+  | "setCompanyName"
+  | "setTaxId"
+  | "setPaymentTerms"
+  | "setCreditLimit"
+  | "setDiscount"
   | "openProfile"
   | "openSupplierProfile"
   | "unsupportedStep";
@@ -233,6 +242,22 @@ export type BantooDraft = {
   phone: string;
   whatsapp: string;
   email: string;
+  // --- Launch Bug Fix Sprint: create_customer profile fields the Party
+  // model already supports (see prisma/schema.prisma) but which were never
+  // plumbed through the draft/execute layer — see lib/ai/actions.ts's
+  // createCustomerSchema doc comment for the full root-cause explanation.
+  companyName: string;
+  taxId: string;
+  // Plain day count as typed ("47"), not a date — mirrors dueDate's
+  // string-of-a-number convention used elsewhere on this type.
+  paymentTermsDays: string;
+  // MAJOR currency units, as typed ("12345678") — converted to minor units
+  // by execute() with parseAmount, same as every other money field.
+  creditLimit: string;
+  // Percentage, as typed ("7").
+  defaultDiscount: string;
+  preferredLanguage: string;
+  preferredPaymentMethod: string;
   // add_customer_note: text appended to the party's existing notes.
   note: string;
   // view_customer: which page to open once the party (or none, for "list")
@@ -350,6 +375,13 @@ export function emptyDraft(): BantooDraft {
     phone: "",
     whatsapp: "",
     email: "",
+    companyName: "",
+    taxId: "",
+    paymentTermsDays: "",
+    creditLimit: "",
+    defaultDiscount: "",
+    preferredLanguage: "",
+    preferredPaymentMethod: "",
     note: "",
     view: "",
     periodText: "",

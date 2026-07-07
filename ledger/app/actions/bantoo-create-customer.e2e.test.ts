@@ -40,6 +40,14 @@ type FakeParty = {
   city: string | null;
   email: string | null;
   notes: string | null;
+  companyName?: string | null;
+  taxId?: string | null;
+  defaultCurrency?: string | null;
+  paymentTermsDays?: number | null;
+  creditLimit?: bigint | null;
+  defaultDiscount?: string | null;
+  preferredLanguage?: string | null;
+  preferredPaymentMethod?: string | null;
 };
 
 let partyStore: FakeParty[] = [];
@@ -68,7 +76,20 @@ const fakePrisma = {
       partyStore.find((p) => matchesWhere(p, where)) ?? null,
     ),
     create: vi.fn(async ({ data }: { data: Omit<FakeParty, "id" | "email" | "notes"> }) => {
-      const party: FakeParty = { id: `party_${nextPartyId++}`, email: null, notes: null, ...data };
+      const party: FakeParty = {
+        id: `party_${nextPartyId++}`,
+        email: null,
+        notes: null,
+        companyName: null,
+        taxId: null,
+        defaultCurrency: null,
+        paymentTermsDays: null,
+        creditLimit: null,
+        defaultDiscount: null,
+        preferredLanguage: null,
+        preferredPaymentMethod: null,
+        ...data,
+      };
       partyStore.push(party);
       return party;
     }),
@@ -133,6 +154,14 @@ function createCustomerAction(overrides: Partial<ExtractedAction> = {}): Extract
     whatsapp: null,
     country: null,
     note: null,
+    email: null,
+    company_name: null,
+    tax_id: null,
+    payment_terms_days: null,
+    credit_limit: null,
+    default_discount: null,
+    preferred_language: null,
+    preferred_payment_method: null,
     post_action: null,
     unsupported_requests: null,
     confidence: 0.92,
@@ -140,6 +169,13 @@ function createCustomerAction(overrides: Partial<ExtractedAction> = {}): Extract
     currency: "XAF",
     ...overrides,
   } as ExtractedAction;
+}
+
+// Look up a party in the fake store the same way a "read the persisted
+// record back" assertion would in production — by id, ignoring orgId scoping
+// noise since every test here only ever uses one org.
+function findParty(id: string | null): FakeParty | undefined {
+  return partyStore.find((p) => p.id === id);
 }
 
 // Mirrors BantooCommand.tsx's handleConfirm() exactly: builds the
@@ -391,5 +427,323 @@ describe("create_customer end-to-end: fuzzy-match false positive against an unre
     const customers = await listParties("org_A", "customer");
     expect(customers).toHaveLength(1);
     expect(customers[0]).toMatchObject({ id: "party_golu", name: "golu", city: "Douala", phone: "690000001" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Launch Bug Fix Sprint regression tests (A-E) — closes the live bug report
+// that credit limit / payment terms / email / tax ID / company name / note
+// were silently dropped somewhere in the create_customer pipeline even
+// though they were extracted. Each test below starts from an
+// ExtractedAction exactly as the (schema-updated) AI extraction layer would
+// return it for the quoted command — see lib/ai/actions.ts's
+// createCustomerSchema and lib/ai/extract.ts's system prompt for the
+// extraction-side half of this fix, which is not independently testable
+// here without a live AI call — and runs the REAL resolveExtraction +
+// executeBantooAction + persisted-record read-back, exactly like the rest of
+// this file, to prove nothing is dropped downstream of extraction.
+// ---------------------------------------------------------------------------
+describe("Launch Bug Fix Sprint regression tests: create_customer field persistence (A-E)", () => {
+  it("A. full create customer (English) — every extracted field survives resolve -> execute -> persisted-record read-back", async () => {
+    // "Create Golu Logistics Ltd as a new customer in Ngoundéré, Cameroon.
+    // Phone +237 699 123 456. WhatsApp same. Email accounts@golulogistics.cm.
+    // Payment terms 47 days. Credit limit 12,345,678 XAF. Default discount
+    // 7%. Tax ID CM-NGA-99821. Note: Only release goods after signed
+    // delivery note."
+    const action = createCustomerAction({
+      customer_name: "Golu Logistics Ltd",
+      city: "Ngoundéré",
+      country: "Cameroon",
+      phone: "+237 699 123 456",
+      whatsapp: "+237 699 123 456",
+      email: "accounts@golulogistics.cm",
+      payment_terms_days: 47,
+      credit_limit: 12345678,
+      default_discount: 7,
+      tax_id: "CM-NGA-99821",
+      note: "Only release goods after signed delivery note.",
+    });
+
+    const proposal = await resolveExtraction(ctx, action);
+    expect(proposal.action).toBe("create_customer");
+    expect(proposal.partyId).toBeNull();
+    expect(proposal.createParty).toBe(true);
+    // Draft must carry every new field forward (Requirement: the draft/proposal
+    // type must carry these fields, not just city/phone/whatsapp/note).
+    expect(proposal.draft.email).toBe("accounts@golulogistics.cm");
+    expect(proposal.draft.taxId).toBe("CM-NGA-99821");
+    expect(proposal.draft.paymentTermsDays).toBe("47");
+    expect(proposal.draft.creditLimit).toBe("12345678");
+    expect(proposal.draft.defaultDiscount).toBe("7");
+    // The confirmation checklist must show EVERY field Bantoo intends to
+    // save — not just city/phone/whatsapp/note (Requirement #9).
+    const codes = proposal.plan.map((step) => step.code);
+    expect(codes).toEqual(
+      expect.arrayContaining([
+        "setCity",
+        "setPhone",
+        "setWhatsapp",
+        "setEmail",
+        "setTaxId",
+        "setPaymentTerms",
+        "setCreditLimit",
+        "setDiscount",
+        "setNote",
+      ]),
+    );
+
+    const result = await executeBantooAction(buildExecuteInput(proposal));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.number).toBe("Golu Logistics Ltd");
+    expect(result.href).toMatch(/^\/customers\/party_\d+$/);
+
+    const saved = findParty(result.href.split("/").pop() ?? null);
+    expect(saved).toBeDefined();
+    // Every extracted field, persisted — the exact bug report's checklist:
+    // credit limit, payment terms, email, tax ID, company name, and note.
+    expect(saved).toMatchObject({
+      name: "Golu Logistics Ltd",
+      city: "Ngoundéré",
+      phone: "+237 699 123 456",
+      whatsapp: "+237 699 123 456",
+      email: "accounts@golulogistics.cm",
+      // Company name defaults to the customer's own name for a brand-new
+      // business customer when no DISTINCT company name was extracted —
+      // closes "Company name field appears blank".
+      companyName: "Golu Logistics Ltd",
+      taxId: "CM-NGA-99821",
+      paymentTermsDays: 47,
+      creditLimit: 12345678n,
+      defaultDiscount: "7",
+      defaultCurrency: "XAF",
+    });
+    expect(saved?.notes).toContain("Only release goods after signed delivery note.");
+  });
+
+  it("B. full create customer (French) — same command in French produces the exact same persisted fields", async () => {
+    // "Créer un nouveau client nommé Golu Logistics Ltd à Ngoundéré,
+    // Cameroun. Téléphone +237 699 123 456. WhatsApp même numéro. Email
+    // accounts@golulogistics.cm. Conditions de paiement 47 jours. Limite de
+    // crédit 12 345 678 XAF. Remise par défaut 7 %. Numéro fiscal
+    // CM-NGA-99821. Note: Ne livrer qu'après bon de livraison signé."
+    //
+    // The rule-based (no-AI) fallback's new field extractors are
+    // deliberately English-only (see extractCreateCustomerEmail's doc
+    // comment in lib/command-parse.ts) — French phrasing for these fields
+    // is handled by the AI extraction prompt (lib/ai/extract.ts), which is
+    // not independently callable in this offline test suite. This test
+    // therefore starts from the ExtractedAction the AI layer produces for
+    // this French command (per the updated prompt) and proves the SAME
+    // resolve -> execute -> persisted-record pipeline as test A never
+    // depends on the source language.
+    const action = createCustomerAction({
+      customer_name: "Golu Logistics Ltd",
+      city: "Ngoundéré",
+      country: "Cameroun",
+      phone: "+237 699 123 456",
+      whatsapp: "+237 699 123 456",
+      email: "accounts@golulogistics.cm",
+      payment_terms_days: 47,
+      credit_limit: 12345678,
+      default_discount: 7,
+      tax_id: "CM-NGA-99821",
+      note: "Ne livrer qu'après bon de livraison signé.",
+    });
+
+    const proposal = await resolveExtraction(ctx, action);
+    const result = await executeBantooAction(buildExecuteInput(proposal));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const saved = findParty(result.href.split("/").pop() ?? null);
+    expect(saved).toMatchObject({
+      name: "Golu Logistics Ltd",
+      city: "Ngoundéré",
+      phone: "+237 699 123 456",
+      whatsapp: "+237 699 123 456",
+      email: "accounts@golulogistics.cm",
+      companyName: "Golu Logistics Ltd",
+      taxId: "CM-NGA-99821",
+      paymentTermsDays: 47,
+      creditLimit: 12345678n,
+      defaultDiscount: "7",
+      defaultCurrency: "XAF",
+    });
+    expect(saved?.notes).toContain("Ne livrer qu'après bon de livraison signé.");
+  });
+
+  it("C. duplicate 'create as new' path — a distinct new Party ID is created with every extracted field persisted, the unrelated existing record is untouched", async () => {
+    partyStore.push({
+      id: "party_golu_garoua",
+      orgId: "org_A",
+      name: "Golu",
+      type: "customer",
+      phone: null,
+      whatsapp: null,
+      country: null,
+      city: "Garoua",
+      email: null,
+      notes: null,
+    });
+
+    // "Create Golu Transport Ltd as a new customer in Ngoundéré with phone
+    // +237699123456, WhatsApp same, email accounts@golutransport.cm,
+    // payment terms 47 days, credit limit 12345678 XAF, note: prefers
+    // WhatsApp." User chooses "Create as a new customer with the
+    // same/similar name."
+    const action = createCustomerAction({
+      customer_name: "Golu Transport Ltd",
+      city: "Ngoundéré",
+      phone: "+237699123456",
+      whatsapp: "+237699123456",
+      email: "accounts@golutransport.cm",
+      payment_terms_days: 47,
+      credit_limit: 12345678,
+      note: "prefers WhatsApp",
+    });
+
+    const proposal = await resolveExtraction(ctx, action);
+    // A fuzzy/substring name match against the unrelated "Golu"/Garoua
+    // record, PLUS a conflicting city, must surface the duplicate prompt
+    // rather than silently reusing or silently creating.
+    expect(proposal.duplicateCandidate?.id).toBe("party_golu_garoua");
+    expect(proposal.partyId).toBeNull();
+
+    // The user's explicit "create as new" choice, mirroring exactly how
+    // BantooCommand.tsx builds the execute input once that radio is picked.
+    const createNewInput: ExecuteBantooInput = {
+      ...buildExecuteInput(proposal),
+      partyId: null,
+      createParty: true,
+      duplicateResolution: "create_new",
+    };
+    const result = await executeBantooAction(createNewInput);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.number).toBe("Golu Transport Ltd");
+    // Distinct from the existing Golu/Garoua party — never reattached.
+    expect(result.href).not.toBe("/customers/party_golu_garoua");
+
+    const newId = result.href.split("/").pop() ?? null;
+    expect(newId).not.toBe("party_golu_garoua");
+
+    const saved = findParty(newId);
+    expect(saved).toMatchObject({
+      name: "Golu Transport Ltd",
+      city: "Ngoundéré",
+      phone: "+237699123456",
+      whatsapp: "+237699123456",
+      email: "accounts@golutransport.cm",
+      companyName: "Golu Transport Ltd",
+      paymentTermsDays: 47,
+      creditLimit: 12345678n,
+    });
+    expect(saved?.notes).toContain("prefers WhatsApp");
+
+    // The pre-existing, unrelated "Golu"/Garoua record is completely
+    // untouched — no fields bled across from the new request.
+    const untouched = findParty("party_golu_garoua");
+    expect(untouched).toMatchObject({ name: "Golu", city: "Garoua", phone: null, email: null });
+
+    const customers = await listParties("org_A", "customer");
+    expect(customers.map((c) => c.name).sort()).toEqual(["Golu", "Golu Transport Ltd"]);
+  });
+
+  it("D. duplicate 'use existing' path — only the intentionally-submitted fields are updated, an unrelated pre-existing field (email) is never silently blanked", async () => {
+    partyStore.push({
+      id: "party_golu_transport",
+      orgId: "org_A",
+      name: "Golu Transport Ltd",
+      type: "customer",
+      phone: null,
+      whatsapp: null,
+      country: null,
+      city: "Ngoundéré",
+      email: "existing-office@golutransport.cm",
+      notes: null,
+    });
+
+    // "Add Golu Transport Ltd as a customer with phone +237699123456 and
+    // payment terms 47 days." The name is an EXACT match against the
+    // existing record, so resolve.ts's isExactCustomerNameMatch auto-selects
+    // it with no duplicate prompt at all (see resolve.ts's doc comment on
+    // that function) — confirming & saving here IS the "use existing
+    // customer" outcome the sprint's test D describes.
+    const action = createCustomerAction({
+      customer_name: "Golu Transport Ltd",
+      city: null,
+      phone: "+237699123456",
+      whatsapp: null,
+      email: null,
+      payment_terms_days: 47,
+      credit_limit: null,
+      note: null,
+    });
+
+    const proposal = await resolveExtraction(ctx, action);
+    expect(proposal.partyId).toBe("party_golu_transport");
+    expect(proposal.createParty).toBe(false);
+    expect(proposal.duplicateCandidate).toBeNull();
+
+    const result = await executeBantooAction(buildExecuteInput(proposal));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.href).toBe("/customers/party_golu_transport");
+
+    const saved = findParty("party_golu_transport");
+    // Only the fields actually submitted this request (phone, payment
+    // terms) were updated.
+    expect(saved?.phone).toBe("+237699123456");
+    expect(saved?.paymentTermsDays).toBe(47);
+    // The pre-existing email, never mentioned in this request, survives
+    // untouched — the exact "silent overwrite" this requirement guards
+    // against.
+    expect(saved?.email).toBe("existing-office@golutransport.cm");
+    // No new party was created — exactly one customer named "Golu
+    // Transport Ltd" exists before and after.
+    const customers = await listParties("org_A", "customer");
+    expect(customers).toHaveLength(1);
+  });
+
+  it("E. default-value trap — persisted values are the SUBMITTED numbers, not silently the app's defaults (30 days / 0 credit limit / 0% discount)", async () => {
+    // "Create Test Non Default Customer in Douala. Payment terms 53 days.
+    // Credit limit 9876543 XAF. Default discount 11%." None of these three
+    // numbers may collide with a plausible default, so a silent
+    // default-fallback bug cannot hide behind a coincidental match.
+    const action = createCustomerAction({
+      customer_name: "Test Non Default Customer",
+      city: "Douala",
+      phone: null,
+      whatsapp: null,
+      email: null,
+      payment_terms_days: 53,
+      credit_limit: 9876543,
+      default_discount: 11,
+      note: null,
+    });
+
+    const proposal = await resolveExtraction(ctx, action);
+    const result = await executeBantooAction(buildExecuteInput(proposal));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const saved = findParty(result.href.split("/").pop() ?? null);
+    expect(saved).toBeDefined();
+
+    // The actual assertions the bug report demands:
+    expect(saved?.paymentTermsDays).toBe(53);
+    expect(saved?.creditLimit).toBe(9876543n);
+    expect(saved?.defaultDiscount).toBe("11");
+
+    // Explicit, loud regression guards: if execute() ever silently fell
+    // back to the app's defaults instead of the submitted values (the
+    // exact bug reported — "shows 30, but that's also the default"), THESE
+    // assertions fail even though the ones above might coincidentally
+    // still look plausible.
+    expect(saved?.paymentTermsDays).not.toBe(30);
+    expect(saved?.creditLimit).not.toBe(0n);
+    expect(saved?.defaultDiscount).not.toBe("0");
+    expect(saved?.defaultDiscount).not.toBeNull();
   });
 });

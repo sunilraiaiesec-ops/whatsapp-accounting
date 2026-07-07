@@ -102,6 +102,13 @@ function draft(overrides: Record<string, string> = {}) {
     phone: "",
     whatsapp: "",
     email: "",
+    companyName: "",
+    taxId: "",
+    paymentTermsDays: "",
+    creditLimit: "",
+    defaultDiscount: "",
+    preferredLanguage: "",
+    preferredPaymentMethod: "",
     note: "",
     view: "",
     periodText: "",
@@ -463,7 +470,16 @@ describe("executeBantooAction — create_customer duplicate-choice resolution (G
       phone: "+237699123456",
       whatsapp: "+237699123456",
     });
-    expect(updatePartySpy).not.toHaveBeenCalled();
+    // Launch Bug Fix Sprint: every brand-new customer gets companyName
+    // defaulted to its own name (see the "Company name field appears
+    // blank" bug this closes) and defaultCurrency set from the request's
+    // currency (defaults to the org base currency) — applied via a
+    // follow-up updateParty call, never by re-litigating the party
+    // identity/duplicate decision above.
+    expect(updatePartySpy).toHaveBeenCalledWith("org_A", "party_golu_transport", {
+      companyName: "Golu Transport",
+      defaultCurrency: "XAF",
+    });
     expect(updatePartyNotesSpy).toHaveBeenCalledWith(
       "org_A",
       "party_golu_transport",

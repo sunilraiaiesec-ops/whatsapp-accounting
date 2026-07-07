@@ -100,6 +100,17 @@ export function ruleBasedExtract(text: string): ExtractedAction {
       currency,
       confidence,
       summary: null,
+      // Launch Bug Fix Sprint: see extractCreateCustomer*'s doc comment in
+      // lib/command-parse.ts — English-only best-effort extraction so text
+      // still works without AI configured.
+      email: parsed.email,
+      company_name: null,
+      tax_id: parsed.taxId,
+      payment_terms_days: parsed.paymentTermsDays,
+      credit_limit: parsed.creditLimit ? Number(parsed.creditLimit) : null,
+      default_discount: parsed.defaultDiscount ? Number(parsed.defaultDiscount) : null,
+      preferred_language: null,
+      preferred_payment_method: null,
     };
   }
 
@@ -539,6 +550,16 @@ function mergeCreateCustomer(
       ? action.unsupported_requests
       : source.unsupported_requests,
     confidence: Math.max(action.confidence, source.confidence),
+    // Launch Bug Fix Sprint fields — same "AI value wins, rule fills gaps"
+    // precedence as every field above.
+    email: action.email?.trim() || source.email,
+    company_name: action.company_name?.trim() || source.company_name,
+    tax_id: action.tax_id?.trim() || source.tax_id,
+    payment_terms_days: action.payment_terms_days ?? source.payment_terms_days,
+    credit_limit: action.credit_limit ?? source.credit_limit,
+    default_discount: action.default_discount ?? source.default_discount,
+    preferred_language: action.preferred_language?.trim() || source.preferred_language,
+    preferred_payment_method: action.preferred_payment_method?.trim() || source.preferred_payment_method,
   };
 }
 

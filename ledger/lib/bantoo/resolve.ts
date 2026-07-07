@@ -268,6 +268,25 @@ function buildPartyPlan(
   if (action.phone?.trim()) steps.push({ code: "setPhone", status: "ready", params: { value: action.phone.trim() } });
   if (action.whatsapp?.trim())
     steps.push({ code: "setWhatsapp", status: "ready", params: { value: action.whatsapp.trim() } });
+  // create_customer-only fields (see createCustomerSchema in lib/ai/actions.ts) —
+  // narrowed via the discriminant so edit_customer/create_supplier, which
+  // don't carry these fields at all, are never accessed here.
+  if (action.action === "create_customer") {
+    if (action.email?.trim()) steps.push({ code: "setEmail", status: "ready", params: { value: action.email.trim() } });
+    if (action.company_name?.trim())
+      steps.push({ code: "setCompanyName", status: "ready", params: { value: action.company_name.trim() } });
+    if (action.tax_id?.trim()) steps.push({ code: "setTaxId", status: "ready", params: { value: action.tax_id.trim() } });
+    if (action.payment_terms_days != null)
+      steps.push({ code: "setPaymentTerms", status: "ready", params: { value: action.payment_terms_days } });
+    if (action.credit_limit != null)
+      steps.push({
+        code: "setCreditLimit",
+        status: "ready",
+        params: { value: action.credit_limit, currency: action.currency },
+      });
+    if (action.default_discount != null)
+      steps.push({ code: "setDiscount", status: "ready", params: { value: action.default_discount } });
+  }
   if (action.note?.trim()) steps.push({ code: "setNote", status: "ready", params: { value: action.note.trim() } });
   if (action.post_action === "open_profile") {
     steps.push({ code: openProfileCode, status: "ready" });
@@ -732,6 +751,20 @@ export async function resolveExtraction(
       draft.whatsapp = action.whatsapp ?? "";
       draft.note = action.note ?? "";
       draft.postAction = action.post_action ?? "";
+      // Launch Bug Fix Sprint: these Party profile fields were previously
+      // dropped here even when the AI/rule extraction layer captured them —
+      // see createCustomerSchema's doc comment in lib/ai/actions.ts. Left as
+      // "" when not extracted; execute() decides create-new defaults (e.g.
+      // companyName falling back to the customer's own name) — resolve.ts
+      // never guesses beyond what was actually extracted.
+      draft.email = action.email ?? "";
+      draft.companyName = action.company_name ?? "";
+      draft.taxId = action.tax_id ?? "";
+      draft.paymentTermsDays = numToStr(action.payment_terms_days);
+      draft.creditLimit = numToStr(action.credit_limit);
+      draft.defaultDiscount = numToStr(action.default_discount);
+      draft.preferredLanguage = action.preferred_language ?? "";
+      draft.preferredPaymentMethod = action.preferred_payment_method ?? "";
       proposal.partyType = "customer";
       proposal.needsParty = true;
 

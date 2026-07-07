@@ -218,6 +218,28 @@ export const createCustomerSchema = z.object({
   // Internal note to save on the new customer's record (e.g. "pays every
   // Friday after Jummah") — never a payment/balance, purely a text note.
   note: ntext,
+  // --- Launch Bug Fix Sprint: fields the Party profile already supports
+  // (see prisma/schema.prisma's Party model) but which create_customer never
+  // asked the extraction layer for, so they were silently dropped before
+  // resolve.ts/execute() ever saw them — NOT a missing-column problem. ---
+  email: ntext,
+  // Only set when a DISTINCT business/company name is mentioned alongside
+  // the contact's own name (e.g. "add John, he works at Acme Corp"). When
+  // null, resolve.ts/execute() default the Party's companyName to the same
+  // value as customer_name for a brand-new customer — see the "Company name
+  // field appears blank" bug this closes.
+  company_name: ntext,
+  // Tax ID / business registration number (name varies by country).
+  tax_id: ntext,
+  // "Net 30" / "payment terms 47 days" → a plain day count.
+  payment_terms_days: numberish,
+  // Credit limit in MAJOR currency units (same convention as every other
+  // money field on this schema) — converted to minor units before saving.
+  credit_limit: numberish,
+  // Default discount, as a percentage (e.g. 7 = 7%).
+  default_discount: numberish,
+  preferred_language: ntext,
+  preferred_payment_method: ntext,
   // e.g. "open_profile" when the user asked to view/open the profile once
   // saved. Null when not requested.
   post_action: postCustomerAction,
