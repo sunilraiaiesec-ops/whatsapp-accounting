@@ -213,13 +213,18 @@
     "noteText": "Note",
     "noteTextPlaceholder": "ex. A demandé une remise sur les commandes en gros",
     "viewCustomerListHint": "Ouvre votre liste complète de clients.",
+    "viewSupplierListHint": "Ouvre votre liste complète de fournisseurs.",
     "statementPeriodHint": "Pour {period}.",
     "statementAllTimeHint": "Pour toute la période — ajoutez une date ou une période pour affiner.",
     "contactViaCall": "Ouvre le composeur de votre téléphone avec le numéro de ce client.",
     "contactViaWhatsapp": "Ouvre WhatsApp pour écrire à ce client.",
     "contactViaEmail": "Ouvre votre application e-mail adressée à ce client.",
+    "contactViaCallSupplier": "Ouvre le composeur de votre téléphone avec le numéro de ce fournisseur.",
+    "contactViaWhatsappSupplier": "Ouvre WhatsApp pour écrire à ce fournisseur.",
+    "contactViaEmailSupplier": "Ouvre votre application e-mail adressée à ce fournisseur.",
     "successFound": "{number} trouvé.",
     "successOpening": "Ouverture de votre liste de clients.",
+    "successOpeningSupplierList": "Ouverture de votre liste de fournisseurs.",
     "successCustomerUpdated": "{number} a été mis à jour.",
     "successNoteAdded": "Note ajoutée pour {number}.",
     "openAction": "Ouvrir",
@@ -257,6 +262,13 @@
     "actionContactCustomer": "Contacter le client",
     "actionCustomerQuery": "Répondre à la question client",
     "actionUnsupportedCustomer": "Pas encore disponible",
+    "actionEditSupplier": "Modifier le fournisseur",
+    "actionViewSupplier": "Ouvrir la fiche fournisseur",
+    "actionSupplierBalance": "Consulter le solde fournisseur",
+    "actionAddSupplierNote": "Ajouter une note fournisseur",
+    "actionContactSupplier": "Contacter le fournisseur",
+    "actionSupplierQuery": "Répondre à la question d'achat",
+    "actionUnsupportedSupplier": "Pas encore disponible",
     "actionUnknown": "Incertain",
     "aiUnavailable": "La photo et la voix nécessitent la configuration de l'IA (OPENAI_API_KEY). Vous pouvez toujours écrire votre demande ci-dessous.",
     "aiFallbackNote": "L'IA était indisponible ; nous avons utilisé une analyse de texte basique. Veuillez vérifier les détails ci-dessous.",
@@ -298,7 +310,14 @@
       "missingPhone": "Ce client n'a pas de numéro de téléphone enregistré. Ajoutez-en un d'abord.",
       "missingWhatsapp": "Ce client n'a pas de numéro WhatsApp enregistré. Ajoutez-en un d'abord.",
       "missingEmail": "Ce client n'a pas d'e-mail enregistré. Ajoutez-en un d'abord.",
-      "notYetAvailable": "Je pourrai bientôt vous aider avec cela, mais cette action n'est pas encore disponible."
+      "notYetAvailable": "Je pourrai bientôt vous aider avec cela, mais cette action n'est pas encore disponible.",
+      "possibleDuplicateCustomer": "Un client existant nommé « {name} » a été trouvé avec des informations différentes. S'agit-il du même client, ou d'un nouveau client portant le même nom ?",
+      "supplierNotFound": "Je n'ai pas trouvé de fournisseur nommé « {name} ». Vérifiez l'orthographe ou choisissez dans la liste.",
+      "supplierAmbiguous": "Plusieurs fournisseurs correspondent à « {name} » — choisissez le bon ci-dessous.",
+      "enterSupplierName": "Saisissez le nom du fournisseur avant d'enregistrer.",
+      "supplierMissingPhone": "Ce fournisseur n'a pas de numéro de téléphone enregistré. Ajoutez-en un d'abord.",
+      "supplierMissingWhatsapp": "Ce fournisseur n'a pas de numéro WhatsApp enregistré. Ajoutez-en un d'abord.",
+      "supplierMissingEmail": "Ce fournisseur n'a pas d'e-mail enregistré. Ajoutez-en un d'abord."
     },
     "fieldReasons": {
       "supplierProductHistory": "Suggéré car {name} a été utilisé {count, plural, one {# fois} other {# fois}} pour ce produit ({lookbackMonths, plural, one {le dernier # mois} other {les derniers # mois}}).",
@@ -308,6 +327,24 @@
       "quantityLastDelivery": "Suggéré à partir de la dernière quantité livrée ({quantity}).",
       "costLastPurchase": "Suggéré à partir du dernier coût d'achat ({amount} {currency}).",
       "dueDatePaymentTerms": "Suggéré car ce fournisseur est habituellement payé ~{days, plural, one {# jour} other {# jours}} après la facture, d'après {paymentCount, plural, one {# paiement passé} other {# paiements passés}} à ce fournisseur (approximatif — les factures ne sont pas liées à un paiement précis)."
+    },
+    "duplicateCustomer": {
+      "title": "Un client existant nommé « {name} » a été trouvé",
+      "existingDetails": "Enregistré pour ce client :",
+      "useExisting": "Utiliser le client existant — {name}",
+      "createNew": "Créer un nouveau client avec le même nom"
+    },
+    "plan": {
+      "title": "Plan",
+      "createCustomer": "Créer le client — {name}",
+      "editCustomer": "Mettre à jour le client — {name}",
+      "setCity": "Ville — {value}",
+      "setPhone": "Téléphone — {value}",
+      "setWhatsapp": "WhatsApp — {value}",
+      "setNote": "Note interne — « {value} »",
+      "openProfile": "Après l'enregistrement — ouvrir la fiche client",
+      "unsupportedStep": "{request}",
+      "notAvailableYet": "pas encore disponible"
     }
   },
   "auth": {

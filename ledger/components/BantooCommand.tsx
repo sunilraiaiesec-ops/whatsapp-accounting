@@ -103,6 +103,10 @@ export function BantooCommand() {
   const [lineAccountOptions, setLineAccountOptions] = useState<BantooOption[]>([]);
   // Display text for the account combobox (accounts are selected by id).
   const [lineAccountText, setLineAccountText] = useState("");
+  // Safety fix: required when proposal.duplicateCandidate is set — the user
+  // must explicitly pick "use existing" vs "create new" before Confirm &
+  // Save is enabled (see canConfirm below). "" means not yet chosen.
+  const [duplicateChoice, setDuplicateChoice] = useState<"" | "existing" | "new">("");
 
   const resetAll = useCallback(() => {
     setPrompt("");
@@ -123,6 +127,7 @@ export function BantooCommand() {
     setLineAccountText("");
     setShowNewCategory(false);
     setNewCategoryName("");
+    setDuplicateChoice("");
   }, []);
 
   const openDialog = useCallback(() => {
@@ -277,6 +282,7 @@ export function BantooCommand() {
       p.lineAccountOptions.find((a) => a.id === p.lineAccountId)?.label ?? "",
     );
     setShowNewCategory(false);
+    setDuplicateChoice("");
     scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -384,6 +390,9 @@ export function BantooCommand() {
     if (success.kind === "view_customer") {
       return success.number ? t("successFound", { number: success.number }) : t("successOpening");
     }
+    if (success.kind === "view_supplier") {
+      return success.number ? t("successFound", { number: success.number }) : t("successOpeningSupplierList");
+    }
     if (success.kind === "edit_customer") return t("successCustomerUpdated", { number: success.number });
     if (success.kind === "add_customer_note") return t("successNoteAdded", { number: success.number });
     return t("successSaved", { number: success.number });
@@ -394,7 +403,14 @@ export function BantooCommand() {
     if (success.href.startsWith("tel:")) return t("callNow");
     if (success.href.startsWith("https://wa.me/")) return t("openWhatsapp");
     if (success.href.startsWith("mailto:")) return t("sendEmailAction");
-    if (success.kind === "view_customer" || success.kind === "customer_balance" || success.kind === "customer_query") {
+    if (
+      success.kind === "view_customer" ||
+      success.kind === "customer_balance" ||
+      success.kind === "customer_query" ||
+      success.kind === "view_supplier" ||
+      success.kind === "supplier_balance" ||
+      success.kind === "supplier_query"
+    ) {
       return t("openAction");
     }
     return t("viewDocument");
@@ -420,10 +436,20 @@ export function BantooCommand() {
     setError(null);
   }
 
-  // "unsupported_customer_action" is recognized confidently but genuinely not
-  // buildable yet — there is nothing to confirm/save, so no confirm button.
+  // Safety fix: a possible-duplicate customer is never auto-resolved either
+  // way — Confirm & Save stays disabled until the user explicitly picks
+  // "use existing" or "create new" (see duplicateChoiceBlock below).
+  const needsDuplicateChoice = Boolean(proposal?.duplicateCandidate) && duplicateChoice === "";
+
+  // "unsupported_customer_action"/"unsupported_supplier_action" are
+  // recognized confidently but genuinely not buildable yet — there is
+  // nothing to confirm/save, so no confirm button.
   const canConfirm =
-    proposal && proposal.action !== "unknown" && proposal.action !== "unsupported_customer_action";
+    proposal &&
+    proposal.action !== "unknown" &&
+    proposal.action !== "unsupported_customer_action" &&
+    proposal.action !== "unsupported_supplier_action" &&
+    !needsDuplicateChoice;
 
   // Read-only/navigation actions don't "save" anything, so the primary
   // button says so — "Confirm & save" would be misleading for e.g. opening
@@ -433,6 +459,10 @@ export function BantooCommand() {
     customer_balance: "showAnswerAction",
     customer_query: "showAnswerAction",
     contact_customer: "continueAction",
+    view_supplier: "openAction",
+    supplier_balance: "showAnswerAction",
+    supplier_query: "showAnswerAction",
+    contact_supplier: "continueAction",
   };
 
   // --- Small render helpers -------------------------------------------------
@@ -610,6 +640,12 @@ export function BantooCommand() {
     return partyBlock(t("customer"), "", { allowCreate: false });
   }
 
+  // Supplier & Purchasing Intelligence Sprint mirror of existingCustomerBlock
+  // above — used by every "existing supplier" workflow.
+  function existingSupplierBlock() {
+    return partyBlock(t("supplier"), "", { allowCreate: false });
+  }
+
   // Searchable unit picker (units are free text on items; suggestions come from
   // existing items + the search endpoint).
   function unitCombobox() {
@@ -701,6 +737,97 @@ export function BantooCommand() {
             </div>
           </div>
         ) : null}
+      </div>
+    );
+  }
+
+  // Safety fix: shown whenever resolve.ts flags a possible-duplicate
+  // customer (see BantooDuplicateCandidate). Forces the user to explicitly
+  // choose before the customer can be saved — see needsDuplicateChoice.
+  function duplicateChoiceBlock() {
+    const dup = proposal?.duplicateCandidate;
+    if (!dup) return null;
+    return (
+      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+        <p className="text-sm font-semibold text-amber-900">
+          {t("duplicateCustomer.title", { name: dup.name })}
+        </p>
+        <div className="mt-2 space-y-0.5 rounded-lg bg-white/70 p-2 text-xs text-slate-600">
+          <p className="font-medium text-slate-500">{t("duplicateCustomer.existingDetails")}</p>
+          {dup.city ? (
+            <p>
+              {t("city")}: {dup.city}
+            </p>
+          ) : null}
+          {dup.phone ? (
+            <p>
+              {t("phone")}: {dup.phone}
+            </p>
+          ) : null}
+          {dup.whatsapp ? (
+            <p>
+              {t("whatsapp")}: {dup.whatsapp}
+            </p>
+          ) : null}
+        </div>
+        <div className="mt-3 space-y-2">
+          <label className="flex items-center gap-2 text-sm text-slate-800">
+            <input
+              type="radio"
+              name="duplicateChoice"
+              checked={duplicateChoice === "existing"}
+              onChange={() => {
+                setDuplicateChoice("existing");
+                setPartyId(dup.id);
+                setCreateParty(false);
+              }}
+            />
+            {t("duplicateCustomer.useExisting", { name: dup.name })}
+          </label>
+          <label className="flex items-center gap-2 text-sm text-slate-800">
+            <input
+              type="radio"
+              name="duplicateChoice"
+              checked={duplicateChoice === "new"}
+              onChange={() => {
+                setDuplicateChoice("new");
+                setPartyId(null);
+                setCreateParty(true);
+              }}
+            />
+            {t("duplicateCustomer.createNew")}
+          </label>
+        </div>
+      </div>
+    );
+  }
+
+  // Multi-step Task Planning: the ordered checklist built by
+  // buildCustomerPlan in resolve.ts — every field the request actually
+  // carried, plus any post-action/unsupported trailing clause. Purely a
+  // read-only preview; the fields below remain the source of truth and stay
+  // fully editable.
+  function planBlock() {
+    if (!proposal || proposal.plan.length === 0) return null;
+    return (
+      <div className="rounded-xl border border-[var(--border)] bg-white p-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{t("plan.title")}</p>
+        <ul className="mt-2 space-y-1.5">
+          {proposal.plan.map((step, i) => (
+            <li
+              key={`${step.code}-${i}`}
+              className={`flex items-start gap-2 text-sm ${
+                step.status === "unavailable" ? "text-slate-400" : "text-slate-700"
+              }`}
+            >
+              <span aria-hidden>{step.status === "ready" ? "✓" : "•"}</span>
+              <span>
+                {t(`plan.${step.code}` as Parameters<typeof t>[0], step.params)}
+                {step.status === "unavailable" ? ` — ${t("plan.notAvailableYet")}` : ""}
+              </span>
+            </li>
+          ))}
+        </ul>
       </div>
     );
   }
@@ -844,8 +971,20 @@ export function BantooCommand() {
       case "create_customer":
         return (
           <>
-            {partyBlock(t("customer"), t("createParty"))}
+            {proposal.duplicateCandidate ? (
+              <label className="block text-sm">
+                <span className="font-medium text-slate-700">{t("customer")}</span>
+                <p className={`${inputClass} mt-1 bg-slate-50 text-slate-700`}>{draft.partyName}</p>
+              </label>
+            ) : (
+              partyBlock(t("customer"), t("createParty"))
+            )}
             {field(t("city"), draft.city, (v) => updateDraft("city", v))}
+            {field(t("phone"), draft.phone, (v) => updateDraft("phone", v))}
+            {field(t("whatsapp"), draft.whatsapp, (v) => updateDraft("whatsapp", v))}
+            {field(t("noteText"), draft.note, (v) => updateDraft("note", v), {
+              placeholder: t("noteTextPlaceholder"),
+            })}
           </>
         );
       case "edit_customer":
@@ -917,6 +1056,62 @@ export function BantooCommand() {
         );
       case "unsupported_customer_action":
         return null;
+      case "edit_supplier":
+        return (
+          <>
+            {existingSupplierBlock()}
+            {field(t("newName"), draft.newName, (v) => updateDraft("newName", v), {
+              placeholder: t("newNamePlaceholder"),
+            })}
+            {field(t("phone"), draft.phone, (v) => updateDraft("phone", v))}
+            {field(t("whatsapp"), draft.whatsapp, (v) => updateDraft("whatsapp", v))}
+            {field(t("email"), draft.email, (v) => updateDraft("email", v))}
+            {field(t("city"), draft.city, (v) => updateDraft("city", v))}
+          </>
+        );
+      case "view_supplier":
+        return draft.view === "list" ? (
+          <p className="text-sm text-slate-600">{t("viewSupplierListHint")}</p>
+        ) : (
+          existingSupplierBlock()
+        );
+      case "supplier_balance":
+        return <>{existingSupplierBlock()}</>;
+      case "add_supplier_note":
+        return (
+          <>
+            {existingSupplierBlock()}
+            {field(t("noteText"), draft.note, (v) => updateDraft("note", v), {
+              placeholder: t("noteTextPlaceholder"),
+            })}
+          </>
+        );
+      case "contact_supplier":
+        return (
+          <>
+            {existingSupplierBlock()}
+            <p className="text-xs text-[var(--muted)]">
+              {t(
+                draft.contactMethod === "whatsapp"
+                  ? "contactViaWhatsappSupplier"
+                  : draft.contactMethod === "email"
+                    ? "contactViaEmailSupplier"
+                    : "contactViaCallSupplier",
+              )}
+            </p>
+          </>
+        );
+      case "supplier_query":
+        return (
+          <>
+            {existingSupplierBlock()}
+            {draft.periodText ? (
+              <p className="text-xs text-[var(--muted)]">{t("statementPeriodHint", { period: draft.periodText })}</p>
+            ) : null}
+          </>
+        );
+      case "unsupported_supplier_action":
+        return null;
       default:
         return <p className="text-sm text-slate-600">{t("unknownAction")}</p>;
     }
@@ -937,6 +1132,13 @@ export function BantooCommand() {
     contact_customer: "actionContactCustomer",
     customer_query: "actionCustomerQuery",
     unsupported_customer_action: "actionUnsupportedCustomer",
+    edit_supplier: "actionEditSupplier",
+    view_supplier: "actionViewSupplier",
+    supplier_balance: "actionSupplierBalance",
+    add_supplier_note: "actionAddSupplierNote",
+    contact_supplier: "actionContactSupplier",
+    supplier_query: "actionSupplierQuery",
+    unsupported_supplier_action: "actionUnsupportedSupplier",
     unknown: "actionUnknown",
   };
 
@@ -1010,13 +1212,19 @@ export function BantooCommand() {
                 </p>
               ) : null}
               {proposal.warnings
-                .filter((w) => !(w.code === "lowConfidence" && proposal.lowConfidence))
+                .filter(
+                  (w) =>
+                    !(w.code === "lowConfidence" && proposal.lowConfidence) &&
+                    w.code !== "possibleDuplicateCustomer",
+                )
                 .map((w) => (
                 <p key={w.code + JSON.stringify(w.params ?? {})} className="text-sm text-amber-700">
                   {warningText(w)}
                 </p>
               ))}
 
+              {duplicateChoiceBlock()}
+              {planBlock()}
               {renderProposalFields()}
             </div>
           ) : (

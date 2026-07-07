@@ -214,13 +214,18 @@
     "noteText": "Note",
     "noteTextPlaceholder": "e.g. Asked for a discount on bulk orders",
     "viewCustomerListHint": "Opens your full customer list.",
+    "viewSupplierListHint": "Opens your full supplier list.",
     "statementPeriodHint": "For {period}.",
     "statementAllTimeHint": "For all time — add a date or period to narrow it down.",
     "contactViaCall": "Opens your phone's dialer with this customer's number.",
     "contactViaWhatsapp": "Opens WhatsApp to message this customer.",
     "contactViaEmail": "Opens your email app addressed to this customer.",
+    "contactViaCallSupplier": "Opens your phone's dialer with this supplier's number.",
+    "contactViaWhatsappSupplier": "Opens WhatsApp to message this supplier.",
+    "contactViaEmailSupplier": "Opens your email app addressed to this supplier.",
     "successFound": "Found {number}.",
     "successOpening": "Opening your customer list.",
+    "successOpeningSupplierList": "Opening your supplier list.",
     "successCustomerUpdated": "{number} was updated.",
     "successNoteAdded": "Note added for {number}.",
     "openAction": "Open",
@@ -258,6 +263,13 @@
     "actionContactCustomer": "Contact customer",
     "actionCustomerQuery": "Answer customer question",
     "actionUnsupportedCustomer": "Not available yet",
+    "actionEditSupplier": "Edit supplier",
+    "actionViewSupplier": "Open supplier",
+    "actionSupplierBalance": "Check supplier balance",
+    "actionAddSupplierNote": "Add supplier note",
+    "actionContactSupplier": "Contact supplier",
+    "actionSupplierQuery": "Answer purchasing question",
+    "actionUnsupportedSupplier": "Not available yet",
     "actionUnknown": "Not sure",
     "aiUnavailable": "Photo and voice need AI setup (OPENAI_API_KEY). You can still type your request below.",
     "aiFallbackNote": "AI was unavailable, so we used basic text parsing. Please double-check the details below.",
@@ -299,7 +311,14 @@
       "missingPhone": "This customer has no phone number on file. Add one first.",
       "missingWhatsapp": "This customer has no WhatsApp number on file. Add one first.",
       "missingEmail": "This customer has no email on file. Add one first.",
-      "notYetAvailable": "I can help with that soon, but this action is not available yet."
+      "notYetAvailable": "I can help with that soon, but this action is not available yet.",
+      "possibleDuplicateCustomer": "Found an existing customer named “{name}” with different details. Is this the same customer, or a new customer with the same name?",
+      "supplierNotFound": "I couldn't find a supplier named “{name}”. Check the spelling or pick from the list.",
+      "supplierAmbiguous": "A few suppliers match “{name}” — pick the right one below.",
+      "enterSupplierName": "Enter the supplier name before saving.",
+      "supplierMissingPhone": "This supplier has no phone number on file. Add one first.",
+      "supplierMissingWhatsapp": "This supplier has no WhatsApp number on file. Add one first.",
+      "supplierMissingEmail": "This supplier has no email on file. Add one first."
     },
     "fieldReasons": {
       "supplierProductHistory": "Suggested because {name} was used {count, plural, one {# time} other {# times}} for this product (last {lookbackMonths, plural, one {# month} other {# months}}).",
@@ -309,6 +328,24 @@
       "quantityLastDelivery": "Suggested from the last delivery quantity ({quantity}).",
       "costLastPurchase": "Suggested from the last purchase cost ({amount} {currency}).",
       "dueDatePaymentTerms": "Suggested because this supplier is usually paid ~{days, plural, one {# day} other {# days}} after the invoice, based on {paymentCount, plural, one {# past payment} other {# past payments}} to this supplier (approximate — invoices aren't linked to a specific payment)."
+    },
+    "duplicateCustomer": {
+      "title": "Found an existing customer named “{name}”",
+      "existingDetails": "On file for this customer:",
+      "useExisting": "Use existing customer — {name}",
+      "createNew": "Create as a new customer with the same name"
+    },
+    "plan": {
+      "title": "Plan",
+      "createCustomer": "Create customer — {name}",
+      "editCustomer": "Update customer — {name}",
+      "setCity": "City — {value}",
+      "setPhone": "Phone — {value}",
+      "setWhatsapp": "WhatsApp — {value}",
+      "setNote": "Internal note — “{value}”",
+      "openProfile": "After saving — open customer profile",
+      "unsupportedStep": "{request}",
+      "notAvailableYet": "not available yet"
     }
   },
   "auth": {
