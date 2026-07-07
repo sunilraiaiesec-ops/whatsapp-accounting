@@ -3,8 +3,10 @@ export type CommandIntent =
   | "create_payment"
   | "create_goods_receipt"
   | "create_customer"
+  | "create_supplier"
   | "customer_action"
   | "supplier_action"
+  | "sales_action"
   | "unknown";
 
 // Every non-creation customer workflow Ask Bantoo can recognize by rule. The
@@ -142,12 +144,15 @@ export type ParsedCommand = {
   customerAction: ParsedCustomerAction | null;
   // Populated only when intent === "supplier_action".
   supplierAction: ParsedSupplierAction | null;
+  // Populated only when intent === "sales_action".
+  salesAction: ParsedSalesAction | null;
   // Multi-step Task Planning: best-effort rule-based extraction of the same
-  // extra fields the AI path captures for create_customer (see
-  // extractCreateCustomerDetails) — a simple compound sentence like "Add
-  // Musa as a customer in Garoua, phone 690123456" should work without AI.
-  // Only populated when intent === "create_customer"; more complex phrasing
-  // (e.g. notes, pronoun resolution) is left to the AI path.
+  // extra fields the AI path captures for create_customer/create_supplier
+  // (see extractCreateCustomerDetails/extractCreateSupplierDetails) — a
+  // simple compound sentence like "Add Musa as a customer in Garoua, phone
+  // 690123456" should work without AI. Only populated when intent is
+  // "create_customer" or "create_supplier"; more complex phrasing (e.g.
+  // notes, pronoun resolution) is left to the AI path.
   phone: string | null;
   whatsapp: string | null;
   postAction: "open_profile" | null;
@@ -156,7 +161,7 @@ export type ParsedCommand = {
 
 export type LegacyCommandIntent = Exclude<
   CommandIntent,
-  "create_customer" | "customer_action" | "supplier_action"
+  "create_customer" | "create_supplier" | "customer_action" | "supplier_action" | "sales_action"
 >;
 
 export type LegacyParsedCommand = {
@@ -189,6 +194,20 @@ const STOCK_RECEIPT_PATTERNS = [
   /\b(mila|milli|aaya|aya)\b/i,
 ];
 
+// "Cash sale" phrasing (EN/FR) is a create_receipt/sales_receipt command that
+// otherwise wouldn't be caught by RECEIPT_PATTERNS above (it has no
+// "received"/"got"/"reçu" word — money is going OUT of the till as goods,
+// not being "received"). Kept as its own tiny pattern set + explicit
+// detectIntent branch rather than folding into RECEIPT_PATTERNS so the
+// receiptCategory below can be forced to "sales" (not "customer") even
+// though a party name is present — see extractCashSaleCustomerName.
+const CASH_SALE_PATTERNS = [
+  /\bcash\s+sales?\b/i,
+  /\bsales?\s+(?:for\s+)?cash\b/i,
+  /\bvente\s+(?:au\s+)?comptant\b/i,
+  /\bventes?\s+cash\b/i,
+];
+
 const PAYMENT_PATTERNS = [
   /\b(paid?|pay|payé|paye|décaiss(?:é|e|ement)?|decaiss(?:é|e|ement)?|sent)\b/i,
   /\b(diya|diye|di gayi|de diya|de diye|bheja|bheje|pay kiya|pay kar diya)\b/i,
@@ -213,12 +232,33 @@ const TO_PARTY_PATTERN =
 
 const FOR_REASON_PATTERN = /\b(?:for|pour)\s+(.+)$/i;
 
+// Launch-blocking bug fix: the verb group below was originally just
+// "add|create|new" (EN) / "ajouter|créer|creer|nouveau" (FR) — too narrow for
+// real phrasing like "Please SAVE him as a supplier" or "ENREGISTREZ-la
+// comme cliente", which pushed those requests toward "unknown" instead of a
+// confident create_customer/create_supplier classification. Broadened here
+// (and mirrored exactly in CREATE_SUPPLIER_PATTERNS below) to also recognize
+// "save"/"register" (EN) and "enregistrer"/its imperative forms (FR).
 const CREATE_CUSTOMER_PATTERNS = [
-  /\b(?:add|create|new)\s+(?:a\s+)?customers?\b/i,
-  /\b(?:ajouter|créer|creer|nouveau)\s+(?:un\s+)?clients?\b/i,
-  /\b(?:add|ajouter)\s+.+\s+(?:as\s+(?:a\s+)?(?:customer|client)|comme\s+client)\b/i,
+  /\b(?:add|create|new|save|register)\s+(?:a\s+)?customers?\b/i,
+  /\b(?:ajouter|cr[ée]er|nouveau|enregistrer|enregistrez|enregistre)\s+(?:un\s+)?clients?\b/i,
+  /\b(?:add|save|register|ajouter|enregistrer|enregistrez|enregistre)\s+.+\s+(?:as\s+(?:a\s+)?(?:customer|client)|comme\s+cliente?s?)\b/i,
   /\b(?:add|ajouter)\s+clients?\s+\S/i,
   /\bclients?\s+(?:nommé|nomme|named|called|appelé|appele|appellé)\b/i,
+];
+
+// Supplier & Purchasing Intelligence Sprint mirror of CREATE_CUSTOMER_PATTERNS
+// — see the module doc comment above detectSupplierAction for why every
+// pattern here deliberately requires the literal word "supplier"/"vendor"/
+// "fournisseur" (never fires on customer text). "vendor" is accepted as an
+// English synonym for "supplier", the same way "client" is accepted as a
+// synonym for "customer" above.
+const CREATE_SUPPLIER_PATTERNS = [
+  /\b(?:add|create|new|save|register)\s+(?:a\s+)?suppliers?\b/i,
+  /\b(?:ajouter|cr[ée]er|nouveau|enregistrer|enregistrez|enregistre)\s+(?:un\s+)?fournisseurs?\b/i,
+  /\b(?:add|save|register|ajouter|enregistrer|enregistrez|enregistre)\s+.+\s+(?:as\s+(?:a\s+)?(?:supplier|vendor)|comme\s+fournisseurs?)\b/i,
+  /\b(?:add|ajouter)\s+fournisseurs?\s+\S/i,
+  /\bfournisseurs?\s+(?:nommé|nomme|named|called|appelé|appele|appellé)\b/i,
 ];
 
 const CUSTOMER_NAME_LEAD =
@@ -807,6 +847,230 @@ function detectSupplierAction(raw: string): ParsedSupplierAction | null {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Sales-document detection (Ask Bantoo Sales Intelligence Sprint). Every
+// pattern below deliberately requires an explicit sales-document keyword
+// ("invoice"/"facture", "credit note"/"note de crédit", "refund"/
+// "remboursement") so it can never collide with create_receipt/
+// create_payment/customer_action/supplier_action detection — see the
+// "does not misclassify ... as a sales_action" regression tests in
+// lib/command-parse-sales.test.ts. Patterns are tried in priority order
+// (most specific first): the unsupported_* patterns (which reference a
+// specific invoice NUMBER) are checked before the generic name-capturing
+// invoice/credit-note/refund patterns so e.g. "Edit invoice INV-0001" is
+// never swallowed by the broader "invoice ..." pattern.
+//
+// Amount is NOT captured here — like every other create_* intent, the
+// shared extractAmount(raw) helper (run once in parseCommandTextFull) picks
+// the amount out of the full raw text regardless of intent.
+// ---------------------------------------------------------------------------
+
+const SALES_UNSUPPORTED_APPLY_PAYMENT = [
+  /\bapply\s+(?:a\s+)?payment\s+to\s+invoice\s+(\S+)/i,
+  /\bappliquer\s+(?:un\s+)?paiement\s+(?:à|a)\s+la\s+facture\s+(\S+)/i,
+];
+
+const SALES_UNSUPPORTED_EMAIL = [
+  /\b(?:email|send)\s+(?:the\s+)?invoice\s+(?:\S+\s+)?to\s+(.+)$/i,
+  /\benvoyer\s+(?:la\s+)?facture\s+(?:\S+\s+)?(?:par\s+email\s+)?(?:à|a)\s+(.+)$/i,
+];
+
+const SALES_UNSUPPORTED_VOID = [
+  /\b(?:void|cancel)\s+(?:the\s+)?invoice\s+(\S+)/i,
+  /\bannuler\s+(?:la\s+)?facture\s+(\S+)/i,
+];
+
+const SALES_UNSUPPORTED_EDIT = [
+  /\b(?:edit|update|modify)\s+(?:the\s+)?invoice\s+(\S+)/i,
+  /\b(?:modifier|mettre\s+à\s+jour|mettre\s+a\s+jour)\s+(?:la\s+)?facture\s+(\S+)/i,
+];
+
+const SALES_VIEW_LIST = [
+  /\b(?:view|show|list|open)\s+(?:my\s+|the\s+)?sales?\s+invoices?\b/i,
+  /\b(?:view|show|list|open)\s+(?:my\s+|the\s+)?invoices?\b/i,
+  /\b(?:voir|afficher|lister|ouvrir)\s+(?:mes\s+|les\s+)?factures?(?:\s+de\s+vente)?\b/i,
+];
+
+// NOT_WORD_BOUNDARY: a \b-equivalent that also works immediately before an
+// accented capital/lowercase letter (é, à, ...) — plain \b relies on \w
+// (=[A-Za-z0-9_]), which does NOT include accented letters, so a literal
+// \b placed right before "émettre"/"établir"/"à" etc. silently fails to
+// match whenever that word is preceded by whitespace or starts the string
+// (the overwhelmingly common case for a leading verb/preposition). This
+// negative lookbehind checks the actual preceding character instead.
+const NOT_WORD_BOUNDARY = "(?<![\\wÀ-ÿ])";
+
+const SALES_CREDIT_NOTE = [
+  /\b(?:issue|create|make|raise|record)\s+(?:a\s+)?credit\s+note\s+(?:of\s+.+?\s+)?(?:for|to)\s+(.+)$/i,
+  /\bcredit\s+note\s+(?:for|to)\s+(.+)$/i,
+  new RegExp(
+    `${NOT_WORD_BOUNDARY}[ée]mettre\\s+(?:une\\s+)?note\\s+de\\s+cr[ée]dit\\s+(?:de\\s+.+?\\s+)?(?:pour|à|a)\\s+(.+)$`,
+    "i",
+  ),
+  /\bnote\s+de\s+cr[ée]dit\s+(?:pour|à|a)\s+(.+)$/i,
+];
+
+const SALES_REFUND = [
+  /\b(?:issue|create|make|process|record)\s+(?:a\s+)?refund(?:\s+receipt)?\s+(?:of\s+.+?\s+)?(?:for|to)\s+(.+)$/i,
+  /\brefund(?:\s+receipt)?\s+(?:for|to)\s+(.+)$/i,
+  /\brefund\s+(.+)$/i,
+  new RegExp(
+    `${NOT_WORD_BOUNDARY}[ée]mettre\\s+(?:un\\s+)?remboursement\\s+(?:de\\s+.+?\\s+)?(?:pour|à|a)\\s+(.+)$`,
+    "i",
+  ),
+  /\brembourser\s+(.+)$/i,
+];
+
+const SALES_INVOICE = [
+  /\b(?:create|make|generate|raise|issue|record)\s+(?:an?\s+)?(?:sales?\s+)?invoice\s+(?:of\s+.+?\s+)?(?:for|to)\s+(.+)$/i,
+  /\binvoice\s+(?:customer\s+)?(.+)$/i,
+  new RegExp(
+    `${NOT_WORD_BOUNDARY}(?:cr[ée]er|[ée]tablir|[ée]mettre|enregistrer)\\s+(?:une\\s+)?facture\\s+(?:de\\s+.+?\\s+)?(?:pour|à|a)\\s+(.+)$`,
+    "i",
+  ),
+  /\bfacturer\s+(.+)$/i,
+];
+
+// "due in 30 days" / "net 30" / "échéance dans 30 jours" / "échéance : 30
+// jours" — captured as a plain day count; the caller (resolve.ts/fallback.ts)
+// resolves it to a concrete ISO date relative to the invoice date.
+const SALES_DUE_DATE_DAYS = new RegExp(
+  `${NOT_WORD_BOUNDARY}(?:due\\s+in\\s+(\\d+)\\s*days?|net\\s*(\\d+)|[ée]ch[ée]ance\\s*(?:dans\\s+)?:?\\s*(\\d+)\\s+jours?)\\b`,
+  "i",
+);
+
+// Referenced document number for the unsupported_* kinds, e.g. "INV-0001".
+const SALES_INVOICE_NUMBER = /\b((?:inv|fac)[-_]?\d+)\b/i;
+
+function extractSalesDueDateDays(text: string): number | null {
+  const m = text.match(SALES_DUE_DATE_DAYS);
+  if (!m) return null;
+  const raw = m[1] ?? m[2] ?? m[3];
+  const n = raw ? Number(raw) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function extractSalesInvoiceNumber(text: string): string | null {
+  const m = text.match(SALES_INVOICE_NUMBER);
+  return m?.[1] ? m[1].toUpperCase() : null;
+}
+
+// Splits a tail like "Musa 50000 for rice, due in 30 days" into a clean
+// customer name, an optional "for X"/"pour X"/"de X"/"of X" description, and
+// an optional due-date day count — mirroring splitNameAndPeriod's
+// tail-parsing style. "de"/"of" are included alongside "for"/"pour" because
+// French phrasing like "facture pour Musa de 50000" introduces the AMOUNT
+// (not a real description) with "de" — whatever follows still gets stripped
+// from the name here, and cleanDescription/the `|| null` fallback below
+// collapse a pure-amount "description" like "50000" back down to null.
+// cleanCustomerName (via cleanLabel) already strips the stray amount/currency
+// tokens left over from the description split.
+function splitSalesTail(tail: string): {
+  name: string;
+  description: string | null;
+  dueDateDays: number | null;
+} {
+  const dueDateDays = extractSalesDueDateDays(tail);
+  const withoutDueDate = dueDateDays ? tail.replace(SALES_DUE_DATE_DAYS, "").trim() : tail;
+
+  const m = withoutDueDate.match(/\s+(?:for|pour|de|of)\s+(.+)$/i);
+  if (m?.[1]) {
+    const description = cleanDescription(stripTrailingPunctuation(m[1]));
+    return {
+      name: cleanCustomerName(withoutDueDate.slice(0, m.index)),
+      description: description || null,
+      dueDateDays,
+    };
+  }
+  return { name: cleanCustomerName(withoutDueDate), description: null, dueDateDays };
+}
+
+function detectSalesAction(raw: string): ParsedSalesAction | null {
+  const emptyExtras = { description: null, dueDateDays: null, invoiceNumber: null } as const;
+
+  let m = firstMatch(SALES_UNSUPPORTED_APPLY_PAYMENT, raw);
+  if (m?.[1]) {
+    return {
+      kind: "unsupported_apply_payment",
+      customerName: null,
+      ...emptyExtras,
+      invoiceNumber: extractSalesInvoiceNumber(m[1]) ?? m[1].toUpperCase(),
+    };
+  }
+
+  m = firstMatch(SALES_UNSUPPORTED_EMAIL, raw);
+  if (m?.[1]) {
+    return {
+      kind: "unsupported_email",
+      customerName: cleanCustomerName(m[1]),
+      ...emptyExtras,
+      invoiceNumber: extractSalesInvoiceNumber(raw),
+    };
+  }
+
+  m = firstMatch(SALES_UNSUPPORTED_VOID, raw);
+  if (m?.[1]) {
+    return {
+      kind: "unsupported_void",
+      customerName: null,
+      ...emptyExtras,
+      invoiceNumber: extractSalesInvoiceNumber(m[1]) ?? m[1].toUpperCase(),
+    };
+  }
+
+  m = firstMatch(SALES_UNSUPPORTED_EDIT, raw);
+  if (m?.[1]) {
+    return {
+      kind: "unsupported_edit",
+      customerName: null,
+      ...emptyExtras,
+      invoiceNumber: extractSalesInvoiceNumber(m[1]) ?? m[1].toUpperCase(),
+    };
+  }
+
+  if (firstMatch(SALES_VIEW_LIST, raw)) {
+    return { kind: "view_list", customerName: null, ...emptyExtras };
+  }
+
+  m = firstMatch(SALES_CREDIT_NOTE, raw);
+  if (m?.[1]) {
+    const split = splitSalesTail(m[1]);
+    return {
+      kind: "credit_note",
+      customerName: split.name,
+      description: split.description,
+      dueDateDays: null,
+      invoiceNumber: null,
+    };
+  }
+
+  m = firstMatch(SALES_REFUND, raw);
+  if (m?.[1]) {
+    const split = splitSalesTail(m[1]);
+    return {
+      kind: "refund",
+      customerName: split.name,
+      description: split.description,
+      dueDateDays: null,
+      invoiceNumber: null,
+    };
+  }
+
+  m = firstMatch(SALES_INVOICE, raw);
+  if (m?.[1]) {
+    const split = splitSalesTail(m[1]);
+    return {
+      kind: "invoice",
+      customerName: split.name,
+      description: split.description,
+      dueDateDays: split.dueDateDays,
+      invoiceNumber: null,
+    };
+  }
+
+  return null;
+}
+
 const MONTH_NAMES: { names: string[]; index: number }[] = [
   { names: ["january", "janvier"], index: 0 },
   { names: ["february", "février", "fevrier"], index: 1 },
@@ -869,10 +1133,38 @@ function normalizeText(s: string): string {
     .trim();
 }
 
+// When BOTH an explicit customer-creation phrasing and an explicit
+// supplier-creation phrasing are present in the same message (rare — usually
+// a self-correction like "...add Musa as a customer, actually save him as a
+// supplier"), returns whichever pattern's LAST match ends latest in the raw
+// text. Mirrors the AI prompt's DISAMBIGUATION RULE (lib/ai/extract.ts) so
+// the rule-based fallback and the AI path resolve the same ambiguity the
+// same way — the LAST explicit statement of intent wins, since a correction
+// stated later supersedes an earlier, now-outdated one.
+function lastMatchEndIndex(patterns: RegExp[], text: string): number {
+  let lastEnd = -1;
+  for (const pattern of patterns) {
+    const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
+    const global = new RegExp(pattern.source, flags);
+    for (const match of text.matchAll(global)) {
+      const end = (match.index ?? 0) + match[0].length;
+      if (end > lastEnd) lastEnd = end;
+    }
+  }
+  return lastEnd;
+}
+
 function detectIntent(text: string): CommandIntent {
   const lower = text.toLowerCase();
   const isCreateCustomer = CREATE_CUSTOMER_PATTERNS.some((p) => p.test(lower));
+  const isCreateSupplier = CREATE_SUPPLIER_PATTERNS.some((p) => p.test(lower));
+  if (isCreateCustomer && isCreateSupplier) {
+    const customerEnd = lastMatchEndIndex(CREATE_CUSTOMER_PATTERNS, text);
+    const supplierEnd = lastMatchEndIndex(CREATE_SUPPLIER_PATTERNS, text);
+    return supplierEnd > customerEnd ? "create_supplier" : "create_customer";
+  }
   if (isCreateCustomer) return "create_customer";
+  if (isCreateSupplier) return "create_supplier";
 
   // Supplier detection runs FIRST: every SUPPLIER_* pattern requires the
   // literal word "supplier"/"fournisseur", so it can never accidentally fire
@@ -886,6 +1178,9 @@ function detectIntent(text: string): CommandIntent {
   // customer pattern.
   if (detectSupplierAction(text)) return "supplier_action";
   if (detectCustomerAction(text)) return "customer_action";
+  if (detectSalesAction(text)) return "sales_action";
+
+  if (CASH_SALE_PATTERNS.some((p) => p.test(lower))) return "create_receipt";
 
   const isReceipt = RECEIPT_PATTERNS.some((p) => p.test(lower));
   const isPayment = PAYMENT_PATTERNS.some((p) => p.test(lower));
@@ -1074,8 +1369,49 @@ function extractPartyName(text: string, intent: CommandIntent): string | null {
   return null;
 }
 
+// Dedicated party-name extraction for "cash sale" commands. Generic
+// FROM_PATTERN/extractPartyName would mis-capture here: French cash-sale
+// phrasing puts the trigger word itself ("vente AU comptant") ahead of the
+// customer's "à Musa" clause, so a naive first-match-of-"à|au" regex would
+// grab "comptant de 20000 à Musa" instead of just "Musa". Stripping the
+// cash-sale trigger phrase first avoids that collision.
+function extractCashSaleCustomerName(raw: string): string | null {
+  let stripped = raw;
+  for (const pattern of CASH_SALE_PATTERNS) {
+    stripped = stripped.replace(pattern, " ");
+  }
+
+  const enMatch = stripped.match(/\b(?:from|by)\s+(.+)$/i);
+  if (enMatch?.[1]) {
+    const cleaned = cleanLabel(enMatch[1]);
+    if (cleaned.length >= 2) return cleaned;
+  }
+
+  // Bare "a" is deliberately excluded (it's the English indefinite article,
+  // e.g. "Record A cash sale..." → would otherwise misfire); only the
+  // accented French forms are matched. Uses NOT_WORD_BOUNDARY (not \b) since
+  // "à" is itself an accented character — see its doc comment above.
+  const frMatch = stripped.match(new RegExp(`${NOT_WORD_BOUNDARY}(?:à|au)\\s+(.+)$`, "i"));
+  if (frMatch?.[1]) {
+    const cleaned = cleanLabel(frMatch[1]);
+    if (cleaned.length >= 2) return cleaned;
+  }
+
+  return null;
+}
+
 function stripCustomerNameLead(text: string): string {
   return cleanLabel(text.replace(CUSTOMER_NAME_LEAD, "").replace(/[.,]\s*$/, ""));
+}
+
+// Supplier & Purchasing Intelligence Sprint mirror of stripCustomerNameLead —
+// CUSTOMER_NAME_LEAD's pattern content isn't actually customer-specific
+// (nommé/named/called/...), but a distinct name keeps this pairing symmetric
+// with every other customer/supplier helper pair in this file.
+const SUPPLIER_NAME_LEAD = CUSTOMER_NAME_LEAD;
+
+function stripSupplierNameLead(text: string): string {
+  return cleanLabel(text.replace(SUPPLIER_NAME_LEAD, "").replace(/[.,]\s*$/, ""));
 }
 
 // Trailing clauses beyond name/city (phone, WhatsApp, an internal note, a
@@ -1126,7 +1462,7 @@ function extractCreateCustomerPostAction(raw: string): "open_profile" | null {
 
 function extractCreateCustomerDetails(text: string): { name: string | null; city: string | null } {
   const asRole = text.match(
-    /\b(?:add|ajouter)\s+(.+?)\s+(?:as\s+(?:a\s+)?(?:customer|client)|comme\s+client)\b(?:\s+(?:in|à|a|en)\s+(.+?))?$/i,
+    /\b(?:add|save|register|ajouter|enregistrer|enregistrez|enregistre)\s+(.+?)\s+(?:as\s+(?:a\s+)?(?:customer|client)|comme\s+cliente?s?)\b(?:\s+(?:in|à|a|en)\s+(.+?))?$/i,
   );
   if (asRole?.[1]) {
     const name = stripCustomerNameLead(asRole[1]);
@@ -1144,7 +1480,7 @@ function extractCreateCustomerDetails(text: string): { name: string | null; city
   }
 
   const prefixed = text.match(
-    /\b(?:add|create|new|ajouter|créer|creer|nouveau)\s+(?:a\s+)?(?:customers?|clients?|un\s+client)\s+(.+?)(?:\s+(?:in|à|a|en)\s+(.+?))?$/i,
+    /\b(?:add|create|new|save|register|ajouter|cr[ée]er|nouveau|enregistrer|enregistrez|enregistre)\s+(?:a\s+)?(?:customers?|clients?|un\s+client)\s+(.+?)(?:\s+(?:in|à|a|en)\s+(.+?))?$/i,
   );
   if (prefixed?.[1]) {
     const name = stripCustomerNameLead(prefixed[1]);
@@ -1158,6 +1494,53 @@ function extractCreateCustomerDetails(text: string): { name: string | null; city
   if (bareClient?.[1]) {
     const name = stripCustomerNameLead(bareClient[1]);
     const city = bareClient[2] ? cleanLabel(bareClient[2]) : null;
+    if (name.length >= 2) return { name, city: city && city.length >= 2 ? city : null };
+  }
+
+  return { name: null, city: null };
+}
+
+// Supplier & Purchasing Intelligence Sprint mirror of
+// extractCreateCustomerDetails — field-for-field identical structure, just
+// "supplier"/"fournisseur"/"vendor" in place of "customer"/"client". Kept as
+// a fully separate function (rather than a shared parameterized helper) so
+// each stays trivially readable/greppable on its own, matching every other
+// customer/supplier pair in this file (cleanCustomerName/cleanSupplierName,
+// parseEditTail/parseSupplierEditTail, etc).
+function extractCreateSupplierDetails(text: string): { name: string | null; city: string | null } {
+  const asRole = text.match(
+    /\b(?:add|save|register|ajouter|enregistrer|enregistrez|enregistre)\s+(.+?)\s+(?:as\s+(?:a\s+)?(?:supplier|vendor)|comme\s+fournisseurs?)\b(?:\s+(?:in|à|a|en)\s+(.+?))?$/i,
+  );
+  if (asRole?.[1]) {
+    const name = stripSupplierNameLead(asRole[1]);
+    const city = asRole[2] ? cleanLabel(asRole[2]) : null;
+    if (name.length >= 2) return { name, city: city && city.length >= 2 ? city : null };
+  }
+
+  const namedRole = text.match(
+    /\b(?:supplier|vendor|fournisseur|un\s+fournisseur)\s+(?:nommé|nomme|named|called|appelé|appele|appellé)\s+(.+?)(?:\s+(?:in|à|a|en)\s+(.+?))?$/i,
+  );
+  if (namedRole?.[1]) {
+    const name = stripSupplierNameLead(namedRole[1]);
+    const city = namedRole[2] ? cleanLabel(namedRole[2]) : null;
+    if (name.length >= 2) return { name, city: city && city.length >= 2 ? city : null };
+  }
+
+  const prefixed = text.match(
+    /\b(?:add|create|new|save|register|ajouter|cr[ée]er|nouveau|enregistrer|enregistrez|enregistre)\s+(?:a\s+)?(?:suppliers?|fournisseurs?|un\s+fournisseur)\s+(.+?)(?:\s+(?:in|à|a|en)\s+(.+?))?$/i,
+  );
+  if (prefixed?.[1]) {
+    const name = stripSupplierNameLead(prefixed[1]);
+    const city = prefixed[2] ? cleanLabel(prefixed[2]) : null;
+    if (name.length >= 2) return { name, city: city && city.length >= 2 ? city : null };
+  }
+
+  const bareSupplier = text.match(
+    /\b(?:add|ajouter)\s+fournisseurs?\s+(.+?)(?:\s+(?:in|à|a|en)\s+(.+?))?$/i,
+  );
+  if (bareSupplier?.[1]) {
+    const name = stripSupplierNameLead(bareSupplier[1]);
+    const city = bareSupplier[2] ? cleanLabel(bareSupplier[2]) : null;
     if (name.length >= 2) return { name, city: city && city.length >= 2 ? city : null };
   }
 
@@ -1178,6 +1561,7 @@ function parseCommandTextFull(text: string): ParsedCommand {
   let itemDescription: string | null = null;
   let customerAction: ParsedCustomerAction | null = null;
   let supplierAction: ParsedSupplierAction | null = null;
+  let salesAction: ParsedSalesAction | null = null;
   let phone: string | null = null;
   let whatsapp: string | null = null;
   let postAction: "open_profile" | null = null;
@@ -1192,6 +1576,13 @@ function parseCommandTextFull(text: string): ParsedCommand {
     phone = extractCreateCustomerPhone(raw);
     whatsapp = extractCreateCustomerWhatsapp(raw, phone);
     postAction = extractCreateCustomerPostAction(raw);
+  } else if (intent === "create_supplier") {
+    const details = extractCreateSupplierDetails(stripTrailingClauses(raw));
+    partyName = details.name;
+    city = details.city;
+    phone = extractCreateCustomerPhone(raw);
+    whatsapp = extractCreateCustomerWhatsapp(raw, phone);
+    postAction = extractCreateCustomerPostAction(raw);
   } else if (intent === "customer_action") {
     customerAction = detectCustomerAction(raw);
     partyName = customerAction?.customerName ?? null;
@@ -1200,6 +1591,9 @@ function parseCommandTextFull(text: string): ParsedCommand {
     supplierAction = detectSupplierAction(raw);
     partyName = supplierAction?.supplierName ?? null;
     city = supplierAction?.city ?? null;
+  } else if (intent === "sales_action") {
+    salesAction = detectSalesAction(raw);
+    partyName = salesAction?.customerName ?? null;
   } else if (intent === "create_payment") {
     partyName = extractPartyName(raw, intent);
     const forReason = extractForReason(raw);
@@ -1213,16 +1607,22 @@ function parseCommandTextFull(text: string): ParsedCommand {
       paymentCategory = "expense";
     }
   } else if (intent === "create_receipt") {
-    partyName = extractPartyName(raw, intent);
     const forReason = extractForReason(raw);
 
-    if (partyName) {
-      receiptCategory = "customer";
-    } else if (forReason) {
-      expenseDescription = forReason;
+    if (CASH_SALE_PATTERNS.some((p) => p.test(raw))) {
+      partyName = extractCashSaleCustomerName(raw);
       receiptCategory = "sales";
+      if (forReason) expenseDescription = forReason;
     } else {
-      receiptCategory = "customer";
+      partyName = extractPartyName(raw, intent);
+      if (partyName) {
+        receiptCategory = "customer";
+      } else if (forReason) {
+        expenseDescription = forReason;
+        receiptCategory = "sales";
+      } else {
+        receiptCategory = "customer";
+      }
     }
   }
 
@@ -1239,6 +1639,7 @@ function parseCommandTextFull(text: string): ParsedCommand {
     receiptCategory,
     customerAction,
     supplierAction,
+    salesAction,
     phone,
     whatsapp,
     postAction,
@@ -1252,15 +1653,17 @@ export function parseBantooCommandText(text: string): ParsedCommand {
 }
 
 /**
- * Legacy command bar parser; create_customer, customer_action, and
- * supplier_action are treated as unknown.
+ * Legacy command bar parser; create_customer, create_supplier,
+ * customer_action, supplier_action, and sales_action are treated as unknown.
  */
 export function parseCommandText(text: string): LegacyParsedCommand {
   const parsed = parseCommandTextFull(text);
   if (
     parsed.intent === "create_customer" ||
+    parsed.intent === "create_supplier" ||
     parsed.intent === "customer_action" ||
-    parsed.intent === "supplier_action"
+    parsed.intent === "supplier_action" ||
+    parsed.intent === "sales_action"
   ) {
     return { ...parsed, intent: "unknown" };
   }

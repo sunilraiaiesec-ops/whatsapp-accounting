@@ -24,6 +24,7 @@ import { getPartyContact, normalizeText, type PartyContactInfo } from "@/lib/par
 import {
   LOW_CONFIDENCE_THRESHOLD,
   type CreateCustomerAction,
+  type CreateSupplierAction,
   type EditCustomerAction,
   type ExtractedAction,
 } from "@/lib/ai/actions";
@@ -213,14 +214,26 @@ function customerConflictsWithExisting(
 // lib/bantoo/types.ts. Reads straight from the ExtractedAction (not the
 // draft) so edit_customer's plan reflects only what was actually REQUESTED to
 // change, never fields merely pre-filled from the existing record.
-function buildCustomerPlan(
-  action: CreateCustomerAction | EditCustomerAction,
+//
+// Shared by create_customer/edit_customer/create_supplier — the plan's FIRST
+// step code (and, for a post-save profile open, the LAST step's code) is the
+// only thing that varies per action; every other field (city/phone/whatsapp/
+// note/unsupported_requests) is handled identically regardless of party type.
+// This is deliberate: the plan's entity-type label is derived from the exact
+// same `action.action` the caller is already branching on, never a second,
+// independently-guessed label that could drift out of sync with it (see the
+// launch-blocking bug postmortem above createSupplierSchema in
+// lib/ai/actions.ts for why that consistency matters).
+function buildPartyPlan(
+  createCode: "createCustomer" | "createSupplier",
+  openProfileCode: "openProfile" | "openSupplierProfile",
+  action: CreateCustomerAction | EditCustomerAction | CreateSupplierAction,
   isEdit: boolean,
   primaryName: string,
 ): BantooPlanStep[] {
   const steps: BantooPlanStep[] = [
     {
-      code: isEdit ? "editCustomer" : "createCustomer",
+      code: isEdit ? "editCustomer" : createCode,
       status: "ready",
       ...(primaryName ? { params: { name: primaryName } } : {}),
     },
@@ -231,12 +244,26 @@ function buildCustomerPlan(
     steps.push({ code: "setWhatsapp", status: "ready", params: { value: action.whatsapp.trim() } });
   if (action.note?.trim()) steps.push({ code: "setNote", status: "ready", params: { value: action.note.trim() } });
   if (action.post_action === "open_profile") {
-    steps.push({ code: "openProfile", status: "ready" });
+    steps.push({ code: openProfileCode, status: "ready" });
   }
   for (const request of action.unsupported_requests ?? []) {
     steps.push({ code: "unsupportedStep", status: "unavailable", params: { request } });
   }
   return steps;
+}
+
+function buildCustomerPlan(
+  action: CreateCustomerAction | EditCustomerAction,
+  isEdit: boolean,
+  primaryName: string,
+): BantooPlanStep[] {
+  return buildPartyPlan("createCustomer", "openProfile", action, isEdit, primaryName);
+}
+
+// Supplier & Purchasing Intelligence Sprint mirror of buildCustomerPlan —
+// create_supplier is never an edit, so isEdit is always false.
+function buildSupplierPlan(action: CreateSupplierAction, primaryName: string): BantooPlanStep[] {
+  return buildPartyPlan("createSupplier", "openSupplierProfile", action, false, primaryName);
 }
 
 // Turn a validated ExtractedAction into a client-ready proposal: fills the
@@ -868,6 +895,36 @@ export async function resolveExtraction(
       break;
     }
 
+    // --- Supplier & Purchasing Intelligence Sprint ------------------------
+
+    case "create_supplier": {
+      // Mirrors create_customer's case exactly (field-for-field), minus the
+      // possible-duplicate safety fix — that check was added to
+      // create_customer in a dedicated later sprint and hasn't been ported
+      // to create_supplier yet; see this file's module doc comment / the
+      // parent task's residual-risk notes for tracking. A HIGH-confidence
+      // name match still auto-selects the existing supplier (never silently
+      // creates a near-duplicate) — only the extra conflicting-details
+      // disambiguation prompt is not yet offered here.
+      draft.partyName = action.supplier_name ?? "";
+      draft.city = action.city ?? "";
+      draft.phone = action.phone ?? "";
+      draft.whatsapp = action.whatsapp ?? "";
+      draft.note = action.note ?? "";
+      draft.postAction = action.post_action ?? "";
+      proposal.partyType = "supplier";
+      proposal.needsParty = true;
+
+      const party = await resolveParty(draft.partyName, "supplier");
+      proposal.partyOptions = party.options;
+      proposal.partyId = party.id;
+      proposal.createParty = party.id ? false : party.create;
+      if (!draft.partyName) warn("enterSupplierName");
+
+      proposal.plan = buildSupplierPlan(action, draft.partyName);
+      break;
+    }
+
     // --- Supplier & Purchasing Intelligence Sprint: existing-supplier
     // workflows. Every case below is a field-for-field mirror of the
     // matching customer_* case above (resolveParty(..., "supplier"),
@@ -1001,6 +1058,139 @@ export async function resolveExtraction(
       draft.partyName = action.supplier_name ?? "";
       draft.requestedAction = action.requested;
       proposal.partyType = "supplier";
+      warn("notYetAvailable");
+      break;
+    }
+
+    // --- Sales Intelligence Sprint: single-line/lump-sum sales documents,
+    // mirroring supplier_purchase (invoice/credit_note) and sales_receipt
+    // (refund_receipt's bank + income-account shape) above — see the module
+    // doc comment in lib/ai/actions.ts for why these stay single-line only.
+
+    case "sales_invoice": {
+      draft.partyName = action.customer_name ?? "";
+      draft.amount = numToStr(action.amount);
+      draft.description = action.description ?? "";
+      draft.date = action.date ?? today();
+      draft.dueDate = action.due_date ?? "";
+      proposal.partyType = "customer";
+      proposal.needsParty = true;
+      proposal.needsLineAccount = true;
+
+      const party = await resolveParty(draft.partyName, "customer");
+      proposal.partyOptions = party.options;
+      proposal.partyId = party.id;
+      proposal.createParty = party.create;
+      if (!draft.partyName) warn("chooseCustomerForInvoice");
+      if (!draft.amount || Number(draft.amount) <= 0) {
+        warn("enterSaleAmount");
+      }
+
+      const lineAccounts = await receiptCounterpartAccounts(ctx.orgId);
+      const income = lineAccounts.filter((a) => a.type === "INCOME");
+      proposal.lineAccountOptions = income.map((a) => ({
+        id: a.id,
+        label: `${a.code} — ${a.name}`,
+      }));
+      const picked = pickSalesAccount(income);
+      proposal.lineAccountId = picked?.id ?? income[0]?.id ?? null;
+      if (!proposal.lineAccountId) {
+        warn("noIncomeAccount");
+      }
+      break;
+    }
+
+    case "credit_note": {
+      draft.partyName = action.customer_name ?? "";
+      draft.amount = numToStr(action.amount);
+      draft.description = action.description ?? "";
+      draft.date = action.date ?? today();
+      proposal.partyType = "customer";
+      proposal.needsParty = true;
+      proposal.needsLineAccount = true;
+
+      const party = await resolveParty(draft.partyName, "customer");
+      proposal.partyOptions = party.options;
+      proposal.partyId = party.id;
+      proposal.createParty = party.create;
+      if (!draft.partyName) warn("chooseCustomerForCreditNote");
+      if (!draft.amount || Number(draft.amount) <= 0) {
+        warn("enterCreditAmount");
+      }
+
+      const lineAccounts = await receiptCounterpartAccounts(ctx.orgId);
+      const income = lineAccounts.filter((a) => a.type === "INCOME");
+      proposal.lineAccountOptions = income.map((a) => ({
+        id: a.id,
+        label: `${a.code} — ${a.name}`,
+      }));
+      const picked = pickSalesAccount(income);
+      proposal.lineAccountId = picked?.id ?? income[0]?.id ?? null;
+      if (!proposal.lineAccountId) {
+        warn("noIncomeAccount");
+      }
+      break;
+    }
+
+    case "refund_receipt": {
+      // Unlike sales_invoice/credit_note, the customer is OPTIONAL here (a
+      // cash refund can be walk-in/anonymous) — createRefundReceipt accepts
+      // a nullable partyId, so a missing name is never warned about.
+      draft.partyName = action.customer_name ?? "";
+      draft.amount = numToStr(action.amount);
+      draft.description = action.description ?? "";
+      draft.date = action.date ?? today();
+      proposal.partyType = "customer";
+      proposal.needsBank = true;
+      proposal.needsLineAccount = true;
+
+      if (draft.partyName) {
+        const party = await resolveParty(draft.partyName, "customer");
+        proposal.partyOptions = party.options;
+        proposal.partyId = party.id;
+        proposal.createParty = party.create;
+      }
+      if (!draft.amount || Number(draft.amount) <= 0) {
+        warn("enterRefundAmount");
+      }
+
+      proposal.bankOptions = await bankOptions();
+      proposal.bankAccountId = proposal.bankOptions[0]?.id ?? null;
+      if (!proposal.bankAccountId) {
+        warn("noBankAccount");
+      }
+
+      const lineAccounts = await receiptCounterpartAccounts(ctx.orgId);
+      const income = lineAccounts.filter((a) => a.type === "INCOME");
+      proposal.lineAccountOptions = income.map((a) => ({
+        id: a.id,
+        label: `${a.code} — ${a.name}`,
+      }));
+      const picked = pickSalesAccount(income);
+      proposal.lineAccountId = picked?.id ?? income[0]?.id ?? null;
+      if (!proposal.lineAccountId) {
+        warn("noIncomeAccount");
+      }
+      break;
+    }
+
+    case "view_sales_invoice": {
+      // Navigation-only. There is no per-customer sales-invoice filter on
+      // /sales-invoices yet (see the salesInvoiceViewTarget doc comment in
+      // lib/ai/actions.ts), so — like view_supplier's "list" case — there is
+      // no party to resolve here even when a customer name was mentioned.
+      draft.view = action.view;
+      proposal.partyType = "customer";
+      break;
+    }
+
+    case "unsupported_sales_action": {
+      // Recognized confidently (never "not sure") but genuinely not
+      // buildable without new backend/UI — mirrors unsupported_customer_action
+      // / unsupported_supplier_action.
+      draft.partyName = action.customer_name ?? "";
+      draft.requestedAction = action.requested;
+      proposal.partyType = "customer";
       warn("notYetAvailable");
       break;
     }

@@ -45,7 +45,30 @@ const WARNING_CODES: BantooWarningCode[] = [
   "supplierMissingPhone",
   "supplierMissingWhatsapp",
   "supplierMissingEmail",
+  // --- Sales Intelligence Sprint ------------------------------------------
+  "chooseCustomerForInvoice",
+  "chooseCustomerForCreditNote",
+  "enterCreditAmount",
+  "enterRefundAmount",
 ];
+
+// Every action label the confirm-form header can render (see BantooCommand.tsx's
+// actionLabelKey) for the new Sales Intelligence Sprint action types.
+const SALES_ACTION_LABEL_KEYS = [
+  "actionSalesInvoice",
+  "actionCreditNote",
+  "actionRefundReceipt",
+  "actionViewSalesInvoice",
+  "actionUnsupportedSales",
+];
+
+// Launch-blocking bug fix regression guard: actionCreateSupplier was missing
+// from BantooCommand.tsx's actionLabelKey map entirely, which is exactly why
+// the suggested action showed "Create customer" for a create_supplier
+// proposal — see the postmortem comment above createSupplierSchema in
+// lib/ai/actions.ts. Checked alongside its create_customer counterpart so
+// the two can never drift apart again.
+const CREATE_PARTY_ACTION_LABEL_KEYS = ["actionCreateCustomer", "actionCreateSupplier"];
 
 const FIELD_REASON_CODES: BantooFieldReasonCode[] = [
   "supplierProductHistory",
@@ -70,6 +93,9 @@ const PLAN_STEP_CODES: BantooPlanStepCode[] = [
   "setNote",
   "openProfile",
   "unsupportedStep",
+  // --- Supplier & Purchasing Intelligence Sprint: create_supplier fix ------
+  "createSupplier",
+  "openSupplierProfile",
 ];
 
 function loadMessages(locale: "en" | "fr") {
@@ -81,6 +107,7 @@ function loadMessages(locale: "en" | "fr") {
       fieldReasons: Record<string, string>;
       plan: Record<string, string>;
       duplicateCustomer: Record<string, string>;
+      [key: string]: unknown;
     };
   };
 }
@@ -115,6 +142,22 @@ describe("Bantoo warning i18n catalogs", () => {
       expect(messages.command.duplicateCustomer.title).toBeTruthy();
       expect(messages.command.duplicateCustomer.useExisting).toBeTruthy();
       expect(messages.command.duplicateCustomer.createNew).toBeTruthy();
+    });
+
+    it(`defines every Sales Intelligence Sprint action label in ${locale}.json`, () => {
+      const messages = loadMessages(locale);
+      for (const key of SALES_ACTION_LABEL_KEYS) {
+        expect(messages.command[key]).toBeTruthy();
+      }
+      expect(messages.command.viewSalesInvoiceListHint).toBeTruthy();
+      expect(messages.command.successOpeningSalesInvoiceList).toBeTruthy();
+    });
+
+    it(`defines both create_customer and create_supplier action labels in ${locale}.json (launch-blocking bug fix)`, () => {
+      const messages = loadMessages(locale);
+      for (const key of CREATE_PARTY_ACTION_LABEL_KEYS) {
+        expect(messages.command[key]).toBeTruthy();
+      }
     });
   }
 });

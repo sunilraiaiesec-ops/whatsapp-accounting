@@ -393,6 +393,7 @@ export function BantooCommand() {
     if (success.kind === "view_supplier") {
       return success.number ? t("successFound", { number: success.number }) : t("successOpeningSupplierList");
     }
+    if (success.kind === "view_sales_invoice") return t("successOpeningSalesInvoiceList");
     if (success.kind === "edit_customer") return t("successCustomerUpdated", { number: success.number });
     if (success.kind === "add_customer_note") return t("successNoteAdded", { number: success.number });
     return t("successSaved", { number: success.number });
@@ -409,7 +410,8 @@ export function BantooCommand() {
       success.kind === "customer_query" ||
       success.kind === "view_supplier" ||
       success.kind === "supplier_balance" ||
-      success.kind === "supplier_query"
+      success.kind === "supplier_query" ||
+      success.kind === "view_sales_invoice"
     ) {
       return t("openAction");
     }
@@ -441,14 +443,14 @@ export function BantooCommand() {
   // "use existing" or "create new" (see duplicateChoiceBlock below).
   const needsDuplicateChoice = Boolean(proposal?.duplicateCandidate) && duplicateChoice === "";
 
-  // "unsupported_customer_action"/"unsupported_supplier_action" are
-  // recognized confidently but genuinely not buildable yet — there is
-  // nothing to confirm/save, so no confirm button.
+  // "unsupported_*_action" are recognized confidently but genuinely not
+  // buildable yet — there is nothing to confirm/save, so no confirm button.
   const canConfirm =
     proposal &&
     proposal.action !== "unknown" &&
     proposal.action !== "unsupported_customer_action" &&
     proposal.action !== "unsupported_supplier_action" &&
+    proposal.action !== "unsupported_sales_action" &&
     !needsDuplicateChoice;
 
   // Read-only/navigation actions don't "save" anything, so the primary
@@ -463,6 +465,7 @@ export function BantooCommand() {
     supplier_balance: "showAnswerAction",
     supplier_query: "showAnswerAction",
     contact_supplier: "continueAction",
+    view_sales_invoice: "openAction",
   };
 
   // --- Small render helpers -------------------------------------------------
@@ -1112,6 +1115,44 @@ export function BantooCommand() {
         );
       case "unsupported_supplier_action":
         return null;
+      case "sales_invoice":
+        return (
+          <>
+            {field(t("amount"), draft.amount, (v) => updateDraft("amount", v), { money: true })}
+            {partyBlock(t("customer"), t("createParty"))}
+            {field(t("expenseDescription"), draft.description, (v) => updateDraft("description", v))}
+            {accountCombobox(t("incomeAccount"), "income_account", false)}
+            {dateField()}
+            {field(t("dueDate"), draft.dueDate, (v) => updateDraft("dueDate", v), {
+              type: "date",
+            })}
+          </>
+        );
+      case "credit_note":
+        return (
+          <>
+            {field(t("amount"), draft.amount, (v) => updateDraft("amount", v), { money: true })}
+            {partyBlock(t("customer"), t("createParty"))}
+            {field(t("expenseDescription"), draft.description, (v) => updateDraft("description", v))}
+            {accountCombobox(t("incomeAccount"), "income_account", false)}
+            {dateField()}
+          </>
+        );
+      case "refund_receipt":
+        return (
+          <>
+            {field(t("amount"), draft.amount, (v) => updateDraft("amount", v), { money: true })}
+            {field(t("expenseDescription"), draft.description, (v) => updateDraft("description", v))}
+            {accountCombobox(t("incomeAccount"), "income_account", false)}
+            {partyBlock(t("customer"), t("createParty"))}
+            {bankSelect()}
+            {dateField()}
+          </>
+        );
+      case "view_sales_invoice":
+        return <p className="text-sm text-slate-600">{t("viewSalesInvoiceListHint")}</p>;
+      case "unsupported_sales_action":
+        return null;
       default:
         return <p className="text-sm text-slate-600">{t("unknownAction")}</p>;
     }
@@ -1132,6 +1173,7 @@ export function BantooCommand() {
     contact_customer: "actionContactCustomer",
     customer_query: "actionCustomerQuery",
     unsupported_customer_action: "actionUnsupportedCustomer",
+    create_supplier: "actionCreateSupplier",
     edit_supplier: "actionEditSupplier",
     view_supplier: "actionViewSupplier",
     supplier_balance: "actionSupplierBalance",
@@ -1139,6 +1181,11 @@ export function BantooCommand() {
     contact_supplier: "actionContactSupplier",
     supplier_query: "actionSupplierQuery",
     unsupported_supplier_action: "actionUnsupportedSupplier",
+    sales_invoice: "actionSalesInvoice",
+    credit_note: "actionCreditNote",
+    refund_receipt: "actionRefundReceipt",
+    view_sales_invoice: "actionViewSalesInvoice",
+    unsupported_sales_action: "actionUnsupportedSales",
     unknown: "actionUnknown",
   };
 

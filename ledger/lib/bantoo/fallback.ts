@@ -1,6 +1,7 @@
-import type { CreateCustomerAction, ExtractedAction } from "@/lib/ai/actions";
+import type { CreateCustomerAction, CreateSupplierAction, ExtractedAction } from "@/lib/ai/actions";
 import { LOW_CONFIDENCE_THRESHOLD } from "@/lib/ai/actions";
 import { humanizeDescription, parseBantooCommandText } from "@/lib/command-parse";
+import { dueDateFromTerms } from "@/lib/command-patterns";
 
 // Rule-based fallback used when no AI provider is configured (missing API key)
 // and the input is plain text. Reuses the existing regex parser so the classic
@@ -63,7 +64,7 @@ export function ruleBasedExtract(text: string): ExtractedAction {
       return {
         action: "sales_receipt",
         amount,
-        customer_name: null,
+        customer_name: parsed.partyName,
         description: parsed.expenseDescription,
         payment_method: null,
         date: null,
@@ -89,6 +90,23 @@ export function ruleBasedExtract(text: string): ExtractedAction {
     return {
       action: "create_customer",
       customer_name: parsed.partyName,
+      city: parsed.city,
+      phone: parsed.phone,
+      whatsapp: parsed.whatsapp,
+      country: null,
+      note: null,
+      post_action: parsed.postAction,
+      unsupported_requests: null,
+      currency,
+      confidence,
+      summary: null,
+    };
+  }
+
+  if (parsed.intent === "create_supplier") {
+    return {
+      action: "create_supplier",
+      supplier_name: parsed.partyName,
       city: parsed.city,
       phone: parsed.phone,
       whatsapp: parsed.whatsapp,
@@ -409,6 +427,96 @@ export function ruleBasedExtract(text: string): ExtractedAction {
     }
   }
 
+  if (parsed.intent === "sales_action" && parsed.salesAction) {
+    const sa = parsed.salesAction;
+    switch (sa.kind) {
+      case "invoice":
+        return {
+          action: "sales_invoice",
+          customer_name: sa.customerName,
+          amount,
+          description: sa.description,
+          date: null,
+          // Relative phrase ("due in 30 days"/"net 30"/"échéance dans 30
+          // jours") is resolved here (the only place with both the day count
+          // AND the invoice date basis) into a concrete ISO date — mirrors
+          // supplier_purchase's use of dueDateFromTerms in resolve.ts, just
+          // driven by the TEXT itself rather than org history.
+          due_date: sa.dueDateDays ? dueDateFromTerms(new Date(), sa.dueDateDays) : null,
+          currency,
+          confidence,
+          summary: null,
+        };
+      case "credit_note":
+        return {
+          action: "credit_note",
+          customer_name: sa.customerName,
+          amount,
+          description: sa.description,
+          date: null,
+          currency,
+          confidence,
+          summary: null,
+        };
+      case "refund":
+        return {
+          action: "refund_receipt",
+          customer_name: sa.customerName,
+          amount,
+          description: sa.description,
+          date: null,
+          currency,
+          confidence,
+          summary: null,
+        };
+      case "view_list":
+        return {
+          action: "view_sales_invoice",
+          customer_name: null,
+          view: "list",
+          currency,
+          confidence,
+          summary: null,
+        };
+      case "unsupported_edit":
+        return {
+          action: "unsupported_sales_action",
+          customer_name: sa.customerName,
+          requested: "edit",
+          currency,
+          confidence,
+          summary: null,
+        };
+      case "unsupported_void":
+        return {
+          action: "unsupported_sales_action",
+          customer_name: sa.customerName,
+          requested: "void",
+          currency,
+          confidence,
+          summary: null,
+        };
+      case "unsupported_email":
+        return {
+          action: "unsupported_sales_action",
+          customer_name: sa.customerName,
+          requested: "email",
+          currency,
+          confidence,
+          summary: null,
+        };
+      case "unsupported_apply_payment":
+        return {
+          action: "unsupported_sales_action",
+          customer_name: sa.customerName,
+          requested: "apply_payment",
+          currency,
+          confidence,
+          summary: null,
+        };
+    }
+  }
+
   return { action: "unknown", currency, confidence: 0, summary: null };
 }
 
@@ -422,6 +530,33 @@ function mergeCreateCustomer(
   return {
     ...action,
     customer_name: action.customer_name?.trim() || source.customer_name,
+    city: action.city?.trim() || source.city,
+    phone: action.phone?.trim() || source.phone,
+    whatsapp: action.whatsapp?.trim() || source.whatsapp,
+    note: action.note?.trim() || source.note,
+    post_action: action.post_action ?? source.post_action,
+    unsupported_requests: action.unsupported_requests?.length
+      ? action.unsupported_requests
+      : source.unsupported_requests,
+    confidence: Math.max(action.confidence, source.confidence),
+  };
+}
+
+// Supplier & Purchasing Intelligence Sprint mirror of mergeCreateCustomer —
+// see the launch-blocking bug postmortem comment above createSupplierSchema
+// in lib/ai/actions.ts for why create_supplier needs its own blend path
+// distinct from create_customer's, rather than sharing one generic function
+// keyed only on field names (customer_name/supplier_name differ).
+function mergeCreateSupplier(
+  action: CreateSupplierAction,
+  source: ExtractedAction,
+): CreateSupplierAction {
+  if (source.action !== "create_supplier") {
+    return action;
+  }
+  return {
+    ...action,
+    supplier_name: action.supplier_name?.trim() || source.supplier_name,
     city: action.city?.trim() || source.city,
     phone: action.phone?.trim() || source.phone,
     whatsapp: action.whatsapp?.trim() || source.whatsapp,
@@ -494,6 +629,27 @@ export function blendExtraction(text: string, action: ExtractedAction): Extracte
       const fromSummary = ruleBasedExtract(action.summary);
       if (fromSummary.action === "create_customer") {
         merged = mergeCreateCustomer(merged, fromSummary);
+      }
+    }
+    if (
+      merged.confidence < LOW_CONFIDENCE_THRESHOLD &&
+      rule.action === merged.action &&
+      rule.confidence >= LOW_CONFIDENCE_THRESHOLD
+    ) {
+      return { ...merged, confidence: rule.confidence };
+    }
+    return merged;
+  }
+
+  if (action.action === "create_supplier") {
+    let merged = action;
+    if (rule.action === "create_supplier") {
+      merged = mergeCreateSupplier(merged, rule);
+    }
+    if (!merged.supplier_name?.trim() && action.summary?.trim()) {
+      const fromSummary = ruleBasedExtract(action.summary);
+      if (fromSummary.action === "create_supplier") {
+        merged = mergeCreateSupplier(merged, fromSummary);
       }
     }
     if (

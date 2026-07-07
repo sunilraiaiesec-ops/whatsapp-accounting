@@ -5,9 +5,12 @@ import { z } from "zod";
 import { requireContext, type CurrentContext } from "@/lib/auth/current";
 import { receivableAccount } from "@/lib/accounts";
 import {
+  createCreditNote,
   createPayment,
   createPurchaseInvoice,
   createReceipt,
+  createRefundReceipt,
+  createSalesInvoice,
   createSalesReceipt,
   DocumentError,
 } from "@/lib/documents";
@@ -529,6 +532,63 @@ export async function executeBantooAction(
         };
       }
 
+      // Supplier & Purchasing Intelligence Sprint: create_supplier is the
+      // exact mirror of create_customer above (party type "supplier", href
+      // under /suppliers) — see the launch-blocking bug postmortem comment
+      // above createSupplierSchema in lib/ai/actions.ts. Before this case
+      // existed, a "save him as a supplier" request had no dedicated action
+      // to execute against at all, since the AI/rule layers had nowhere to
+      // route a create_supplier classification.
+      case "create_supplier": {
+        const name = draft.partyName.trim();
+        if (!name) return { ok: false, error: "Enter the supplier name." };
+
+        if (input.partyId) {
+          const found = await prisma.party.findFirst({
+            where: { id: input.partyId, orgId: ctx.orgId, type: { in: ["supplier", "both"] } },
+            select: { id: true, name: true, notes: true },
+          });
+          if (!found) return { ok: false, error: "That supplier was not found." };
+          if (draft.note.trim()) {
+            await appendPartyNote(ctx.orgId, found.id, found.notes, draft.note.trim(), date);
+          }
+          return {
+            ok: true,
+            href: `/suppliers/${found.id}`,
+            number: found.name,
+            kind: input.action,
+          };
+        }
+
+        const supplierId = await ensurePartyId(ctx, {
+          partyId: null,
+          createParty: input.createParty,
+          partyName: name,
+          type: "supplier",
+          city: draft.city,
+          phone: draft.phone,
+          whatsapp: draft.whatsapp,
+        });
+        if (!supplierId) return { ok: false, error: "Enter the supplier name." };
+
+        const party = await prisma.party.findFirst({
+          where: { id: supplierId, orgId: ctx.orgId },
+          select: { id: true, name: true, notes: true },
+        });
+        if (!party) return { ok: false, error: "Could not save the supplier." };
+
+        if (draft.note.trim()) {
+          await appendPartyNote(ctx.orgId, party.id, party.notes, draft.note.trim(), date);
+        }
+
+        return {
+          ok: true,
+          href: `/suppliers/${party.id}`,
+          number: party.name,
+          kind: input.action,
+        };
+      }
+
       // --- Customer Intelligence Sprint: existing-customer workflows -----
       // Every case re-validates that partyId belongs to this org before
       // reading/writing anything, mirroring ensurePartyId/assertOrgItemId
@@ -872,6 +932,125 @@ export async function executeBantooAction(
       }
 
       case "unsupported_supplier_action":
+        return { ok: false, error: "This action is not available yet." };
+
+      // --- Sales Intelligence Sprint: single-line/lump-sum sales documents,
+      // mirroring supplier_purchase (sales_invoice) and sales_receipt
+      // (refund_receipt's bank + income-account shape) above.
+
+      case "sales_invoice": {
+        const amount = parseAmount(draft.amount || "0", cur);
+        if (amount <= 0n) return { ok: false, error: "Enter the sale amount." };
+        if (!input.lineAccountId) return { ok: false, error: "Choose an income account." };
+        const lineAccountId = await assertOrgAccountId(ctx, input.lineAccountId);
+        const customerId = await ensurePartyId(ctx, {
+          partyId: input.partyId,
+          createParty: input.createParty,
+          partyName: draft.partyName,
+          type: "customer",
+        });
+        if (!customerId) return { ok: false, error: "Choose the customer to invoice." };
+
+        const dueDate = draft.dueDate.trim() ? parseDate(draft.dueDate) : null;
+        const invoice = await createSalesInvoice(ctx.orgId, {
+          partyId: customerId,
+          date,
+          dueDate,
+          notes: draft.description.trim() || null,
+          lines: [
+            {
+              description: draft.description.trim() || "Sale",
+              quantity: "1",
+              unitPrice: amount,
+              accountId: lineAccountId,
+            },
+          ],
+        });
+        return {
+          ok: true,
+          href: `/sales-invoices/${invoice.id}`,
+          number: invoice.number,
+          kind: input.action,
+        };
+      }
+
+      case "credit_note": {
+        const amount = parseAmount(draft.amount || "0", cur);
+        if (amount <= 0n) return { ok: false, error: "Enter the credit amount." };
+        if (!input.lineAccountId) return { ok: false, error: "Choose an income account." };
+        const lineAccountId = await assertOrgAccountId(ctx, input.lineAccountId);
+        const customerId = await ensurePartyId(ctx, {
+          partyId: input.partyId,
+          createParty: input.createParty,
+          partyName: draft.partyName,
+          type: "customer",
+        });
+        if (!customerId) return { ok: false, error: "Choose the customer to credit." };
+
+        const note = await createCreditNote(ctx.orgId, {
+          partyId: customerId,
+          date,
+          notes: draft.description.trim() || null,
+          lines: [
+            {
+              description: draft.description.trim() || "Credit note",
+              quantity: "1",
+              unitPrice: amount,
+              accountId: lineAccountId,
+            },
+          ],
+        });
+        return {
+          ok: true,
+          href: `/credit-notes/${note.id}`,
+          number: note.number,
+          kind: input.action,
+        };
+      }
+
+      case "refund_receipt": {
+        const amount = parseAmount(draft.amount || "0", cur);
+        if (amount <= 0n) return { ok: false, error: "Enter the refund amount." };
+        if (!input.bankAccountId) return { ok: false, error: "Choose a bank or cash account." };
+        if (!input.lineAccountId) return { ok: false, error: "Choose an income account." };
+        const bankAccountId = await assertOrgAccountId(ctx, input.bankAccountId);
+        const lineAccountId = await assertOrgAccountId(ctx, input.lineAccountId);
+        // Unlike sales_invoice/credit_note, the customer is OPTIONAL here (a
+        // cash refund can be walk-in/anonymous) — createRefundReceipt accepts
+        // a nullable partyId.
+        const customerId = await ensurePartyId(ctx, {
+          partyId: input.partyId,
+          createParty: input.createParty,
+          partyName: draft.partyName,
+          type: "customer",
+        });
+
+        const refund = await createRefundReceipt(ctx.orgId, {
+          bankAccountId,
+          partyId: customerId,
+          date,
+          notes: draft.description.trim() || null,
+          lines: [
+            {
+              description: draft.description.trim() || "Refund",
+              quantity: "1",
+              unitPrice: amount,
+              accountId: lineAccountId,
+            },
+          ],
+        });
+        return {
+          ok: true,
+          href: `/refund-receipts/${refund.id}`,
+          number: refund.number,
+          kind: input.action,
+        };
+      }
+
+      case "view_sales_invoice":
+        return { ok: true, href: "/sales-invoices", number: "", kind: input.action };
+
+      case "unsupported_sales_action":
         return { ok: false, error: "This action is not available yet." };
 
       default:

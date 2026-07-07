@@ -96,7 +96,12 @@ export type BantooWarningCode =
   | "enterSupplierName"
   | "supplierMissingPhone"
   | "supplierMissingWhatsapp"
-  | "supplierMissingEmail";
+  | "supplierMissingEmail"
+  // --- Sales Intelligence Sprint ------------------------------------------
+  | "chooseCustomerForInvoice"
+  | "chooseCustomerForCreditNote"
+  | "enterCreditAmount"
+  | "enterRefundAmount";
 
 // The existing customer record a create_customer request's name matched,
 // shown side-by-side with the newly-typed details so the user can tell at a
@@ -119,17 +124,24 @@ export type BantooDuplicateCandidate = {
 export type BantooPlanStepStatus = "ready" | "unavailable";
 
 // Deliberately a small, closed set scoped to what create_customer/
-// edit_customer can actually carry today, NOT a generic action registry —
-// see lib/ai/actions.ts's `unsupportedRequests` doc comment for why a full
-// multi-action queue is out of scope for this sprint.
+// edit_customer/create_supplier can actually carry today, NOT a generic
+// action registry — see lib/ai/actions.ts's `unsupportedRequests` doc comment
+// for why a full multi-action queue is out of scope for this sprint.
+// "createSupplier"/"openSupplierProfile" are the create_supplier mirror of
+// "createCustomer"/"openProfile" — kept as distinct codes (rather than reusing
+// the customer ones) so each renders its own correctly-worded label ("Create
+// supplier" / "open supplier profile") instead of a shared label that could
+// say "customer" for a supplier plan step.
 export type BantooPlanStepCode =
   | "createCustomer"
   | "editCustomer"
+  | "createSupplier"
   | "setCity"
   | "setPhone"
   | "setWhatsapp"
   | "setNote"
   | "openProfile"
+  | "openSupplierProfile"
   | "unsupportedStep";
 
 export type BantooPlanStep = {
@@ -275,9 +287,9 @@ export type BantooProposal = {
   // Absent/empty when no pattern signal applied.
   fieldReasons: BantooFieldReasons;
   // Multi-step Task Planning: ordered checklist built from every field this
-  // action carries (see buildCustomerPlan in resolve.ts). Empty for actions
+  // action carries (see buildPartyPlan in resolve.ts). Empty for actions
   // that don't have a plan representation yet (everything except
-  // create_customer/edit_customer, for now).
+  // create_customer/edit_customer/create_supplier, for now).
   plan: BantooPlanStep[];
   // Set only for create_customer when the resolved party name matched an
   // EXISTING customer AND the incoming request conflicts with (or is

@@ -22,6 +22,10 @@ export const BANTOO_ACTION_TYPES = [
   "customer_query",
   "unsupported_customer_action",
   // --- Supplier & Purchasing Intelligence Sprint -------------------------
+  // create_supplier mirrors create_customer field-for-field — see the
+  // launch-blocking bug postmortem above createSupplierSchema for why this
+  // was missing until now.
+  "create_supplier",
   "edit_supplier",
   "view_supplier",
   "supplier_balance",
@@ -29,6 +33,12 @@ export const BANTOO_ACTION_TYPES = [
   "contact_supplier",
   "supplier_query",
   "unsupported_supplier_action",
+  // --- Sales Intelligence Sprint ------------------------------------------
+  "sales_invoice",
+  "credit_note",
+  "refund_receipt",
+  "view_sales_invoice",
+  "unsupported_sales_action",
   "unknown",
 ] as const;
 
@@ -316,7 +326,45 @@ export const unsupportedCustomerActionSchema = z.object({
 // mirroring the Customer Intelligence Sprint schemas above field-for-field
 // (customer_name -> supplier_name). See lib/bantoo/resolve.ts and
 // app/actions/bantoo.ts for the resolution/execution mirrors.
+//
+// Launch-blocking bug postmortem: this sprint originally shipped every
+// EXISTING-supplier workflow (edit/view/balance/note/contact/query) below but
+// never added a "create a brand-new supplier" action — unlike customers,
+// which got create_customer (with the full Multi-step Task Planning fields)
+// from day one. Because create_supplier didn't exist anywhere (not in this
+// schema, not in the AI prompt, not in the rule-based fallback), a request
+// like "save him as a supplier, note: ..., then open his profile" had no way
+// to be represented: the AI's only "new contact" schema was create_customer,
+// so it got forced in there — mislabeling the plan/suggested-action as
+// "Create customer" even when the user explicitly said "supplier". This is
+// the actual root cause of the launch-blocking bug, not a blend/precedence
+// override. createSupplierSchema below closes that gap by mirroring
+// createCustomerSchema exactly, field-for-field, so create_supplier is a
+// real, independently-selectable action the AI/rule parser can return, and
+// resolve.ts/execute() key off `action.action` alone — never two different
+// derivations that can drift apart.
 // ---------------------------------------------------------------------------
+
+// Add a NEW supplier contact (no purchase/bill involved) — the supplier
+// mirror of createCustomerSchema above, field-for-field. Same Multi-step Task
+// Planning support: a single compound message ("Alhaji Ibrahim, city Garoua,
+// phone ..., WhatsApp same number, note: ..., save him as a supplier, then
+// open his profile") fills every field on this ONE action object.
+export const createSupplierSchema = z.object({
+  action: z.literal("create_supplier"),
+  supplier_name: ntext,
+  city: ntext,
+  phone: ntext,
+  whatsapp: ntext,
+  country: ntext,
+  // Internal note to save on the new supplier's record — never a
+  // payment/balance, purely a text note (mirrors create_customer's note).
+  note: ntext,
+  post_action: postCustomerAction,
+  unsupported_requests: unsupportedRequests,
+  currency,
+  ...base,
+});
 
 // Update fields on an EXISTING supplier. `supplier_name` identifies who to
 // resolve; every other field is an optional change to apply — null/absent
@@ -400,6 +448,80 @@ export const unsupportedSupplierActionSchema = z.object({
   ...base,
 });
 
+// ---------------------------------------------------------------------------
+// Sales Intelligence Sprint: single-line/lump-sum sales documents, mirroring
+// the single-line shape of supplier_purchase/sales_receipt above — NOT
+// multi-line itemized invoicing via chat (out of scope; see resolve.ts).
+// ---------------------------------------------------------------------------
+
+// A credit sale invoice (due later, not paid now). due_date accepts an
+// absolute date OR is resolved server-side from a relative phrase like "net
+// 30" / "due in 30 days" / "échéance dans 30 jours" — see
+// lib/bantoo/fallback.ts's ruleBasedExtract and lib/ai/extract.ts's prompt.
+export const salesInvoiceSchema = z.object({
+  action: z.literal("sales_invoice"),
+  customer_name: ntext,
+  amount: numberish,
+  description: ntext,
+  date: isoDate,
+  due_date: isoDate,
+  currency,
+  ...base,
+});
+
+// Issued to a customer to reduce their receivable balance / record a sales
+// return credit — NOT a cash refund (see refund_receipt below).
+export const creditNoteSchema = z.object({
+  action: z.literal("credit_note"),
+  customer_name: ntext,
+  amount: numberish,
+  description: ntext,
+  date: isoDate,
+  currency,
+  ...base,
+});
+
+// A cash refund paid back to a customer (money out of a bank/cash account).
+export const refundReceiptSchema = z.object({
+  action: z.literal("refund_receipt"),
+  customer_name: ntext,
+  amount: numberish,
+  description: ntext,
+  date: isoDate,
+  currency,
+  ...base,
+});
+
+// Navigation-only: there is no per-customer sales-invoice filter on
+// /sales-invoices yet, so "list" is the only supported view target — any
+// other guess falls back to it via .catch(), the same convention used
+// elsewhere in this file for an unrecognized/invalid enum value.
+const salesInvoiceViewTarget = z.enum(["list"]).catch("list");
+
+export const viewSalesInvoiceSchema = z.object({
+  action: z.literal("view_sales_invoice"),
+  customer_name: ntext,
+  view: salesInvoiceViewTarget,
+  currency,
+  ...base,
+});
+
+// Recognized-but-not-yet-buildable sales commands — editing/voiding an
+// existing invoice, emailing an invoice to a customer, or applying a
+// payment to one specific invoice number. Mirrors unsupported_customer_action
+// / unsupported_supplier_action exactly.
+const unsupportedSalesRequest = z
+  .enum(["edit", "void", "email", "apply_payment"])
+  .catch("edit");
+
+export const unsupportedSalesActionSchema = z.object({
+  action: z.literal("unsupported_sales_action"),
+  customer_name: ntext,
+  requested: unsupportedSalesRequest,
+  currency,
+  ...base,
+});
+
 export const unknownSchema = z.object({
   action: z.literal("unknown"),
   currency,
@@ -421,6 +543,7 @@ export const extractedActionSchema = z.discriminatedUnion("action", [
   contactCustomerSchema,
   customerQuerySchema,
   unsupportedCustomerActionSchema,
+  createSupplierSchema,
   editSupplierSchema,
   viewSupplierSchema,
   supplierBalanceSchema,
@@ -428,6 +551,11 @@ export const extractedActionSchema = z.discriminatedUnion("action", [
   contactSupplierSchema,
   supplierQuerySchema,
   unsupportedSupplierActionSchema,
+  salesInvoiceSchema,
+  creditNoteSchema,
+  refundReceiptSchema,
+  viewSalesInvoiceSchema,
+  unsupportedSalesActionSchema,
   unknownSchema,
 ]);
 
@@ -446,6 +574,7 @@ export type AddCustomerNoteAction = z.infer<typeof addCustomerNoteSchema>;
 export type ContactCustomerAction = z.infer<typeof contactCustomerSchema>;
 export type CustomerQueryAction = z.infer<typeof customerQuerySchema>;
 export type UnsupportedCustomerActionAction = z.infer<typeof unsupportedCustomerActionSchema>;
+export type CreateSupplierAction = z.infer<typeof createSupplierSchema>;
 export type EditSupplierAction = z.infer<typeof editSupplierSchema>;
 export type ViewSupplierAction = z.infer<typeof viewSupplierSchema>;
 export type SupplierBalanceAction = z.infer<typeof supplierBalanceSchema>;
@@ -453,6 +582,11 @@ export type AddSupplierNoteAction = z.infer<typeof addSupplierNoteSchema>;
 export type ContactSupplierAction = z.infer<typeof contactSupplierSchema>;
 export type SupplierQueryAction = z.infer<typeof supplierQuerySchema>;
 export type UnsupportedSupplierActionAction = z.infer<typeof unsupportedSupplierActionSchema>;
+export type SalesInvoiceAction = z.infer<typeof salesInvoiceSchema>;
+export type CreditNoteAction = z.infer<typeof creditNoteSchema>;
+export type RefundReceiptAction = z.infer<typeof refundReceiptSchema>;
+export type ViewSalesInvoiceAction = z.infer<typeof viewSalesInvoiceSchema>;
+export type UnsupportedSalesActionAction = z.infer<typeof unsupportedSalesActionSchema>;
 export type UnknownAction = z.infer<typeof unknownSchema>;
 
 // Confidence below this is treated as "not sure" — the UI must warn the user and

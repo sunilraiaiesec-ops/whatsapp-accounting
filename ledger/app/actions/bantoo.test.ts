@@ -304,6 +304,90 @@ describe("executeBantooAction org trust boundary", () => {
       whatsapp: null,
     });
   });
+
+  // Launch-blocking bug fix: create_supplier didn't exist at all before this
+  // sprint (see the postmortem comment above createSupplierSchema in
+  // lib/ai/actions.ts) — this is the execute-time mirror of the
+  // create_customer test above, confirming the confirmation message/href/kind
+  // all say "supplier" (via /suppliers route + kind: "create_supplier"),
+  // never drifting to a customer record.
+  it("creates a supplier with name and city for create_supplier action (launch-blocking bug fix)", async () => {
+    createPartySpy.mockResolvedValue({ id: "sup_new", name: "Alhaji Ibrahim" });
+    partyFindMany.mockResolvedValue([]);
+    partyFindFirst.mockResolvedValue({ id: "sup_new", name: "Alhaji Ibrahim", notes: null });
+
+    const input: ExecuteBantooInput = {
+      action: "create_supplier",
+      draft: draft({ partyName: "Alhaji Ibrahim", city: "Garoua", phone: "690123456", whatsapp: "690123456" }),
+      partyId: null,
+      createParty: true,
+      partyType: "supplier",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    };
+
+    const result = await executeBantooAction(input);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.href).toBe("/suppliers/sup_new");
+      expect(result.number).toBe("Alhaji Ibrahim");
+      expect(result.kind).toBe("create_supplier");
+    }
+    expect(createPartySpy).toHaveBeenCalledWith("org_A", {
+      name: "Alhaji Ibrahim",
+      type: "supplier",
+      city: "Garoua",
+      phone: "690123456",
+      whatsapp: "690123456",
+    });
+  });
+
+  it("create_supplier: appends the internal note after saving, mirroring create_customer", async () => {
+    createPartySpy.mockResolvedValue({ id: "sup_new", name: "Alhaji Ibrahim" });
+    partyFindMany.mockResolvedValue([]);
+    partyFindFirst.mockResolvedValue({ id: "sup_new", name: "Alhaji Ibrahim", notes: null });
+
+    const input: ExecuteBantooInput = {
+      action: "create_supplier",
+      draft: draft({
+        partyName: "Alhaji Ibrahim",
+        city: "Garoua",
+        note: "I'll be buying sesame from him every month",
+      }),
+      partyId: null,
+      createParty: true,
+      partyType: "supplier",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    };
+
+    const result = await executeBantooAction(input);
+    expect(result.ok).toBe(true);
+    expect(updatePartyNotesSpy).toHaveBeenCalledWith(
+      "org_A",
+      "sup_new",
+      expect.stringContaining("I'll be buying sesame from him every month"),
+    );
+  });
+
+  it("create_supplier: rejects when the supplier name is blank", async () => {
+    const input: ExecuteBantooInput = {
+      action: "create_supplier",
+      draft: draft({ partyName: "   " }),
+      partyId: null,
+      createParty: true,
+      partyType: "supplier",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    };
+
+    const result = await executeBantooAction(input);
+    expect(result).toEqual({ ok: false, error: "Enter the supplier name." });
+    expect(createPartySpy).not.toHaveBeenCalled();
+  });
 });
 
 describe("executeBantooAction — Customer Intelligence Sprint", () => {
