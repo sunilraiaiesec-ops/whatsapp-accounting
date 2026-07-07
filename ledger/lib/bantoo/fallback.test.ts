@@ -12,6 +12,15 @@ describe("ruleBasedExtract (no-AI text fallback)", () => {
     }
   });
 
+  it('maps "Record receipt … from …" phrasing to customer_payment (BUG-001)', () => {
+    const action = ruleBasedExtract("Record receipt 50000 from Elhaji");
+    expect(action.action).toBe("customer_payment");
+    if (action.action === "customer_payment") {
+      expect(action.amount).toBe(50_000);
+      expect(action.customer_name?.toLowerCase()).toContain("elhaji");
+    }
+  });
+
   it("maps a paid expense to expense", () => {
     const action = ruleBasedExtract("Paid 45,000 for tire change");
     expect(action.action).toBe("expense");

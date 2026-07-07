@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const getCurrentContext = vi.fn();
 const extractBantooAction = vi.fn();
 const resolveExtraction = vi.fn();
+const consumeAiCredit = vi.fn();
 
 vi.mock("@/lib/auth/current", () => ({
   getCurrentContext: (...args: unknown[]) => getCurrentContext(...args),
@@ -14,6 +15,10 @@ vi.mock("@/lib/auth/current", () => ({
 
 vi.mock("@/lib/ai/extract", () => ({
   extractBantooAction: (...args: unknown[]) => extractBantooAction(...args),
+}));
+
+vi.mock("@/lib/billing/ai-credits", () => ({
+  consumeAiCredit: (...args: unknown[]) => consumeAiCredit(...args),
 }));
 
 // Keep AiNotConfiguredError real; force isAiConfigured() true so the route takes
@@ -46,7 +51,11 @@ beforeEach(() => {
   getCurrentContext.mockReset();
   extractBantooAction.mockReset();
   resolveExtraction.mockReset();
+  consumeAiCredit.mockReset();
   getCurrentContext.mockResolvedValue({ orgId: "org_A", userId: "user_1" });
+  // Default: credits available, so existing tests exercise the AI call path
+  // exactly as before metering was added.
+  consumeAiCredit.mockResolvedValue({ allowed: true, remaining: 9, limit: 10, used: 1 });
   resolveExtraction.mockImplementation(async (_ctx, action) => ({
     action: action.action,
     lowConfidence: false,
@@ -98,5 +107,51 @@ describe("POST /api/bantoo/extract resilience", () => {
     expect(res.status).toBe(200);
     expect(data.aiFallback).toBe(false);
     expect(data.proposal.action).toBe("customer_payment");
+  });
+});
+
+describe("POST /api/bantoo/extract — AI credit metering", () => {
+  it("text-only + credits exhausted → falls back to rule-based extraction, never calls the AI provider", async () => {
+    consumeAiCredit.mockResolvedValue({ allowed: false, remaining: 0, limit: 10, used: 10 });
+
+    const res = await POST(makeRequest({ text: "Received 25 million from Elhaji Adoum" }));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.aiFallback).toBe(true);
+    expect(data.proposal).toBeTruthy();
+    expect(data.proposal.action).not.toBe("unknown");
+    expect(extractBantooAction).not.toHaveBeenCalled();
+    expect(consumeAiCredit).toHaveBeenCalledWith("org_A", "text_extraction");
+  });
+
+  it("image attached + credits exhausted → 402 with upgrade message, AI provider never called", async () => {
+    consumeAiCredit.mockResolvedValue({ allowed: false, remaining: 0, limit: 10, used: 10 });
+    const image = new File([new Uint8Array([137, 80, 78, 71])], "photo.png", {
+      type: "image/png",
+    });
+
+    const res = await POST(makeRequest({ text: "", image }));
+    const data = await res.json();
+
+    expect(res.status).toBe(402);
+    expect(data.error).toMatch(/upgrade/i);
+    expect(data.error).toContain("10");
+    expect(extractBantooAction).not.toHaveBeenCalled();
+    expect(resolveExtraction).not.toHaveBeenCalled();
+    expect(consumeAiCredit).toHaveBeenCalledWith("org_A", "photo_ocr");
+  });
+
+  it("credits available → proceeds with the AI call as before (no fallback flag)", async () => {
+    consumeAiCredit.mockResolvedValue({ allowed: true, remaining: 5, limit: 10, used: 5 });
+    extractBantooAction.mockResolvedValue({ action: "customer_payment", confidence: 0.9 });
+
+    const res = await POST(makeRequest({ text: "Received 25 million from Elhaji Adoum" }));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.aiFallback).toBe(false);
+    expect(extractBantooAction).toHaveBeenCalledTimes(1);
+    expect(consumeAiCredit).toHaveBeenCalledWith("org_A", "text_extraction");
   });
 });

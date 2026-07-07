@@ -236,7 +236,38 @@
     "bestMatch": "Best match",
     "createNew": "Create new “{name}”",
     "usingExisting": "Using existing: {name}",
-    "willCreateNew": "Will create new: {name}"
+    "willCreateNew": "Will create new: {name}",
+    "warnings": {
+      "barcodeDuplicateReceiveStock": "“{name}” already exists with this barcode — receiving stock may be a better fit.",
+      "similarItemReceiveStock": "An item like “{label}” already exists — receiving stock may be a better fit.",
+      "enterProductName": "Enter the product name before saving.",
+      "openingStockNeedsCost": "Add the unit cost to record opening stock, or clear the quantity.",
+      "itemNotInInventory": "“{name}” isn't in your items yet — pick a match or a new item will be created.",
+      "chooseInventoryItem": "Choose which inventory item was received.",
+      "chooseSupplier": "Choose the supplier this stock came from.",
+      "enterQuantity": "Enter the quantity received.",
+      "enterUnitCost": "Enter the unit cost before saving.",
+      "chooseSupplierForBill": "Choose the supplier for this bill.",
+      "enterInvoiceTotal": "Enter the invoice total.",
+      "noExpensePurchasesAccount": "No expense/purchases account found — add one first.",
+      "chooseCustomer": "Choose the customer who paid.",
+      "enterAmountReceived": "Enter the amount received.",
+      "noBankAccount": "No bank or cash account found. Add one under Bank & Cash first.",
+      "enterAmountPaid": "Enter the amount paid.",
+      "noExpenseAccount": "No expense account found — add one first.",
+      "enterSaleAmount": "Enter the sale amount.",
+      "noIncomeAccount": "No income account found — add one first.",
+      "lowConfidence": "I'm not sure. Please confirm or edit these details."
+    },
+    "fieldReasons": {
+      "supplierProductHistory": "Suggested because {name} was used {count, plural, one {# time} other {# times}} for this product (last {lookbackMonths, plural, one {# month} other {# months}}).",
+      "itemDeliveryHistory": "Suggested because past deliveries of “{query}” used “{label}” ({count, plural, one {# time} other {# times}}).",
+      "itemBestMatch": "Best match for “{query}”.",
+      "quantityUsual": "Suggested because you usually receive {quantity} at a time ({dominant} of the last {total} deliveries).",
+      "quantityLastDelivery": "Suggested from the last delivery quantity ({quantity}).",
+      "costLastPurchase": "Suggested from the last purchase cost ({amount} {currency}).",
+      "dueDatePaymentTerms": "Suggested because this supplier is usually paid ~{days, plural, one {# day} other {# days}} after the invoice, based on {paymentCount, plural, one {# past payment} other {# past payments}} to this supplier (approximate — invoices aren't linked to a specific payment)."
+    }
   },
   "auth": {
     "signIn": "Sign in",
@@ -288,7 +319,30 @@
     "unbalanced": "Out of balance ✗",
     "activity": "Activity",
     "invoices": "Invoices",
-    "viewReports": "View full reports →"
+    "viewReports": "View full reports →",
+    "lowStockAlert": "{count} item(s) at or below reorder level.",
+    "lowStockAlertCta": "Reorder now"
+  },
+  "approvals": {
+    "widgetTitle": "Pending approvals",
+    "widgetEmpty": "Nothing waiting on you right now.",
+    "submittedBy": "Submitted by {name}",
+    "noAttachment": "No attachment",
+    "hasAttachment": "Attachment included",
+    "aiConfidence": "AI confidence: {confidence}%",
+    "riskLow": "Low risk",
+    "riskMedium": "Medium risk",
+    "riskHigh": "High risk",
+    "approve": "Approve",
+    "reject": "Reject",
+    "requestCorrection": "Request correction",
+    "reasonPlaceholder": "Reason for rejecting this transaction",
+    "correctionPlaceholder": "What needs to be fixed?",
+    "cancel": "Cancel",
+    "submit": "Submit",
+    "correctionNoticeTitle": "Needs your attention",
+    "rejectedNotice": "Rejected: {reason}",
+    "needsCorrectionNotice": "Needs correction: {reason}"
   },
   "reportsPage": {
     "title": "Reports",
@@ -535,6 +589,7 @@
     "chartOfAccounts": "Chart of accounts",
     "manualJournal": "Post a manual journal entry",
     "importData": "Import from Excel or PDF",
+    "migrationWizard": "Migration & Opening Balances",
     "resetOwnerOnly": "Only the business owner can reset books.",
     "reset": {
       "title": "Reset books to factory default",
@@ -554,6 +609,14 @@
       "confirmLabel": "Type \"{name}\" to confirm",
       "resetNow": "Permanently reset books",
       "doneTitle": "Books reset complete"
+    },
+    "approvals": {
+      "title": "Approval workflow",
+      "description": "When on, lower-privilege roles (Cashier, Warehouse Staff, Salesperson, and Manager for higher-value transactions) submit drafts for review instead of posting directly. Owner, Admin, and Accountant always post directly.",
+      "statusOn": "On — some roles require approval before posting",
+      "statusOff": "Off — everyone with create access posts directly",
+      "turnOn": "Turn on",
+      "turnOff": "Turn off"
     }
   },
   "import": {
@@ -601,6 +664,34 @@
     "saving": "Saving…",
     "saved": "Profile updated.",
     "passwordSaved": "Password updated."
+  },
+  "reorder": {
+    "sectionTitle": "Reorder suggestions",
+    "sectionSubtitle": "Items at or below their reorder level. Request a quote from a supplier over WhatsApp — the message never mentions your stock levels.",
+    "itemCount": "{count} item(s)",
+    "lowStockBadge": "Low stock",
+    "currentStock": "In stock",
+    "reorderLevel": "Reorder level",
+    "suggestedQty": "Suggested reorder",
+    "supplierLabel": "Supplier",
+    "noSupplierSuggested": "No supplier suggested yet",
+    "supplierSourcePreferred": "Preferred supplier for this item",
+    "supplierSourceRecent": "Most recently used supplier for this item",
+    "supplierSourceFrequent": "Most frequently used supplier for this item",
+    "supplierSourceNone": "No purchase history for this item — choose a supplier below",
+    "lastPurchase": "Last bought at {price} from {supplier} on {date}",
+    "requestQuote": "Request quote on WhatsApp",
+    "modalTitle": "Request a quote",
+    "supplierField": "Supplier",
+    "supplierPlaceholder": "Search suppliers…",
+    "unitField": "Unit",
+    "messageField": "Message",
+    "messageHint": "Edit the message before sending — it never mentions stock levels or urgency.",
+    "chooseSupplier": "Choose a supplier to continue.",
+    "missingPhone": "Supplier phone number missing.",
+    "missingPhoneLink": "Add phone number first",
+    "openWhatsApp": "Open WhatsApp",
+    "close": "Close"
   },
   "metadata": {
     "title": "Bantoo Books",

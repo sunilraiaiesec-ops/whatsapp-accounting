@@ -4,6 +4,7 @@ import { getCurrentContext } from "@/lib/auth/current";
 import { getAiProvider, AiNotConfiguredError } from "@/lib/ai/provider";
 import { ALLOWED_AUDIO_TYPES, MAX_AUDIO_BYTES } from "@/lib/bantoo/upload";
 import { rateLimit, RATE_LIMITS } from "@/lib/bantoo/rate-limit";
+import { consumeAiCredit } from "@/lib/billing/ai-credits";
 
 export const maxDuration = 60;
 
@@ -51,6 +52,18 @@ export async function POST(request: Request) {
   }
 
   const lang = String(formData.get("lang") ?? "").trim().slice(0, 5) || undefined;
+
+  // Meter right before the AI call — voice has no rule-based fallback, so
+  // exhaustion is a clear blocking message rather than a silent degrade.
+  const credit = await consumeAiCredit(ctx.orgId, "voice_transcription");
+  if (!credit.allowed) {
+    return NextResponse.json(
+      {
+        error: `You've used all ${credit.limit} AI credits included in your plan this month. Upgrade your plan, or try again next month.`,
+      },
+      { status: 402 },
+    );
+  }
 
   try {
     const provider = getAiProvider();

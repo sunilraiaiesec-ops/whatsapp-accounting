@@ -22,6 +22,9 @@ export type ParsedCommand = {
 
 const RECEIPT_PATTERNS = [
   /\b(received?|receive|reçu|recu|encaiss(?:é|e|ement)?|got)\b/i,
+  /\brecord\s+receipt\b/i,
+  /\breceipt\b.+\b(?:from|de|client|customer|by)\b/i,
+  /\b(?:from|de|client|customer|by)\b.+\breceipt\b/i,
   /\b(milli|mila|mile|mili|mil gayi|mil gaya|mil gaye|mil gya)\b/i,
   /\b(aaya|aya|aayi|aaye)\b/i,
   /\bpayment\s+(?:milli|mila|mili|received|aayi|aaya|mil gayi|mil gaya)\b/i,

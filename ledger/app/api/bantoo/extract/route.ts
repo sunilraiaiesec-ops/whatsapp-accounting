@@ -7,6 +7,7 @@ import {
   isAiConfigured,
   type AiImageInput,
 } from "@/lib/ai/provider";
+import { consumeAiCredit } from "@/lib/billing/ai-credits";
 import { ruleBasedExtract } from "@/lib/bantoo/fallback";
 import { resolveExtraction } from "@/lib/bantoo/resolve";
 import { rateLimit, RATE_LIMITS } from "@/lib/bantoo/rate-limit";
@@ -113,33 +114,51 @@ export async function POST(request: Request) {
     }
     action = ruleBasedExtract(combinedText);
   } else {
-    try {
-      action = await extractBantooAction({ text: combinedText, images });
-    } catch (err) {
-      // A HARD AI failure (auth/quota/model-not-enabled/network) — distinct from
-      // a legitimate low-confidence "unknown", which returns normally without
-      // throwing. Log the real cause (no secrets) so it's visible in server logs
-      // instead of being masked by a generic user message.
-      console.error(
-        "[bantoo/extract] AI extraction error (org=%s):",
-        ctx.orgId,
-        err instanceof Error ? err.message : err,
-      );
-      if (images.length === 0 && hasText) {
-        // Keep text entry working even if OpenAI is down/misconfigured.
-        action = ruleBasedExtract(combinedText);
-        aiFallback = true;
-      } else {
-        // Images/voice can't fall back to rules — give a clear, actionable note.
-        const notConfigured = err instanceof AiNotConfiguredError;
+    // Meter right before the AI call — a request rejected earlier (rate
+    // limit, bad file type, etc.) never consumes a credit.
+    const feature = images.length > 0 ? "photo_ocr" : "text_extraction";
+    const credit = await consumeAiCredit(ctx.orgId, feature);
+    if (!credit.allowed) {
+      if (images.length > 0) {
         return NextResponse.json(
           {
-            error: notConfigured
-              ? new AiNotConfiguredError().message
-              : "Ask Bantoo's photo/voice AI is temporarily unavailable. Please try again shortly, or type the details as text.",
+            error: `You've used all ${credit.limit} AI credits included in your plan this month for photo/voice extraction. Upgrade your plan, or type the details as text instead.`,
           },
-          { status: notConfigured ? 503 : 502 },
+          { status: 402 },
         );
+      }
+      // Text-only: degrade exactly like a hard AI failure — no AI call made.
+      action = ruleBasedExtract(combinedText);
+      aiFallback = true;
+    } else {
+      try {
+        action = await extractBantooAction({ text: combinedText, images });
+      } catch (err) {
+        // A HARD AI failure (auth/quota/model-not-enabled/network) — distinct from
+        // a legitimate low-confidence "unknown", which returns normally without
+        // throwing. Log the real cause (no secrets) so it's visible in server logs
+        // instead of being masked by a generic user message.
+        console.error(
+          "[bantoo/extract] AI extraction error (org=%s):",
+          ctx.orgId,
+          err instanceof Error ? err.message : err,
+        );
+        if (images.length === 0 && hasText) {
+          // Keep text entry working even if OpenAI is down/misconfigured.
+          action = ruleBasedExtract(combinedText);
+          aiFallback = true;
+        } else {
+          // Images/voice can't fall back to rules — give a clear, actionable note.
+          const notConfigured = err instanceof AiNotConfiguredError;
+          return NextResponse.json(
+            {
+              error: notConfigured
+                ? new AiNotConfiguredError().message
+                : "Ask Bantoo's photo/voice AI is temporarily unavailable. Please try again shortly, or type the details as text.",
+            },
+            { status: notConfigured ? 503 : 502 },
+          );
+        }
       }
     }
   }

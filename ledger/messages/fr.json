@@ -235,7 +235,38 @@
     "bestMatch": "Meilleure correspondance",
     "createNew": "Créer « {name} »",
     "usingExisting": "Utilisation de : {name}",
-    "willCreateNew": "Créera : {name}"
+    "willCreateNew": "Créera : {name}",
+    "warnings": {
+      "barcodeDuplicateReceiveStock": "« {name} » existe déjà avec ce code-barres — une réception de stock pourrait mieux convenir.",
+      "similarItemReceiveStock": "Un article comme « {label} » existe déjà — une réception de stock pourrait mieux convenir.",
+      "enterProductName": "Saisissez le nom du produit avant d'enregistrer.",
+      "openingStockNeedsCost": "Ajoutez le coût unitaire pour enregistrer le stock initial, ou effacez la quantité.",
+      "itemNotInInventory": "« {name} » n'est pas encore dans vos articles — choisissez une correspondance ou un nouvel article sera créé.",
+      "chooseInventoryItem": "Choisissez l'article de stock reçu.",
+      "chooseSupplier": "Choisissez le fournisseur d'où provient ce stock.",
+      "enterQuantity": "Saisissez la quantité reçue.",
+      "enterUnitCost": "Saisissez le coût unitaire avant d'enregistrer.",
+      "chooseSupplierForBill": "Choisissez le fournisseur pour cette facture.",
+      "enterInvoiceTotal": "Saisissez le total de la facture.",
+      "noExpensePurchasesAccount": "Aucun compte de dépenses/achats trouvé — ajoutez-en un d'abord.",
+      "chooseCustomer": "Choisissez le client qui a payé.",
+      "enterAmountReceived": "Saisissez le montant reçu.",
+      "noBankAccount": "Aucun compte banque ou caisse trouvé. Ajoutez-en un dans Banque & Caisse d'abord.",
+      "enterAmountPaid": "Saisissez le montant payé.",
+      "noExpenseAccount": "Aucun compte de dépenses trouvé — ajoutez-en un d'abord.",
+      "enterSaleAmount": "Saisissez le montant de la vente.",
+      "noIncomeAccount": "Aucun compte de revenus trouvé — ajoutez-en un d'abord.",
+      "lowConfidence": "Je ne suis pas sûr. Veuillez confirmer ou modifier ces détails."
+    },
+    "fieldReasons": {
+      "supplierProductHistory": "Suggéré car {name} a été utilisé {count, plural, one {# fois} other {# fois}} pour ce produit ({lookbackMonths, plural, one {le dernier # mois} other {les derniers # mois}}).",
+      "itemDeliveryHistory": "Suggéré car les livraisons passées de « {query} » utilisaient « {label} » ({count, plural, one {# fois} other {# fois}}).",
+      "itemBestMatch": "Meilleure correspondance pour « {query} ».",
+      "quantityUsual": "Suggéré car vous recevez habituellement {quantity} à la fois ({dominant} des {total} dernières livraisons).",
+      "quantityLastDelivery": "Suggéré à partir de la dernière quantité livrée ({quantity}).",
+      "costLastPurchase": "Suggéré à partir du dernier coût d'achat ({amount} {currency}).",
+      "dueDatePaymentTerms": "Suggéré car ce fournisseur est habituellement payé ~{days, plural, one {# jour} other {# jours}} après la facture, d'après {paymentCount, plural, one {# paiement passé} other {# paiements passés}} à ce fournisseur (approximatif — les factures ne sont pas liées à un paiement précis)."
+    }
   },
   "auth": {
     "signIn": "Connexion",
@@ -287,7 +318,30 @@
     "unbalanced": "Déséquilibre ✗",
     "activity": "Activité",
     "invoices": "Factures",
-    "viewReports": "Voir les rapports →"
+    "viewReports": "Voir les rapports →",
+    "lowStockAlert": "{count} article(s) au niveau de réapprovisionnement ou en dessous.",
+    "lowStockAlertCta": "Réapprovisionner"
+  },
+  "approvals": {
+    "widgetTitle": "Approbations en attente",
+    "widgetEmpty": "Rien n'attend votre validation pour le moment.",
+    "submittedBy": "Soumis par {name}",
+    "noAttachment": "Aucune pièce jointe",
+    "hasAttachment": "Pièce jointe incluse",
+    "aiConfidence": "Confiance IA : {confidence}%",
+    "riskLow": "Risque faible",
+    "riskMedium": "Risque moyen",
+    "riskHigh": "Risque élevé",
+    "approve": "Approuver",
+    "reject": "Rejeter",
+    "requestCorrection": "Demander une correction",
+    "reasonPlaceholder": "Motif du rejet de cette transaction",
+    "correctionPlaceholder": "Que faut-il corriger ?",
+    "cancel": "Annuler",
+    "submit": "Envoyer",
+    "correctionNoticeTitle": "Nécessite votre attention",
+    "rejectedNotice": "Rejeté : {reason}",
+    "needsCorrectionNotice": "Correction demandée : {reason}"
   },
   "reportsPage": {
     "title": "Rapports",
@@ -553,6 +607,14 @@
       "confirmLabel": "Saisissez « {name} » pour confirmer",
       "resetNow": "Réinitialiser définitivement",
       "doneTitle": "Réinitialisation terminée"
+    },
+    "approvals": {
+      "title": "Circuit d'approbation",
+      "description": "Lorsqu'il est activé, les rôles à privilèges réduits (Caissier, Magasinier, Vendeur, et Manager pour les transactions à montant élevé) soumettent des brouillons à valider au lieu de les enregistrer directement. Propriétaire, Admin et Comptable enregistrent toujours directement.",
+      "statusOn": "Activé — certains rôles doivent obtenir une approbation avant l'enregistrement",
+      "statusOff": "Désactivé — tous les utilisateurs autorisés enregistrent directement",
+      "turnOn": "Activer",
+      "turnOff": "Désactiver"
     }
   },
   "import": {
@@ -600,6 +662,34 @@
     "saving": "Enregistrement…",
     "saved": "Profil mis à jour.",
     "passwordSaved": "Mot de passe mis à jour."
+  },
+  "reorder": {
+    "sectionTitle": "Suggestions de réapprovisionnement",
+    "sectionSubtitle": "Articles au niveau de réapprovisionnement ou en dessous. Demandez un devis à un fournisseur sur WhatsApp — le message ne mentionne jamais votre niveau de stock.",
+    "itemCount": "{count} article(s)",
+    "lowStockBadge": "Stock faible",
+    "currentStock": "En stock",
+    "reorderLevel": "Niveau de réappro.",
+    "suggestedQty": "Quantité suggérée",
+    "supplierLabel": "Fournisseur",
+    "noSupplierSuggested": "Aucun fournisseur suggéré",
+    "supplierSourcePreferred": "Fournisseur préféré pour cet article",
+    "supplierSourceRecent": "Fournisseur le plus récemment utilisé pour cet article",
+    "supplierSourceFrequent": "Fournisseur le plus fréquemment utilisé pour cet article",
+    "supplierSourceNone": "Aucun historique d'achat pour cet article — choisissez un fournisseur ci-dessous",
+    "lastPurchase": "Dernier achat à {price} auprès de {supplier} le {date}",
+    "requestQuote": "Demander un devis sur WhatsApp",
+    "modalTitle": "Demander un devis",
+    "supplierField": "Fournisseur",
+    "supplierPlaceholder": "Rechercher des fournisseurs…",
+    "unitField": "Unité",
+    "messageField": "Message",
+    "messageHint": "Modifiez le message avant de l'envoyer — il ne mentionne jamais le niveau de stock ni d'urgence.",
+    "chooseSupplier": "Choisissez un fournisseur pour continuer.",
+    "missingPhone": "Numéro de téléphone du fournisseur manquant.",
+    "missingPhoneLink": "Ajouter un numéro de téléphone",
+    "openWhatsApp": "Ouvrir WhatsApp",
+    "close": "Fermer"
   },
   "metadata": {
     "title": "Bantoo Books",

@@ -80,8 +80,9 @@ describe("getCommandPatternSuggestions — supplier suggestion from repeated pur
 
     expect(result.supplier?.id).toBe("sup_A");
     expect(result.supplier?.count).toBe(3);
-    expect(result.supplier?.reason).toMatch(/Supplier A/);
-    expect(result.supplier?.reason).toMatch(/3 times/);
+    expect(result.supplier?.reason.code).toBe("supplierProductHistory");
+    expect(result.supplier?.reason.params?.name).toBe("Supplier A");
+    expect(result.supplier?.reason.params?.count).toBe(3);
     // Recent (5 days ago) evidence + a real pairing frequency => decent bucket.
     expect(["medium", "high"]).toContain(result.supplier?.bucket);
   });
@@ -162,8 +163,9 @@ describe("getCommandPatternSuggestions — last purchase cost suggestion", () =>
     });
 
     expect(result.costPrice?.value).toBe("21500");
-    expect(result.costPrice?.reason).toContain("21,500");
-    expect(result.costPrice?.reason).toContain("XAF");
+    expect(result.costPrice?.reason.code).toBe("costLastPurchase");
+    expect(result.costPrice?.reason.params?.amount).toBe("21500");
+    expect(result.costPrice?.reason.params?.currency).toBe("XAF");
   });
 });
 

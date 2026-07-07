@@ -51,10 +51,59 @@ export type BantooOption = {
   bucket?: MatchBucket;
 };
 
-// A human-readable explanation for a suggested/pre-filled field, surfaced by
+// Stable codes for resolve-time validation hints. Mapped to next-intl keys on
+// the client (command.warnings.*) so French/English UI stay in sync.
+export type BantooWarningCode =
+  | "barcodeDuplicateReceiveStock"
+  | "similarItemReceiveStock"
+  | "enterProductName"
+  | "openingStockNeedsCost"
+  | "itemNotInInventory"
+  | "chooseInventoryItem"
+  | "chooseSupplier"
+  | "enterQuantity"
+  | "enterUnitCost"
+  | "chooseSupplierForBill"
+  | "enterInvoiceTotal"
+  | "noExpensePurchasesAccount"
+  | "chooseCustomer"
+  | "enterAmountReceived"
+  | "noBankAccount"
+  | "enterAmountPaid"
+  | "noExpenseAccount"
+  | "enterSaleAmount"
+  | "noIncomeAccount"
+  | "lowConfidence";
+
+export type BantooWarning = {
+  code: BantooWarningCode;
+  params?: Record<string, string | number>;
+};
+
+// Stable codes for org transaction-pattern learning hints. Mapped to
+// next-intl keys on the client (command.fieldReasons.*).
+export type BantooFieldReasonCode =
+  | "supplierProductHistory"
+  | "itemDeliveryHistory"
+  | "itemBestMatch"
+  | "quantityUsual"
+  | "quantityLastDelivery"
+  | "costLastPurchase"
+  | "dueDatePaymentTerms";
+
+export type BantooPatternReason = {
+  code: BantooFieldReasonCode;
+  params?: Record<string, string | number>;
+};
+
+// A localized explanation for a suggested/pre-filled field, surfaced by
 // org-scoped transaction-pattern learning (see lib/command-patterns.ts). Client-
-// safe: just a bucket + short text, never raw historical data.
-export type BantooFieldReason = { text: string; bucket: MatchBucket };
+// safe: code + optional params, never raw historical rows.
+export type BantooFieldReason = {
+  code: BantooFieldReasonCode;
+  bucket: MatchBucket;
+  params?: Record<string, string | number>;
+};
 
 // Keyed by BantooDraft field name (plus "supplier"/"customer"/"item" for the
 // resolved-entity fields, which aren't literal draft keys). Populated only when
@@ -107,7 +156,7 @@ export type BantooProposal = {
   confidence: number;
   lowConfidence: boolean;
   summary: string;
-  warnings: string[];
+  warnings: BantooWarning[];
   draft: BantooDraft;
   partyType: "customer" | "supplier" | null;
   partyId: string | null;

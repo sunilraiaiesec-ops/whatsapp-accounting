@@ -13,10 +13,14 @@ describe("blendEntity", () => {
       score: 92,
       bucket: "high",
       count: 18,
-      reason: "Suggested because Supplier A was used 18 times for this product.",
+      reason: {
+        code: "supplierProductHistory",
+        params: { name: "Supplier A", count: 18, lookbackMonths: 6 },
+      },
     });
     expect(result.id).toBe("sup_A");
-    expect(result.reason).toContain("18 times");
+    expect(result.reason?.code).toBe("supplierProductHistory");
+    expect(result.reason?.params?.count).toBe(18);
   });
 
   it("low confidence pattern suggestion never auto-selects", () => {
@@ -26,7 +30,10 @@ describe("blendEntity", () => {
       score: 40,
       bucket: "low",
       count: 1,
-      reason: "Suggested because Supplier A was used 1 time for this product.",
+      reason: {
+        code: "supplierProductHistory",
+        params: { name: "Supplier A", count: 1, lookbackMonths: 6 },
+      },
     });
     // Still surfaced (reason present, for a "show as an option" affordance),
     // but never auto-selected.
@@ -37,7 +44,7 @@ describe("blendEntity", () => {
   it("BOOST: reinforces a borderline text match that agrees with the pattern, crossing into auto-select", () => {
     const result = blendEntity(
       { id: "sup_A", score: 75 },
-      { id: "sup_A", label: "Supplier A", score: 90, bucket: "high", count: 12, reason: "used often" },
+      { id: "sup_A", label: "Supplier A", score: 90, bucket: "high", count: 12, reason: { code: "supplierProductHistory", params: { name: "Supplier A", count: 12, lookbackMonths: 6 } } },
     );
     expect(result.score).toBeGreaterThan(75);
     expect(result.id).toBe("sup_A"); // 75 + round(90*0.2)=18 => 93 >= 90
@@ -46,7 +53,7 @@ describe("blendEntity", () => {
   it("does not override an already-decent (>=60) text match with a different pattern candidate", () => {
     const result = blendEntity(
       { id: "sup_TEXT", score: 65 },
-      { id: "sup_PATTERN", label: "Supplier P", score: 95, bucket: "high", count: 20, reason: "used often" },
+      { id: "sup_PATTERN", label: "Supplier P", score: 95, bucket: "high", count: 20, reason: { code: "supplierProductHistory", params: { name: "Supplier P", count: 20, lookbackMonths: 6 } } },
     );
     // Text's own candidate stands; pattern doesn't hijack an already-reasonable match.
     expect(result.id).toBeNull(); // 65 < 90, so not auto-selected either way, but crucially not sup_PATTERN

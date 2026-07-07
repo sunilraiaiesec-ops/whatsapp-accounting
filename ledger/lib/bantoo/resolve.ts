@@ -28,7 +28,10 @@ import {
   type BantooDraft,
   type BantooFieldReasons,
   type BantooOption,
+  type BantooPatternReason,
   type BantooProposal,
+  type BantooWarning,
+  type BantooWarningCode,
   type MatchBucket,
 } from "@/lib/bantoo/types";
 
@@ -58,7 +61,7 @@ function today(): string {
 export function blendEntity(
   textTop: { id: string; score: number } | undefined,
   pattern: EntityPatternCandidate | undefined,
-): { id: string | null; score: number; reason?: string } {
+): { id: string | null; score: number; reason?: BantooPatternReason } {
   if (!pattern) {
     return textTop
       ? { id: textTop.score >= MATCH_HIGH ? textTop.id : null, score: textTop.score }
@@ -91,7 +94,11 @@ function applyPartyPatternBlend(
     : undefined;
   const blended = blendEntity(textTop, pattern);
   if (blended.reason) {
-    fieldReasons.supplier = { text: blended.reason, bucket: bucketFor(Math.round(blended.score)) };
+    fieldReasons.supplier = {
+      code: blended.reason.code,
+      bucket: bucketFor(Math.round(blended.score)),
+      params: blended.reason.params,
+    };
   }
   if (blended.id && !proposal.partyId) {
     proposal.partyId = blended.id;
@@ -127,7 +134,11 @@ function applyItemPatternBlend(
     // Attributed to the item field only — the item IS the unit-disambiguating
     // signal (e.g. "50kg bag" is part of the item name), so a separate,
     // identical-looking hint under the Unit combobox would just be noise.
-    fieldReasons.item = { text: blended.reason, bucket: bucketFor(Math.round(blended.score)) };
+    fieldReasons.item = {
+      code: blended.reason.code,
+      bucket: bucketFor(Math.round(blended.score)),
+      params: blended.reason.params,
+    };
   }
   if (blended.id && !proposal.itemId) {
     proposal.itemId = blended.id;
@@ -153,7 +164,7 @@ function applyItemPatternBlend(
 function applyValueSuggestion(
   draft: BantooDraft,
   key: "quantity" | "costPrice",
-  suggestion: { value: string; score: number; bucket: MatchBucket; reason: string } | undefined,
+  suggestion: { value: string; score: number; bucket: MatchBucket; reason: BantooPatternReason } | undefined,
   fieldReasons: BantooFieldReasons,
   reasonKey: keyof BantooFieldReasons,
 ) {
@@ -162,7 +173,11 @@ function applyValueSuggestion(
   if (!alreadySet && suggestion.bucket !== "low") {
     draft[key] = suggestion.value;
   }
-  fieldReasons[reasonKey] = { text: suggestion.reason, bucket: suggestion.bucket };
+  fieldReasons[reasonKey] = {
+    code: suggestion.reason.code,
+    bucket: suggestion.bucket,
+    params: suggestion.reason.params,
+  };
 }
 
 // Turn a validated ExtractedAction into a client-ready proposal: fills the
@@ -174,8 +189,12 @@ export async function resolveExtraction(
 ): Promise<BantooProposal> {
   const draft = emptyDraft();
   draft.currency = action.currency || ctx.baseCurrency || "XAF";
-  const warnings: string[] = [];
+  const warnings: BantooWarning[] = [];
   const lowConfidence = action.confidence < LOW_CONFIDENCE_THRESHOLD;
+
+  function warn(code: BantooWarningCode, params?: Record<string, string | number>) {
+    warnings.push(params ? { code, params } : { code });
+  }
 
   const proposal: BantooProposal = {
     action: action.action,
@@ -264,15 +283,11 @@ export async function resolveExtraction(
       }));
       const dup = draft.productName ? rankMatches(draft.productName, productCandidates)[0] : undefined;
       if (barcodeDup) {
-        warnings.push(
-          `“${barcodeDup.name}” already exists with this barcode — receiving stock may be a better fit.`,
-        );
+        warn("barcodeDuplicateReceiveStock", { name: barcodeDup.name });
       } else if (dup && dup.bucket === "high") {
-        warnings.push(
-          `An item like “${dup.label}” already exists — receiving stock may be a better fit.`,
-        );
+        warn("similarItemReceiveStock", { label: dup.label });
       }
-      if (!draft.productName) warnings.push("Enter the product name before saving.");
+      if (!draft.productName) warn("enterProductName");
       // Opening stock is optional; if provided we also receive it, which needs a supplier.
       if (draft.quantity && Number(draft.quantity) > 0) {
         const party = await resolveParty(draft.partyName, "supplier");
@@ -290,7 +305,7 @@ export async function resolveExtraction(
         applyValueSuggestion(draft, "quantity", patterns.quantity, fieldReasons, "quantity");
         applyValueSuggestion(draft, "costPrice", patterns.costPrice, fieldReasons, "costPrice");
         if (!draft.costPrice || Number(draft.costPrice) <= 0) {
-          warnings.push("Add the unit cost to record opening stock, or clear the quantity.");
+          warn("openingStockNeedsCost");
         }
       }
       break;
@@ -379,18 +394,17 @@ export async function resolveExtraction(
       }
 
       if (!proposal.itemId) {
-        warnings.push(
-          draft.productName
-            ? `“${draft.productName}” isn't in your items yet — pick a match or a new item will be created.`
-            : "Choose which inventory item was received.",
+        warn(
+          draft.productName ? "itemNotInInventory" : "chooseInventoryItem",
+          draft.productName ? { name: draft.productName } : undefined,
         );
       }
-      if (!draft.partyName) warnings.push("Choose the supplier this stock came from.");
+      if (!draft.partyName) warn("chooseSupplier");
       if (!draft.quantity || Number(draft.quantity) <= 0) {
-        warnings.push("Enter the quantity received.");
+        warn("enterQuantity");
       }
       if (!draft.costPrice || Number(draft.costPrice) <= 0) {
-        warnings.push("Enter the unit cost before saving.");
+        warn("enterUnitCost");
       }
       break;
     }
@@ -409,9 +423,9 @@ export async function resolveExtraction(
       proposal.partyOptions = party.options;
       proposal.partyId = party.id;
       proposal.createParty = party.create;
-      if (!draft.partyName) warnings.push("Choose the supplier for this bill.");
+      if (!draft.partyName) warn("chooseSupplierForBill");
       if (!draft.amount || Number(draft.amount) <= 0) {
-        warnings.push("Enter the invoice total.");
+        warn("enterInvoiceTotal");
       }
 
       // Payment terms: "usually paid ~30 days after delivery" — suggests a
@@ -432,8 +446,9 @@ export async function resolveExtraction(
             draft.dueDate = suggestedDueDate;
           }
           fieldReasons.dueDate = {
-            text: patterns.dueDateDays.reason,
+            code: patterns.dueDateDays.reason.code,
             bucket: patterns.dueDateDays.bucket,
+            params: patterns.dueDateDays.reason.params,
           };
         }
       }
@@ -447,7 +462,7 @@ export async function resolveExtraction(
       const picked = pickExpenseAccount(expenses, draft.description || draft.partyName);
       proposal.lineAccountId = picked?.id ?? expenses[0]?.id ?? null;
       if (!proposal.lineAccountId) {
-        warnings.push("No expense/purchases account found — add one first.");
+        warn("noExpensePurchasesAccount");
       }
       break;
     }
@@ -467,15 +482,15 @@ export async function resolveExtraction(
       proposal.partyOptions = party.options;
       proposal.partyId = party.id;
       proposal.createParty = party.create;
-      if (!draft.partyName) warnings.push("Choose the customer who paid.");
+      if (!draft.partyName) warn("chooseCustomer");
       if (!draft.amount || Number(draft.amount) <= 0) {
-        warnings.push("Enter the amount received.");
+        warn("enterAmountReceived");
       }
 
       proposal.bankOptions = await bankOptions();
       proposal.bankAccountId = proposal.bankOptions[0]?.id ?? null;
       if (!proposal.bankAccountId) {
-        warnings.push("No bank or cash account found. Add one under Bank & Cash first.");
+        warn("noBankAccount");
       }
 
       const lineAccounts = await receiptCounterpartAccounts(ctx.orgId);
@@ -507,13 +522,13 @@ export async function resolveExtraction(
         proposal.createParty = party.create;
       }
       if (!draft.amount || Number(draft.amount) <= 0) {
-        warnings.push("Enter the amount paid.");
+        warn("enterAmountPaid");
       }
 
       proposal.bankOptions = await bankOptions();
       proposal.bankAccountId = proposal.bankOptions[0]?.id ?? null;
       if (!proposal.bankAccountId) {
-        warnings.push("No bank or cash account found. Add one under Bank & Cash first.");
+        warn("noBankAccount");
       }
 
       const accounts = await paymentCounterpartAccounts(ctx.orgId);
@@ -525,7 +540,7 @@ export async function resolveExtraction(
       const picked = pickExpenseAccount(expenses, draft.category || draft.description);
       proposal.lineAccountId = picked?.id ?? expenses[0]?.id ?? null;
       if (!proposal.lineAccountId) {
-        warnings.push("No expense account found — add one first.");
+        warn("noExpenseAccount");
       }
       break;
     }
@@ -547,13 +562,13 @@ export async function resolveExtraction(
         proposal.createParty = party.create;
       }
       if (!draft.amount || Number(draft.amount) <= 0) {
-        warnings.push("Enter the sale amount.");
+        warn("enterSaleAmount");
       }
 
       proposal.bankOptions = await bankOptions();
       proposal.bankAccountId = proposal.bankOptions[0]?.id ?? null;
       if (!proposal.bankAccountId) {
-        warnings.push("No bank or cash account found. Add one under Bank & Cash first.");
+        warn("noBankAccount");
       }
 
       const lineAccounts = await receiptCounterpartAccounts(ctx.orgId);
@@ -565,7 +580,7 @@ export async function resolveExtraction(
       const picked = pickSalesAccount(income);
       proposal.lineAccountId = picked?.id ?? income[0]?.id ?? null;
       if (!proposal.lineAccountId) {
-        warnings.push("No income account found — add one first.");
+        warn("noIncomeAccount");
       }
       break;
     }
@@ -573,7 +588,7 @@ export async function resolveExtraction(
 
   if (!draft.date) draft.date = today();
   if (lowConfidence) {
-    warnings.unshift("I'm not sure. Please confirm or edit these details.");
+    warn("lowConfidence");
   }
 
   return proposal;

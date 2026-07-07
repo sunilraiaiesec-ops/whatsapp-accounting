@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { formatAmount } from "@/lib/money";
 import { bucketFor, rankMatches, similarity } from "@/lib/bantoo/match";
-import type { MatchBucket } from "@/lib/bantoo/types";
+import type { MatchBucket, BantooPatternReason } from "@/lib/bantoo/types";
 import type { BantooActionType } from "@/lib/ai/actions";
 
 // ---------------------------------------------------------------------------
@@ -43,7 +43,7 @@ export type EntityPatternCandidate = {
   score: number; // 0-100
   bucket: PatternBucket;
   count: number;
-  reason: string;
+  reason: BantooPatternReason;
 };
 
 export type ValuePatternSuggestion<T> = {
@@ -51,7 +51,7 @@ export type ValuePatternSuggestion<T> = {
   score: number; // 0-100
   bucket: PatternBucket;
   count: number;
-  reason: string;
+  reason: BantooPatternReason;
 };
 
 export type PatternSuggestions = {
@@ -133,8 +133,8 @@ async function withLookback<T>(
   return { rows: wideRows, windowDays: WIDE_LOOKBACK_DAYS };
 }
 
-function lookbackLabel(windowDays: number): string {
-  return windowDays > DEFAULT_LOOKBACK_DAYS ? "last 12 months" : "last 6 months";
+function lookbackMonths(windowDays: number): 6 | 12 {
+  return windowDays > DEFAULT_LOOKBACK_DAYS ? 12 : 6;
 }
 
 function minorToPlain(minor: bigint, currency: string): string {
@@ -211,7 +211,10 @@ async function supplierPatternForItem(
     score,
     bucket: bucketFromScore(score),
     count: top.count,
-    reason: `Suggested because ${top.name} was used ${top.count} time${top.count === 1 ? "" : "s"} for this product (${lookbackLabel(windowDays)}).`,
+    reason: {
+      code: "supplierProductHistory",
+      params: { name: top.name, count: top.count, lookbackMonths: lookbackMonths(windowDays) },
+    },
   };
 }
 
@@ -289,8 +292,11 @@ async function itemPatternForQuery(
     count: top.count,
     reason:
       top.count > 0
-        ? `Suggested because past deliveries of “${productQuery}” used “${top.label}” (${top.count} time${top.count === 1 ? "" : "s"}).`
-        : `Best match for “${productQuery}”.`,
+        ? {
+            code: "itemDeliveryHistory",
+            params: { query: productQuery, label: top.label, count: top.count },
+          }
+        : { code: "itemBestMatch", params: { query: productQuery } },
   };
 }
 
@@ -300,7 +306,10 @@ async function itemPatternForQuery(
 // limitations note on sales-side quantity). Suggested value = the historical
 // MODE (most common quantity), since a single supplier/product habit is
 // usually a fixed batch size, not an average. Source: GoodsReceiptLine.quantity.
-async function quantityPatternForItem(
+// Exported so lib/reorder.ts can reuse this exact "usual quantity" signal
+// for the low-stock reorder flow's suggested reorder quantity, instead of
+// re-deriving a mode-quantity from GoodsReceiptLine history a second time.
+export async function quantityPatternForItem(
   orgId: string,
   itemIds: string[],
   partyId?: string | null,
@@ -344,8 +353,11 @@ async function quantityPatternForItem(
     count: rows.length,
     reason:
       modeCount > 1
-        ? `Suggested because you usually receive ${modeQty} at a time (${modeCount} of the last ${rows.length} deliveries).`
-        : `Suggested from the last delivery quantity (${modeQty}).`,
+        ? {
+            code: "quantityUsual",
+            params: { quantity: modeQty, dominant: modeCount, total: rows.length },
+          }
+        : { code: "quantityLastDelivery", params: { quantity: modeQty } },
   };
 }
 
@@ -353,7 +365,10 @@ async function quantityPatternForItem(
 // "Last purchase cost of rice was 21,500 XAF" — uses the LAST cost, not an
 // average, because purchase prices drift over time and the most recent value
 // is the most relevant one to default to. Source: GoodsReceiptLine.unitCost.
-async function costPatternForItem(
+// Exported so lib/approvals/risk-review.ts can reuse this exact "last
+// purchase cost" signal for the §12 "price is notably higher than last
+// purchase" advisory check instead of re-deriving it.
+export async function costPatternForItem(
   orgId: string,
   itemIds: string[],
   partyId: string | null | undefined,
@@ -390,7 +405,10 @@ async function costPatternForItem(
     score,
     bucket: bucketFromScore(score),
     count: rows.length,
-    reason: `Suggested from the last purchase cost (${formatAmount(lastCost, currency)} ${currency}).`,
+    reason: {
+      code: "costLastPurchase",
+      params: { amount: minorToPlain(lastCost, currency), currency },
+    },
   };
 }
 
@@ -424,7 +442,7 @@ export async function paymentTermsPatternForSupplier(
   );
   if (withDue.length > 0) {
     const days = withDue.map((r) => daysBetween(r.date, r.dueDate as Date));
-    return termsSuggestionFromDays(days, `${withDue.length} past invoice due date${withDue.length === 1 ? "" : "s"} (${lookbackLabel(dueWindow)})`);
+    return termsSuggestionFromDays(days, withDue.length);
   }
 
   const [{ rows: docs }, payments] = await Promise.all([
@@ -454,15 +472,13 @@ export async function paymentTermsPatternForSupplier(
     }
   }
   if (days.length === 0) return undefined;
-  return termsSuggestionFromDays(
-    days,
-    `${days.length} past payment${days.length === 1 ? "" : "s"} to this supplier (approximate — invoices aren't linked to a specific payment)`,
-  );
+  return termsSuggestionFromDays(days, days.length, { approximate: true });
 }
 
 function termsSuggestionFromDays(
   days: number[],
-  sourceLabel: string,
+  paymentCount: number,
+  options?: { approximate?: boolean },
 ): ValuePatternSuggestion<number> {
   const avg = Math.round(days.reduce((s, d) => s + d, 0) / days.length);
   const variance = days.reduce((s, d) => s + (d - avg) ** 2, 0) / days.length;
@@ -481,7 +497,14 @@ function termsSuggestionFromDays(
     score,
     bucket: bucketFromScore(score),
     count: days.length,
-    reason: `Suggested because this supplier is usually paid ~${avg} day${avg === 1 ? "" : "s"} after the invoice, based on ${sourceLabel}.`,
+    reason: {
+      code: "dueDatePaymentTerms",
+      params: {
+        days: avg,
+        paymentCount,
+        ...(options?.approximate ? { approximate: 1 as const } : {}),
+      },
+    },
   };
 }
 

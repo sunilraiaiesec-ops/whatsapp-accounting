@@ -384,7 +384,12 @@ export function BantooCommand() {
   function reasonHint(key: keyof BantooProposal["fieldReasons"]) {
     const reason = proposal?.fieldReasons?.[key];
     if (!reason) return null;
-    return <p className="mt-1 text-xs text-[var(--muted)]">💡 {reason.text}</p>;
+    const text = t(`fieldReasons.${reason.code}` as Parameters<typeof t>[0], reason.params);
+    return <p className="mt-1 text-xs text-[var(--muted)]">💡 {text}</p>;
+  }
+
+  function warningText(warning: BantooProposal["warnings"][number]) {
+    return t(`warnings.${warning.code}` as Parameters<typeof t>[0], warning.params);
   }
 
   function field(
@@ -861,9 +866,11 @@ export function BantooCommand() {
                   {t("notSure")}
                 </p>
               ) : null}
-              {proposal.warnings.map((w) => (
-                <p key={w} className="text-sm text-amber-700">
-                  {w}
+              {proposal.warnings
+                .filter((w) => !(w.code === "lowConfidence" && proposal.lowConfidence))
+                .map((w) => (
+                <p key={w.code + JSON.stringify(w.params ?? {})} className="text-sm text-amber-700">
+                  {warningText(w)}
                 </p>
               ))}
 
