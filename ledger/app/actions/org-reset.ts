@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { requireContext } from "@/lib/auth/current";
+import { isOwnerRole } from "@/lib/permissions";
 import {
   OrgResetError,
   requestOrgReset,
@@ -26,7 +27,7 @@ function fail(err: unknown): ResetActionState {
 
 async function ownerContext() {
   const ctx = await requireContext();
-  if (ctx.role !== "OWNER") {
+  if (!isOwnerRole(ctx.role)) {
     throw new OrgResetError("Only the business owner can reset books.");
   }
   return ctx;

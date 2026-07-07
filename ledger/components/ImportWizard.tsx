@@ -33,7 +33,7 @@ export function ImportWizard() {
 
   const rowsJson = useMemo(
     () => (preview?.resolvedRows ? JSON.stringify(preview.resolvedRows) : ""),
-    [preview?.resolvedRows],
+    [preview],
   );
 
   async function handleAnalyze(event: FormEvent<HTMLFormElement>) {

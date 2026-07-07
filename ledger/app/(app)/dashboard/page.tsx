@@ -5,6 +5,14 @@ import { requireContext } from "@/lib/auth/current";
 import { formatAmount } from "@/lib/money";
 import { balanceSheet, profitAndLoss } from "@/lib/reports";
 import { getSidebarCounts } from "@/lib/sidebar";
+import { countLowStockItems } from "@/lib/reorder";
+import { getDueSoonAndOverdueInvoices } from "@/lib/billing/reminders";
+import { PaymentRemindersWidget } from "@/components/PaymentRemindersWidget";
+import { hasPermission } from "@/lib/permissions";
+import { listMySubmissionNotices, listPendingApprovals } from "@/lib/approvals/engine";
+import { summarizePendingApprovals } from "@/lib/approvals/summary";
+import { PendingApprovalsWidget, type PendingApprovalRowVM } from "@/components/approvals/PendingApprovalsWidget";
+import { MySubmissionNotices, type SubmissionNoticeVM } from "@/components/approvals/MySubmissionNotices";
 
 export default async function DashboardPage() {
   const ctx = await requireContext();
@@ -44,11 +52,43 @@ export default async function DashboardPage() {
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
 
-  const [bs, pnl, counts] = await Promise.all([
-    balanceSheet(ctx.orgId),
-    profitAndLoss(ctx.orgId, monthStart, monthEnd),
-    getSidebarCounts(ctx.orgId),
-  ]);
+  const canApprove = hasPermission(ctx, "approveTransactions");
+
+  const [bs, pnl, counts, lowStockCount, paymentReminders, pendingApprovalRows, mySubmissionNotices] =
+    await Promise.all([
+      balanceSheet(ctx.orgId),
+      profitAndLoss(ctx.orgId, monthStart, monthEnd),
+      getSidebarCounts(ctx.orgId),
+      countLowStockItems(ctx.orgId),
+      getDueSoonAndOverdueInvoices(ctx.orgId),
+      canApprove ? listPendingApprovals(ctx.orgId) : Promise.resolve([]),
+      listMySubmissionNotices(ctx.orgId, ctx.userId),
+    ]);
+
+  const pendingApprovalSummaries = await summarizePendingApprovals(ctx.orgId, cur, pendingApprovalRows);
+  const pendingApprovalItems: PendingApprovalRowVM[] = pendingApprovalSummaries.map((s) => ({
+    id: s.id,
+    typeLabel: s.typeLabel,
+    amountLabel: s.amountLabel,
+    partyName: s.partyName,
+    description: s.description,
+    submittedByName: s.submittedByName,
+    submittedAtLabel: s.submittedAt.toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }),
+    aiConfidence: s.aiConfidence,
+    aiRiskReview: s.aiRiskReview,
+    hasAttachment: s.hasAttachment,
+  }));
+  const submissionNotices: SubmissionNoticeVM[] = mySubmissionNotices.map((n) => ({
+    id: n.id,
+    type: n.type,
+    status: n.status as "rejected" | "needs_correction",
+    rejectionReason: n.rejectionReason,
+  }));
 
   const incomeNum = Number(pnl.totalIncome);
   const expenseNum = Number(pnl.totalExpenses);
@@ -70,6 +110,28 @@ export default async function DashboardPage() {
           </Link>
         ))}
       </div>
+
+      {lowStockCount > 0 ? (
+        <Link
+          href="/inventory-items#low-stock"
+          className="mt-5 flex items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 transition hover:border-amber-300"
+        >
+          <span className="flex items-center gap-2 text-sm font-medium text-amber-800">
+            <span aria-hidden>⚠️</span>
+            {t("lowStockAlert", { count: lowStockCount })}
+          </span>
+          <span className="shrink-0 text-sm font-semibold text-amber-700">{t("lowStockAlertCta")} →</span>
+        </Link>
+      ) : null}
+
+      <PaymentRemindersWidget
+        dueSoon={paymentReminders.dueSoon}
+        overdue={paymentReminders.overdue}
+        currency={cur}
+      />
+
+      <MySubmissionNotices items={submissionNotices} />
+      {canApprove ? <PendingApprovalsWidget items={pendingApprovalItems} /> : null}
 
       <section className="mt-8">
         <div className="mb-3 flex items-center justify-between">

@@ -24,8 +24,10 @@ import {
   DocumentError,
 } from "@/lib/documents";
 import { LedgerError } from "@/lib/ledger";
+import { checkPlanLimit } from "@/lib/billing/enforce";
+import { gateTransaction } from "@/lib/approvals/gate";
 
-export type DocState = { error?: string };
+export type DocState = { error?: string; info?: string };
 
 function parseDate(value: FormDataEntryValue | null, fallback = new Date()): Date {
   const s = String(value || "").trim();
@@ -158,19 +160,25 @@ export async function createReceiptAction(
   if (lines === null) return { error: "Could not read line items" };
   const fx = parseCurrency(formData);
 
+  const payload = {
+    date: parseDate(formData.get("date")),
+    bankAccountId,
+    partyId: String(formData.get("partyId") || "") || null,
+    reference: String(formData.get("reference") || "") || null,
+    description: String(formData.get("description") || "") || null,
+    paymentMethod: String(formData.get("paymentMethod") || "") || null,
+    tags: parseTags(formData),
+    currency: fx.currency,
+    exchangeRate: fx.exchangeRate,
+    lines,
+  };
+
   try {
-    await createReceipt(ctx.orgId, {
-      date: parseDate(formData.get("date")),
-      bankAccountId,
-      partyId: String(formData.get("partyId") || "") || null,
-      reference: String(formData.get("reference") || "") || null,
-      description: String(formData.get("description") || "") || null,
-      paymentMethod: String(formData.get("paymentMethod") || "") || null,
-      tags: parseTags(formData),
-      currency: fx.currency,
-      exchangeRate: fx.exchangeRate,
-      lines,
-    });
+    const gate = await gateTransaction(ctx, "payment_received", payload);
+    if (gate.gated) {
+      return { info: "Submitted for approval. It will post once reviewed." };
+    }
+    await createReceipt(ctx.orgId, payload);
   } catch (err) {
     return fail(err);
   }
@@ -263,21 +271,33 @@ export async function createPaymentAction(
   if (lines === null) return { error: "Could not read line items" };
   const itemLines = parseItemLines(formData, ctx.baseCurrency);
   const fx = parseCurrency(formData);
+  const partyId = String(formData.get("partyId") || "") || null;
+
+  const payload = {
+    date: parseDate(formData.get("date")),
+    bankAccountId,
+    partyId,
+    reference: String(formData.get("reference") || "") || null,
+    description: String(formData.get("description") || "") || null,
+    paymentMethod: String(formData.get("paymentMethod") || "") || null,
+    tags: parseTags(formData),
+    currency: fx.currency,
+    exchangeRate: fx.exchangeRate,
+    lines,
+    itemLines,
+  };
 
   try {
-    await createPayment(ctx.orgId, {
-      date: parseDate(formData.get("date")),
-      bankAccountId,
-      partyId: String(formData.get("partyId") || "") || null,
-      reference: String(formData.get("reference") || "") || null,
-      description: String(formData.get("description") || "") || null,
-      paymentMethod: String(formData.get("paymentMethod") || "") || null,
-      tags: parseTags(formData),
-      currency: fx.currency,
-      exchangeRate: fx.exchangeRate,
-      lines,
-      itemLines,
-    });
+    // Payment covers both "expense" and "supplier_payment" (§10/§11) —
+    // there's no separate model/flag for the distinction, so a payment tied
+    // to a party is classified as a supplier payment, and one with no party
+    // as a general expense (see the report for this call).
+    const type = partyId ? "supplier_payment" : "expense";
+    const gate = await gateTransaction(ctx, type, payload);
+    if (gate.gated) {
+      return { info: "Submitted for approval. It will post once reviewed." };
+    }
+    await createPayment(ctx.orgId, payload);
   } catch (err) {
     return fail(err);
   }
@@ -317,15 +337,24 @@ export async function createSalesInvoiceAction(
 
   const dueRaw = String(formData.get("dueDate") || "").trim();
 
+  const planCheck = await checkPlanLimit(ctx.orgId, "salesInvoice");
+  if (!planCheck.ok) return { error: planCheck.message };
+
+  const payload = {
+    partyId,
+    date: parseDate(formData.get("date")),
+    dueDate: dueRaw ? parseDate(formData.get("dueDate")) : null,
+    reference: String(formData.get("reference") || "") || null,
+    notes: String(formData.get("notes") || "") || null,
+    lines,
+  };
+
   try {
-    await createSalesInvoice(ctx.orgId, {
-      partyId,
-      date: parseDate(formData.get("date")),
-      dueDate: dueRaw ? parseDate(formData.get("dueDate")) : null,
-      reference: String(formData.get("reference") || "") || null,
-      notes: String(formData.get("notes") || "") || null,
-      lines,
-    });
+    const gate = await gateTransaction(ctx, "sales_invoice", payload);
+    if (gate.gated) {
+      return { info: "Submitted for approval. It will post once reviewed." };
+    }
+    await createSalesInvoice(ctx.orgId, payload);
   } catch (err) {
     return fail(err);
   }
@@ -363,15 +392,24 @@ export async function createPurchaseInvoiceAction(
 
   const dueRaw = String(formData.get("dueDate") || "").trim();
 
+  const planCheck = await checkPlanLimit(ctx.orgId, "purchaseInvoice");
+  if (!planCheck.ok) return { error: planCheck.message };
+
+  const payload = {
+    partyId,
+    date: parseDate(formData.get("date")),
+    dueDate: dueRaw ? parseDate(formData.get("dueDate")) : null,
+    supplierRef: String(formData.get("supplierRef") || "") || null,
+    notes: String(formData.get("notes") || "") || null,
+    lines,
+  };
+
   try {
-    await createPurchaseInvoice(ctx.orgId, {
-      partyId,
-      date: parseDate(formData.get("date")),
-      dueDate: dueRaw ? parseDate(formData.get("dueDate")) : null,
-      supplierRef: String(formData.get("supplierRef") || "") || null,
-      notes: String(formData.get("notes") || "") || null,
-      lines,
-    });
+    const gate = await gateTransaction(ctx, "purchase_invoice", payload);
+    if (gate.gated) {
+      return { info: "Submitted for approval. It will post once reviewed." };
+    }
+    await createPurchaseInvoice(ctx.orgId, payload);
   } catch (err) {
     return fail(err);
   }

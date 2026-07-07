@@ -16,7 +16,9 @@ export class DocumentError extends Error {}
 
 // A category line: a plain expense/income account and a net amount (base
 // currency minor units). Optional per-line sales tax rate (percent).
-type LineInput = {
+// Exported so lib/approvals/payloads.ts can type the exact staged-payload
+// shape for createReceipt/createPayment without re-declaring it.
+export type LineInput = {
   accountId: string;
   amount: bigint;
   memo?: string | null;
@@ -349,7 +351,9 @@ export async function createPayment(
 // Sales invoice — credit sale to a customer.
 // Dr Accounts receivable (total, party) ; Cr each income line.
 // ---------------------------------------------------------------------------
-type InvoiceLineInput = {
+// Exported so lib/approvals/payloads.ts can type the exact staged-payload
+// shape for createSalesInvoice/createPurchaseInvoice without re-declaring it.
+export type InvoiceLineInput = {
   description: string;
   quantity: string; // decimal string
   unitPrice: bigint; // minor units

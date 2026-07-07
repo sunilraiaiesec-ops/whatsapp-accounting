@@ -3,13 +3,16 @@ import { getTranslations } from "next-intl/server";
 
 import { requireContext } from "@/lib/auth/current";
 import { getResetStatus } from "@/lib/org-reset";
+import { isOwnerRole, hasPermission, ROLE_LABELS, isRole } from "@/lib/permissions";
 import { ResetBooksPanel } from "@/components/ResetBooksPanel";
+import { ApprovalWorkflowToggle } from "@/components/approvals/ApprovalWorkflowToggle";
 import { PageHeader } from "@/components/ui/PageHeader";
 
 export default async function SettingsPage() {
   const ctx = await requireContext();
   const t = await getTranslations("settings");
-  const isOwner = ctx.role === "OWNER";
+  const isOwner = isOwnerRole(ctx.role);
+  const canManageSettings = hasPermission(ctx, "manageSettings");
   const resetStatus = isOwner ? await getResetStatus(ctx.orgId) : { step: "none" as const };
 
   return (
@@ -25,7 +28,7 @@ export default async function SettingsPage() {
             <dt className="text-slate-500">{t("baseCurrency")}</dt>
             <dd className="text-slate-900">{ctx.baseCurrency}</dd>
             <dt className="text-slate-500">{t("role")}</dt>
-            <dd className="text-slate-900 capitalize">{ctx.role.toLowerCase()}</dd>
+            <dd className="text-slate-900">{isRole(ctx.role) ? ROLE_LABELS[ctx.role] : ctx.role}</dd>
           </dl>
         </section>
 
@@ -47,8 +50,17 @@ export default async function SettingsPage() {
                 {t("importData")}
               </Link>
             </li>
+            <li>
+              <Link href="/migration" className="font-medium text-[var(--brand)] hover:underline">
+                {t("migrationWizard")}
+              </Link>
+            </li>
           </ul>
         </section>
+
+        {canManageSettings ? (
+          <ApprovalWorkflowToggle enabled={ctx.approvalWorkflowEnabled} />
+        ) : null}
 
         {isOwner ? (
           <ResetBooksPanel orgName={ctx.orgName} status={resetStatus} />

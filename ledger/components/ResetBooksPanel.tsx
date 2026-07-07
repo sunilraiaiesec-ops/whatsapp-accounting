@@ -63,9 +63,10 @@ export function ResetBooksPanel({
   const [email, setEmail] = useState(
     status.step === "awaiting_code" ? status.email : "",
   );
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
   const [confirmName, setConfirmName] = useState("");
 
+  /* eslint-disable react-hooks/set-state-in-effect -- sync local wizard step from server action status */
   useEffect(() => {
     setStep(status.step);
     if (status.step === "cooldown") setDeleteAllowedAt(status.deleteAllowedAt);
@@ -95,6 +96,7 @@ export function ResetBooksPanel({
       setStep("ready");
     }
   }, [step, cooldownRemaining]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const message =
     executeState.success ??
