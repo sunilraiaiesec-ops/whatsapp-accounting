@@ -1,0 +1,176 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://bantoobooks.internal/tutorials/schema.json",
+  "title": "BantooBooks Tutorial",
+  "description": "Formal schema for a single BantooBooks tutorial content file. Each tutorial markdown file (NNN-slug.md) has YAML frontmatter that MUST validate against this schema. See tutorials/README.md for the human-readable explanation of every field and tutorials/TEMPLATE.md for a blank starting point.",
+  "type": "object",
+  "required": [
+    "tutorial_id",
+    "title",
+    "feature_area",
+    "audience",
+    "goal",
+    "prerequisites",
+    "demo_company",
+    "test_data",
+    "step_by_step_actions",
+    "screen_to_show",
+    "voiceover_script",
+    "on_screen_highlights",
+    "expected_result",
+    "short_youtube_title",
+    "youtube_description",
+    "help_center_article",
+    "guidde_recording_notes",
+    "synthesia_script"
+  ],
+  "properties": {
+    "tutorial_id": {
+      "type": "string",
+      "description": "Stable short id in kebab-case. MUST match the filename minus the leading 'NNN-' number prefix and the '.md' extension. Never change this once published — video tools and the help center will link to it.",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "examples": ["create-a-customer", "record-customer-receipt"]
+    },
+    "title": {
+      "type": "string",
+      "description": "Human-readable tutorial title, shown as the H1 / help-center article title.",
+      "minLength": 3,
+      "maxLength": 120
+    },
+    "feature_area": {
+      "type": "string",
+      "description": "The product area this tutorial belongs to. Keep this list small and consistent so tutorials can be grouped/filtered later.",
+      "enum": [
+        "Customers",
+        "Suppliers",
+        "Sales & Invoicing",
+        "Payments",
+        "Receipts",
+        "Inventory",
+        "Reports",
+        "Ask Bantoo",
+        "Settings",
+        "Migration",
+        "Approvals",
+        "Billing",
+        "Purchasing",
+        "Banking"
+      ]
+    },
+    "audience": {
+      "type": "string",
+      "description": "Who this tutorial is written for, in plain terms (e.g. 'New BantooBooks users', 'Shop owner / cashier', 'Bookkeeper'). Used to calibrate jargon level in the voiceover and help-center article.",
+      "minLength": 3,
+      "maxLength": 200
+    },
+    "goal": {
+      "type": "string",
+      "description": "One sentence describing exactly what the user accomplishes by the end of the tutorial. Should be usable as a video description opener.",
+      "minLength": 10,
+      "maxLength": 240
+    },
+    "prerequisites": {
+      "type": "array",
+      "description": "Things that must already be true / set up before this tutorial can be followed (e.g. an existing bank/cash account, an existing customer, an existing inventory item).",
+      "items": { "type": "string", "minLength": 3 },
+      "minItems": 1
+    },
+    "demo_company": {
+      "type": "string",
+      "description": "Which permanent demo organization to record this tutorial in. Use the canonical BantooBooks demo org unless a tutorial specifically needs a different seeded dataset.",
+      "const": "Central Distribution Cameroon SARL"
+    },
+    "test_data": {
+      "type": "object",
+      "description": "The exact, realistic values to type or select while recording — names, amounts, dates. Must be consistent with the demo org's actual seeded data style (Cameroonian XAF FMCG distributor, real consumer brand names used only as representative catalog items, French/English mixed place names). Keys are free-form (whatever fields this tutorial's form has); values are strings so they can be typed verbatim on screen.",
+      "additionalProperties": { "type": "string" },
+      "minProperties": 1
+    },
+    "step_by_step_actions": {
+      "type": "array",
+      "description": "Numbered, precise actions using REAL button/field labels exactly as they appear in the BantooBooks UI (not paraphrased). Each item is one discrete action a presenter/recorder performs.",
+      "items": {
+        "type": "object",
+        "required": ["step", "action"],
+        "properties": {
+          "step": { "type": "integer", "minimum": 1 },
+          "action": {
+            "type": "string",
+            "description": "What to click/type/select, quoting the exact UI label, e.g. 'Click the \"+ Add customer\" pill on the dashboard.'",
+            "minLength": 5
+          }
+        }
+      },
+      "minItems": 2
+    },
+    "screen_to_show": {
+      "type": "array",
+      "description": "For each step, which page/panel is on screen — written for a video editor who has never used the app.",
+      "items": {
+        "type": "object",
+        "required": ["step", "screen"],
+        "properties": {
+          "step": { "type": "integer", "minimum": 1 },
+          "screen": { "type": "string", "minLength": 3 }
+        }
+      },
+      "minItems": 1
+    },
+    "voiceover_script": {
+      "type": "array",
+      "description": "Simple, friendly, plain-language narration for African SME users, roughly mapped 1:1 to step_by_step_actions. Avoid accounting jargon; explain WHY a step matters where useful. This script assumes the viewer CAN see the screen (unlike synthesia_script).",
+      "items": {
+        "type": "object",
+        "required": ["step", "line"],
+        "properties": {
+          "step": { "type": "integer", "minimum": 1 },
+          "line": { "type": "string", "minLength": 3 }
+        }
+      },
+      "minItems": 1
+    },
+    "on_screen_highlights": {
+      "type": "array",
+      "description": "What to visually emphasize, circle, or zoom in on at each step, for a video editor adding call-outs in Guidde or a similar tool.",
+      "items": {
+        "type": "object",
+        "required": ["step", "highlight"],
+        "properties": {
+          "step": { "type": "integer", "minimum": 1 },
+          "highlight": { "type": "string", "minLength": 3 }
+        }
+      },
+      "minItems": 1
+    },
+    "expected_result": {
+      "type": "string",
+      "description": "What the user should see/verify at the end, in concrete, checkable terms (e.g. 'The customer count on the Customers page increases by 1 and the new name appears in the list.').",
+      "minLength": 10
+    },
+    "short_youtube_title": {
+      "type": "string",
+      "description": "Punchy YouTube title, under 70 characters.",
+      "maxLength": 70
+    },
+    "youtube_description": {
+      "type": "string",
+      "description": "2-4 sentences plus a short bullet list (as markdown '- ' lines within the string, or use youtube_description_bullets) written for discoverability (search terms an SME owner would type).",
+      "minLength": 20
+    },
+    "help_center_article": {
+      "type": "string",
+      "description": "A short, self-contained written how-to (a few paragraphs) that could stand alone as a help doc, independent of any video.",
+      "minLength": 40
+    },
+    "guidde_recording_notes": {
+      "type": "string",
+      "description": "Practical notes for whoever records this in Guidde: browser zoom level, things to blur/avoid showing (real customer data, API keys, other orgs in the switcher, etc.), pacing tips, click-precision notes.",
+      "minLength": 20
+    },
+    "synthesia_script": {
+      "type": "string",
+      "description": "A separate, tightly-timed narrator script for an AI avatar tool. Short sentences, natural pauses marked with '...' or line breaks, target ~60-90 seconds spoken (roughly 150-220 words). Must stand alone with NO visual-only references ('as you can see', 'click here', 'this button') since the Synthesia viewer may not be shown the matching screen recording.",
+      "minLength": 40
+    }
+  }
+}
