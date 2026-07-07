@@ -29,6 +29,7 @@ export async function getApiContext(
     baseCurrency: membership.org.baseCurrency,
     role: membership.role,
     emailVerified: membership.user.emailVerified != null,
+    approvalWorkflowEnabled: membership.org.approvalWorkflowEnabled,
   };
 }
 

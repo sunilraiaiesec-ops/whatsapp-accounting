@@ -12,6 +12,10 @@ export type CurrentContext = {
   baseCurrency: string;
   role: string;
   emailVerified: boolean;
+  // Org-level toggle for the approval workflow (see lib/permissions.ts §11 /
+  // lib/approvals/*). Piggybacks on the membership query below (the org row
+  // is already fetched) rather than a second query.
+  approvalWorkflowEnabled: boolean;
 };
 
 // Resolves the signed-in user and their active organization, verifying the
@@ -35,6 +39,7 @@ export async function getCurrentContext(): Promise<CurrentContext | null> {
     baseCurrency: membership.org.baseCurrency,
     role: membership.role,
     emailVerified: membership.user.emailVerified != null,
+    approvalWorkflowEnabled: membership.org.approvalWorkflowEnabled,
   };
 }
 

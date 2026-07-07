@@ -14,6 +14,7 @@ import {
   AccountError,
 } from "@/lib/auth/account";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
+import { readReferralCookieCode } from "@/lib/billing/partners";
 
 export type AuthState = { error?: string; done?: boolean };
 
@@ -50,7 +51,8 @@ export async function signupAction(
   }
 
   try {
-    const { org, user } = await createOrganizationWithOwner(parsed.data);
+    const referralCode = await readReferralCookieCode();
+    const { org, user } = await createOrganizationWithOwner({ ...parsed.data, referralCode });
     await sendUserVerification(user.id, user.email);
     await createSession({ userId: user.id, orgId: org.id });
   } catch (err) {
@@ -59,7 +61,12 @@ export async function signupAction(
     return { error: "Could not create account. Please try again." };
   }
 
-  redirect("/dashboard");
+  // New organizations are asked "how are you starting?" once, right after
+  // signup — brand-new businesses skip the migration wizard entirely, and
+  // existing businesses are routed into it (see app/actions/onboarding.ts).
+  // Orgs that predate this feature never see this screen: they're already
+  // signed in and past this code path.
+  redirect("/onboarding");
 }
 
 const loginSchema = z.object({
