@@ -128,6 +128,18 @@ export function ruleBasedExtract(text: string): ExtractedAction {
       currency,
       confidence,
       summary: null,
+      // QA Reliability Swarm (Track 2) field-persistence parity fix: mirrors
+      // the create_customer branch above field-for-field — see
+      // parseCommandTextFull's create_supplier branch in lib/command-parse.ts
+      // for the extractor calls this reads from.
+      email: parsed.email,
+      company_name: null,
+      tax_id: parsed.taxId,
+      payment_terms_days: parsed.paymentTermsDays,
+      credit_limit: parsed.creditLimit ? Number(parsed.creditLimit) : null,
+      default_discount: parsed.defaultDiscount ? Number(parsed.defaultDiscount) : null,
+      preferred_language: null,
+      preferred_payment_method: null,
     };
   }
 
@@ -587,6 +599,16 @@ function mergeCreateSupplier(
       ? action.unsupported_requests
       : source.unsupported_requests,
     confidence: Math.max(action.confidence, source.confidence),
+    // QA Reliability Swarm (Track 2) field-persistence parity fix — same
+    // "AI value wins, rule fills gaps" precedence as mergeCreateCustomer.
+    email: action.email?.trim() || source.email,
+    company_name: action.company_name?.trim() || source.company_name,
+    tax_id: action.tax_id?.trim() || source.tax_id,
+    payment_terms_days: action.payment_terms_days ?? source.payment_terms_days,
+    credit_limit: action.credit_limit ?? source.credit_limit,
+    default_discount: action.default_discount ?? source.default_discount,
+    preferred_language: action.preferred_language?.trim() || source.preferred_language,
+    preferred_payment_method: action.preferred_payment_method?.trim() || source.preferred_payment_method,
   };
 }
 

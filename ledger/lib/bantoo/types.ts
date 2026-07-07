@@ -97,6 +97,9 @@ export type BantooWarningCode =
   | "supplierMissingPhone"
   | "supplierMissingWhatsapp"
   | "supplierMissingEmail"
+  // QA Reliability Swarm (Track 4): create_supplier mirror of
+  // possibleDuplicateCustomer above — same semantics, worded for a supplier.
+  | "possibleDuplicateSupplier"
   // --- Sales Intelligence Sprint ------------------------------------------
   | "chooseCustomerForInvoice"
   | "chooseCustomerForCreditNote"
@@ -113,6 +116,10 @@ export type BantooDuplicateCandidate = {
   city: string | null;
   phone: string | null;
   whatsapp: string | null;
+  // QA Reliability Swarm (Track 1/4): shown alongside city/phone/whatsapp so
+  // the disambiguation prompt can also flag a country mismatch, for both the
+  // create_customer and (now) create_supplier duplicate-safety checks.
+  country: string | null;
 };
 
 // Multi-step Task Planning (see the module doc comment above BantooProposal's
@@ -139,6 +146,7 @@ export type BantooPlanStepCode =
   | "setCity"
   | "setPhone"
   | "setWhatsapp"
+  | "setCountry"
   | "setNote"
   // --- Launch Bug Fix Sprint: create_customer-only plan rows, added so the
   // confirmation checklist shows EVERY field Bantoo intends to save, not just
@@ -242,6 +250,13 @@ export type BantooDraft = {
   phone: string;
   whatsapp: string;
   email: string;
+  // QA Reliability Swarm (Track 1): create_customer/create_supplier's
+  // `country` field (see createCustomerSchema/createSupplierSchema in
+  // lib/ai/actions.ts) was accepted by the extraction schema and supported by
+  // the Party model (prisma/schema.prisma), but had nowhere to live between
+  // resolve.ts and execute() — silently dropped before ever reaching the
+  // database. This closes that gap.
+  country: string;
   // --- Launch Bug Fix Sprint: create_customer profile fields the Party
   // model already supports (see prisma/schema.prisma) but which were never
   // plumbed through the draft/execute layer — see lib/ai/actions.ts's
@@ -375,6 +390,7 @@ export function emptyDraft(): BantooDraft {
     phone: "",
     whatsapp: "",
     email: "",
+    country: "",
     companyName: "",
     taxId: "",
     paymentTermsDays: "",

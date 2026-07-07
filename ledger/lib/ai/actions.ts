@@ -382,6 +382,19 @@ export const createSupplierSchema = z.object({
   // Internal note to save on the new supplier's record — never a
   // payment/balance, purely a text note (mirrors create_customer's note).
   note: ntext,
+  // --- QA Reliability Swarm (Track 2) field-persistence parity fix: these
+  // mirror createCustomerSchema's own extended-profile fields exactly. Before
+  // this fix, create_supplier had no way to even RECEIVE these values from
+  // the AI/rule parser, regardless of what resolve.ts/execute() did with
+  // them downstream. ---
+  email: ntext,
+  company_name: ntext,
+  tax_id: ntext,
+  payment_terms_days: numberish,
+  credit_limit: numberish,
+  default_discount: numberish,
+  preferred_language: ntext,
+  preferred_payment_method: ntext,
   post_action: postCustomerAction,
   unsupported_requests: unsupportedRequests,
   currency,

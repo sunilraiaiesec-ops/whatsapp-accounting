@@ -334,6 +334,7 @@ describe("create_customer end-to-end: fuzzy-match false positive against an unre
       city: null,
       phone: null,
       whatsapp: null,
+      country: null,
     });
     expect(proposal.warnings.some((w) => w.code === "possibleDuplicateCustomer")).toBe(true);
 

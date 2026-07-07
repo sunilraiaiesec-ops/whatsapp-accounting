@@ -160,6 +160,12 @@ export type PartyDuplicateCandidate = {
   type: string;
   phone: string | null;
   whatsapp: string | null;
+  // QA Reliability Swarm (Track 3): needed by ensurePartyId's dual-role
+  // type-upgrade fix in app/actions/bantoo.ts, so it can tell which fields
+  // are already on file (and must never be silently overwritten) before
+  // merging in a second role's own contact details.
+  city: string | null;
+  country: string | null;
   score: number; // 0-100; 100 for a phone/WhatsApp exact hit
   matchedOn: "name" | "phone" | "whatsapp";
 };
@@ -181,7 +187,7 @@ export async function findPossiblePartyDuplicates(
 
   const candidates = await prisma.party.findMany({
     where: { orgId, ...(input.excludeId ? { id: { not: input.excludeId } } : {}) },
-    select: { id: true, name: true, type: true, phone: true, whatsapp: true },
+    select: { id: true, name: true, type: true, phone: true, whatsapp: true, city: true, country: true },
   });
 
   const byId = new Map<string, PartyDuplicateCandidate>();
@@ -196,6 +202,8 @@ export async function findPossiblePartyDuplicates(
         type: c.type,
         phone: c.phone,
         whatsapp: c.whatsapp,
+        city: c.city,
+        country: c.country,
         score: 100,
         matchedOn: "phone",
       });
@@ -209,6 +217,8 @@ export async function findPossiblePartyDuplicates(
           type: c.type,
           phone: c.phone,
           whatsapp: c.whatsapp,
+          city: c.city,
+          country: c.country,
           score: 100,
           matchedOn: "whatsapp",
         });
@@ -234,6 +244,8 @@ export async function findPossiblePartyDuplicates(
         type: c.type,
         phone: c.phone,
         whatsapp: c.whatsapp,
+        city: c.city,
+        country: c.country,
         score: r.score,
         matchedOn: "name",
       });

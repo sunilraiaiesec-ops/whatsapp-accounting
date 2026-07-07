@@ -76,6 +76,19 @@ vi.mock("@/lib/documents", async (importActual) => {
   return { ...actual, createPayment, createSalesInvoice, createCreditNote, createRefundReceipt };
 });
 
+// This suite tests executeBantooAction's business logic (balances, party
+// creation, duplicate handling, etc.), not locale/i18n behavior — pin the
+// resolved UI locale to English so its long-standing English message
+// assertions keep testing what they always tested. (Locale-switching itself
+// is covered by app/actions/qa-swarm-09-language-consistency.test.ts and
+// lib/bantoo/qa-swarm-09-language-consistency.test.ts.) Without this, calls
+// to resolveUiLocale() made outside a real Next.js request scope fall back
+// to routing.defaultLocale ("fr").
+vi.mock("@/lib/bantoo/locale", async (importActual) => {
+  const actual = await importActual<typeof import("@/lib/bantoo/locale")>();
+  return { ...actual, resolveUiLocale: vi.fn(async () => "en" as const) };
+});
+
 const { executeBantooAction, getBantooProductDefaults } = await import("@/app/actions/bantoo");
 
 function draft(overrides: Record<string, string> = {}) {
@@ -93,6 +106,7 @@ function draft(overrides: Record<string, string> = {}) {
     amount: "",
     partyName: "",
     city: "",
+    country: "",
     paymentMethod: "",
     description: "",
     date: "2026-01-05",
@@ -200,6 +214,7 @@ describe("ensurePartyId duplicate-prevention safety net (via executeBantooAction
       city: null,
       phone: null,
       whatsapp: null,
+      country: null,
     });
     expect(createPayment).toHaveBeenCalledWith(
       "org_A",
@@ -315,6 +330,7 @@ describe("executeBantooAction org trust boundary", () => {
       city: "Ngoundéré",
       phone: null,
       whatsapp: null,
+      country: null,
     });
   });
 
@@ -353,6 +369,7 @@ describe("executeBantooAction org trust boundary", () => {
       city: "Garoua",
       phone: "690123456",
       whatsapp: "690123456",
+      country: null,
     });
   });
 
@@ -469,6 +486,7 @@ describe("executeBantooAction — create_customer duplicate-choice resolution (G
       city: "Ngoundéré",
       phone: "+237699123456",
       whatsapp: "+237699123456",
+      country: null,
     });
     // Launch Bug Fix Sprint: every brand-new customer gets companyName
     // defaulted to its own name (see the "Company name field appears
@@ -622,6 +640,7 @@ describe("executeBantooAction — create_customer duplicate-choice resolution (G
       city: "Douala",
       phone: null,
       whatsapp: null,
+      country: null,
     });
   });
 });

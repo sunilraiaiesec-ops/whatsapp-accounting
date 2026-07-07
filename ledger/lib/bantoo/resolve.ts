@@ -199,12 +199,13 @@ function fieldConflicts(newValue: string, existingValue: string | null): boolean
 
 function customerConflictsWithExisting(
   existing: PartyContactInfo,
-  fields: { city: string; phone: string; whatsapp: string },
+  fields: { city: string; phone: string; whatsapp: string; country?: string },
 ): boolean {
   return (
     fieldConflicts(fields.city, existing.city) ||
     fieldConflicts(fields.phone, existing.phone) ||
-    fieldConflicts(fields.whatsapp, existing.whatsapp)
+    fieldConflicts(fields.whatsapp, existing.whatsapp) ||
+    fieldConflicts(fields.country ?? "", existing.country)
   );
 }
 
@@ -230,7 +231,11 @@ function customerConflictsWithExisting(
 // duplicateCandidate prompt so the user explicitly picks "use existing" or
 // "create new" (via the existing duplicateResolution/forceCreate mechanism)
 // instead of the system silently guessing.
-function isExactCustomerNameMatch(existingName: string, newName: string): boolean {
+//
+// QA Reliability Swarm (Track 4): despite the "customer" name, this is a
+// pure string comparison with no customer-specific behavior — reused as-is
+// for create_supplier's duplicate-safety check below.
+function isExactPartyNameMatch(existingName: string, newName: string): boolean {
   return normalizeText(existingName) === normalizeText(newName);
 }
 
@@ -268,10 +273,17 @@ function buildPartyPlan(
   if (action.phone?.trim()) steps.push({ code: "setPhone", status: "ready", params: { value: action.phone.trim() } });
   if (action.whatsapp?.trim())
     steps.push({ code: "setWhatsapp", status: "ready", params: { value: action.whatsapp.trim() } });
-  // create_customer-only fields (see createCustomerSchema in lib/ai/actions.ts) —
-  // narrowed via the discriminant so edit_customer/create_supplier, which
-  // don't carry these fields at all, are never accessed here.
-  if (action.action === "create_customer") {
+  // Extended profile fields (see createCustomerSchema/createSupplierSchema in
+  // lib/ai/actions.ts) — narrowed via the discriminant so edit_customer,
+  // which doesn't carry these fields at all, is never accessed here.
+  // QA Reliability Swarm (Track 1/2) fix: `country` (and the rest of this
+  // block) used to be gated to create_customer only, even though
+  // createSupplierSchema now carries the exact same extended fields (Fix A
+  // parity) — a create_supplier request with e.g. a country or tax ID
+  // silently showed no plan step for it at all.
+  if (action.action === "create_customer" || action.action === "create_supplier") {
+    if (action.country?.trim())
+      steps.push({ code: "setCountry", status: "ready", params: { value: action.country.trim() } });
     if (action.email?.trim()) steps.push({ code: "setEmail", status: "ready", params: { value: action.email.trim() } });
     if (action.company_name?.trim())
       steps.push({ code: "setCompanyName", status: "ready", params: { value: action.company_name.trim() } });
@@ -749,6 +761,12 @@ export async function resolveExtraction(
       draft.city = action.city ?? "";
       draft.phone = action.phone ?? "";
       draft.whatsapp = action.whatsapp ?? "";
+      // QA Reliability Swarm (Track 1) fix: `country` used to be extracted
+      // (createCustomerSchema/command-parse both already captured it) but
+      // silently dropped here — BantooDraft had no field to hold it, so
+      // even a perfectly-extracted country never reached the confirm screen
+      // or execute(). See lib/bantoo/types.ts's BantooDraft/emptyDraft.
+      draft.country = action.country ?? "";
       draft.note = action.note ?? "";
       draft.postAction = action.post_action ?? "";
       // Launch Bug Fix Sprint: these Party profile fields were previously
@@ -775,13 +793,13 @@ export async function resolveExtraction(
         // Safety fix: a name match is auto-selected here (MATCH_HIGH), but
         // never silently reused if the new request conflicts with what's
         // already on file, OR if the match itself isn't a genuinely exact
-        // name (see isExactCustomerNameMatch above for the "golu" vs "Golu
+        // name (see isExactPartyNameMatch above for the "golu" vs "Golu
         // Transport" substring-match regression this closes) — either way,
         // force the user to explicitly choose instead.
         const existing = await getPartyContact(ctx.orgId, party.id);
         if (
           existing &&
-          (!isExactCustomerNameMatch(existing.name, draft.partyName) ||
+          (!isExactPartyNameMatch(existing.name, draft.partyName) ||
             customerConflictsWithExisting(existing, draft))
         ) {
           proposal.partyId = null;
@@ -792,6 +810,7 @@ export async function resolveExtraction(
             city: existing.city,
             phone: existing.phone,
             whatsapp: existing.whatsapp,
+            country: existing.country,
           };
           warn("possibleDuplicateCustomer", { name: existing.name });
         } else {
@@ -964,27 +983,62 @@ export async function resolveExtraction(
     // --- Supplier & Purchasing Intelligence Sprint ------------------------
 
     case "create_supplier": {
-      // Mirrors create_customer's case exactly (field-for-field), minus the
-      // possible-duplicate safety fix — that check was added to
-      // create_customer in a dedicated later sprint and hasn't been ported
-      // to create_supplier yet; see this file's module doc comment / the
-      // parent task's residual-risk notes for tracking. A HIGH-confidence
-      // name match still auto-selects the existing supplier (never silently
-      // creates a near-duplicate) — only the extra conflicting-details
-      // disambiguation prompt is not yet offered here.
+      // QA Reliability Swarm (Track 2/4): now a full field-for-field mirror
+      // of create_customer's case above, including the possible-duplicate
+      // safety fix (see isExactPartyNameMatch/customerConflictsWithExisting
+      // above — deliberately reused as-is, since neither does anything
+      // customer-specific) and the extended profile fields createSupplierSchema
+      // now carries at parity with createCustomerSchema (lib/ai/actions.ts).
       draft.partyName = action.supplier_name ?? "";
       draft.city = action.city ?? "";
       draft.phone = action.phone ?? "";
       draft.whatsapp = action.whatsapp ?? "";
+      draft.country = action.country ?? "";
       draft.note = action.note ?? "";
       draft.postAction = action.post_action ?? "";
+      draft.email = action.email ?? "";
+      draft.companyName = action.company_name ?? "";
+      draft.taxId = action.tax_id ?? "";
+      draft.paymentTermsDays = numToStr(action.payment_terms_days);
+      draft.creditLimit = numToStr(action.credit_limit);
+      draft.defaultDiscount = numToStr(action.default_discount);
+      draft.preferredLanguage = action.preferred_language ?? "";
+      draft.preferredPaymentMethod = action.preferred_payment_method ?? "";
       proposal.partyType = "supplier";
       proposal.needsParty = true;
 
       const party = await resolveParty(draft.partyName, "supplier");
       proposal.partyOptions = party.options;
-      proposal.partyId = party.id;
-      proposal.createParty = party.id ? false : party.create;
+
+      if (party.id) {
+        // See create_customer's identical block above for the full
+        // rationale — same "exact name AND no conflicting field" bar for
+        // silent auto-association, now applied to suppliers too.
+        const existing = await getPartyContact(ctx.orgId, party.id);
+        if (
+          existing &&
+          (!isExactPartyNameMatch(existing.name, draft.partyName) ||
+            customerConflictsWithExisting(existing, draft))
+        ) {
+          proposal.partyId = null;
+          proposal.createParty = false;
+          proposal.duplicateCandidate = {
+            id: existing.id,
+            name: existing.name,
+            city: existing.city,
+            phone: existing.phone,
+            whatsapp: existing.whatsapp,
+            country: existing.country,
+          };
+          warn("possibleDuplicateSupplier", { name: existing.name });
+        } else {
+          proposal.partyId = party.id;
+          proposal.createParty = false;
+        }
+      } else {
+        proposal.partyId = null;
+        proposal.createParty = party.create;
+      }
       if (!draft.partyName) warn("enterSupplierName");
 
       proposal.plan = buildSupplierPlan(action, draft.partyName);

@@ -473,6 +473,7 @@ describe("resolveExtraction — Customer Intelligence Sprint", () => {
         city: "Douala",
         phone: null,
         whatsapp: null,
+        country: null,
       });
       expect(
         proposal.warnings.some((w) => w.code === "possibleDuplicateCustomer" && w.params?.name === "Elhaji Adamou"),
@@ -598,6 +599,7 @@ describe("resolveExtraction — Customer Intelligence Sprint", () => {
         city: existing.city,
         phone: existing.phone,
         whatsapp: existing.whatsapp,
+        country: existing.country,
       });
       expect(proposal.partyId).toBeNull();
     });
