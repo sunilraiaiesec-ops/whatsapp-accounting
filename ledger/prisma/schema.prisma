@@ -19,32 +19,63 @@ datasource db {
 // Tenancy & access control
 // ---------------------------------------------------------------------------
 
-model Organization {
-  id           String   @id @default(cuid())
-  name         String
-  baseCurrency String   @default("XAF")
-  createdAt    DateTime @default(now())
+// How a new organization told the "How are you starting?" onboarding prompt
+// it should be treated: a brand-new business has no prior books and skips the
+// migration wizard entirely, while an existing business is routed into it.
+// Nullable — organizations created before this feature existed (and any org
+// that skips the prompt for some other reason) simply have no value here and
+// are never retroactively interrupted with the prompt.
+enum OnboardingChoice {
+  NEW_BUSINESS
+  EXISTING_BUSINESS
+}
 
-  memberships   Membership[]
-  accounts      Account[]
-  parties       Party[]
-  entries       JournalEntry[]
-  lines         JournalLine[]
-  receipts         Receipt[]
-  payments         Payment[]
-  salesInvoices    SalesInvoice[]
-  purchaseInvoices PurchaseInvoice[]
-  transfers        InterAccountTransfer[]
-  creditNotes      CreditNote[]
-  debitNotes       DebitNote[]
-  inventoryItems   InventoryItem[]
-  goodsReceipts    GoodsReceipt[]
-  inventoryWriteOffs InventoryWriteOff[]
+model Organization {
+  id               String            @id @default(cuid())
+  name             String
+  baseCurrency     String            @default("XAF")
+  onboardingChoice OnboardingChoice?
+  // Business+ feature gate (see lib/permissions.ts §11 and the report's plan-
+  // tier note). Independent org-level boolean for now — a placeholder for
+  // when lib/billing/plans.ts feature flags land; this is the flag they
+  // should eventually wrap (org can only flip it on if their plan allows it).
+  approvalWorkflowEnabled Boolean     @default(false)
+  createdAt        DateTime          @default(now())
+
+  memberships          Membership[]
+  accounts             Account[]
+  parties              Party[]
+  entries              JournalEntry[]
+  lines                JournalLine[]
+  receipts             Receipt[]
+  payments             Payment[]
+  salesInvoices        SalesInvoice[]
+  purchaseInvoices     PurchaseInvoice[]
+  transfers            InterAccountTransfer[]
+  creditNotes          CreditNote[]
+  debitNotes           DebitNote[]
+  inventoryItems       InventoryItem[]
+  goodsReceipts        GoodsReceipt[]
+  inventoryWriteOffs   InventoryWriteOff[]
   inventoryAdjustments InventoryAdjustment[]
-  salesReceipts    SalesReceipt[]
-  refundReceipts   RefundReceipt[]
-  resetRequests      OrgResetRequest[]
-  documentSequences  DocumentSequence[]
+  salesReceipts        SalesReceipt[]
+  refundReceipts       RefundReceipt[]
+  resetRequests        OrgResetRequest[]
+  documentSequences    DocumentSequence[]
+  migrationWizard      MigrationWizard?
+
+  // --- Commercial / billing (see lib/billing/*) -----------------------------
+  subscription   Subscription?
+  aiCreditUsage  AiCreditUsage[]
+  documents      Document[]
+  // A given org can be referred by AT MOST one partner (first-attribution,
+  // captured once at signup — see lib/billing/partners.ts).
+  referral       Referral?
+  paymentRecords PaymentRecord[]
+  commissions    Commission[]
+
+  // --- Roles, permissions & approval workflow (see lib/permissions.ts, lib/approvals/*) ---
+  pendingTransactions PendingTransaction[]
 
   @@map("organizations")
 }
@@ -58,9 +89,19 @@ model User {
   emailVerified DateTime?
   createdAt     DateTime  @default(now())
 
-  memberships Membership[]
-  resetRequests OrgResetRequest[]
-  authTokens  AuthToken[]
+  memberships          Membership[]
+  resetRequests        OrgResetRequest[]
+  authTokens           AuthToken[]
+  migrationWizardsDone MigrationWizard[] @relation("MigrationWizardCompletedBy")
+  documentsUploaded    Document[]        @relation("DocumentUploadedBy")
+  // A user MAY also be a referral partner (see Partner below). Optional and
+  // separate from Membership/Role — being a partner has nothing to do with
+  // any organization's own books.
+  partner              Partner?
+
+  // --- Roles, permissions & approval workflow ---
+  pendingTransactionsSubmitted PendingTransaction[] @relation("PendingTransactionSubmittedBy")
+  pendingTransactionsReviewed  PendingTransaction[] @relation("PendingTransactionReviewedBy")
 
   @@map("users")
 }
@@ -93,10 +134,21 @@ model RateLimit {
   @@map("rate_limits")
 }
 
+// 8-tier role model (see lib/permissions.ts for the full capability matrix).
+// OWNER and ADMIN are unchanged from the original 3-role system so every
+// existing role-check call site (isAdminRole, Owner-only reset, etc.) keeps
+// working exactly as before. The old STAFF value is migrated to ACCOUNTANT
+// (see the accompanying migration.sql) — see lib/permissions.ts's module
+// comment for why ACCOUNTANT was chosen as STAFF's replacement.
 enum Role {
   OWNER
   ADMIN
-  STAFF
+  ACCOUNTANT
+  MANAGER
+  CASHIER
+  WAREHOUSE_STAFF
+  SALESPERSON
+  VIEWER
 }
 
 model Membership {
@@ -140,26 +192,28 @@ model Account {
   currency  String?
   createdAt DateTime    @default(now())
 
-  org               Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  parent            Account?          @relation("AccountChildren", fields: [parentId], references: [id])
-  children          Account[]         @relation("AccountChildren")
-  lines                JournalLine[]
-  receiptDeposits      Receipt[]
-  receiptLines         ReceiptLine[]
-  paymentSources       Payment[]
-  paymentLines         PaymentLine[]
-  salesInvoiceLines    SalesInvoiceLine[]
-  purchaseInvoiceLines PurchaseInvoiceLine[]
-  transfersOut         InterAccountTransfer[] @relation("TransferFrom")
-  transfersIn          InterAccountTransfer[] @relation("TransferTo")
-  creditNoteLines      CreditNoteLine[]
-  debitNoteLines       DebitNoteLine[]
-  inventoryWriteOffs   InventoryWriteOff[]
-  inventoryAdjustments InventoryAdjustment[]
-  salesReceiptsBank    SalesReceipt[]        @relation("SalesReceiptBank")
-  salesReceiptLines    SalesReceiptLine[]
-  refundReceiptsBank   RefundReceipt[]       @relation("RefundReceiptBank")
-  refundReceiptLines   RefundReceiptLine[]
+  org                      Organization              @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  parent                   Account?                  @relation("AccountChildren", fields: [parentId], references: [id])
+  children                 Account[]                 @relation("AccountChildren")
+  lines                    JournalLine[]
+  receiptDeposits          Receipt[]
+  receiptLines             ReceiptLine[]
+  paymentSources           Payment[]
+  paymentLines             PaymentLine[]
+  salesInvoiceLines        SalesInvoiceLine[]
+  purchaseInvoiceLines     PurchaseInvoiceLine[]
+  transfersOut             InterAccountTransfer[]    @relation("TransferFrom")
+  transfersIn              InterAccountTransfer[]    @relation("TransferTo")
+  creditNoteLines          CreditNoteLine[]
+  debitNoteLines           DebitNoteLine[]
+  inventoryWriteOffs       InventoryWriteOff[]
+  inventoryAdjustments     InventoryAdjustment[]
+  salesReceiptsBank        SalesReceipt[]            @relation("SalesReceiptBank")
+  salesReceiptLines        SalesReceiptLine[]
+  refundReceiptsBank       RefundReceipt[]           @relation("RefundReceiptBank")
+  refundReceiptLines       RefundReceiptLine[]
+  migrationOpeningBalances MigrationOpeningBalance[]
+  migrationBankBalances    MigrationBankBalance[]
 
   @@unique([orgId, code])
   @@index([orgId, type])
@@ -176,9 +230,9 @@ model Party {
   createdAt DateTime @default(now())
 
   // --- Quick-add extras (alongside phone; kept nullable/backward compatible) ---
-  whatsapp  String?
-  country   String?
-  city      String?
+  whatsapp String?
+  country  String?
+  city     String?
 
   // --- Extended "Profile" fields (all nullable — set later, never required) ---
   email                  String?
@@ -197,27 +251,33 @@ model Party {
   // Payment terms, in days (e.g. 30 = "net 30"). Nullable — most contacts
   // have no explicit terms until set on the Profile tab or accepted from an
   // AI-suggested enrichment.
-  paymentTermsDays        Int?
+  paymentTermsDays       Int?
   // Credit limit in the party's/org's minor currency units (same
   // BigInt-minor-units convention as every other money column — see lib/money.ts).
-  creditLimit             BigInt?
+  creditLimit            BigInt?
   // Default discount, as a percentage (e.g. 5 = 5%).
-  defaultDiscount         Decimal? @db.Decimal(7, 4)
-  preferredPaymentMethod  String?
+  defaultDiscount        Decimal? @db.Decimal(7, 4)
+  preferredPaymentMethod String?
   // Freeform notes shown on the contact's "Notes" tab.
-  notes                   String?
+  notes                  String?
 
-  org              Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  lines            JournalLine[]
-  receipts         Receipt[]
-  payments         Payment[]
-  salesInvoices    SalesInvoice[]
-  purchaseInvoices PurchaseInvoice[]
-  creditNotes      CreditNote[]
-  debitNotes       DebitNote[]
-  goodsReceipts    GoodsReceipt[]
-  salesReceipts    SalesReceipt[]
-  refundReceipts   RefundReceipt[]
+  org                       Organization               @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  lines                     JournalLine[]
+  receipts                  Receipt[]
+  payments                  Payment[]
+  salesInvoices             SalesInvoice[]
+  purchaseInvoices          PurchaseInvoice[]
+  creditNotes               CreditNote[]
+  debitNotes                DebitNote[]
+  goodsReceipts             GoodsReceipt[]
+  salesReceipts             SalesReceipt[]
+  refundReceipts            RefundReceipt[]
+  // Inventory items that explicitly name this party as their preferred/default
+  // supplier (see InventoryItem.preferredSupplierId) — used by the low-stock
+  // reorder/quote-request flow before falling back to purchase-history signals.
+  preferredForItems         InventoryItem[]            @relation("ItemPreferredSupplier")
+  migrationCustomerBalances MigrationCustomerBalance[]
+  migrationSupplierBalances MigrationSupplierBalance[]
 
   @@index([orgId])
   @@map("parties")
@@ -371,18 +431,18 @@ model PaymentLine {
 // Credit sale to a customer.
 // Posts: Dr Accounts receivable (total, with party); Cr each income line.
 model SalesInvoice {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   orgId          String
   number         String
   partyId        String
-  date           DateTime @db.Date
+  date           DateTime  @db.Date
   dueDate        DateTime? @db.Date
   reference      String?
   notes          String?
-  total          BigInt   @default(0)
-  status         String   @default("unpaid")
-  journalEntryId String   @unique
-  createdAt      DateTime @default(now())
+  total          BigInt    @default(0)
+  status         String    @default("unpaid")
+  journalEntryId String    @unique
+  createdAt      DateTime  @default(now())
 
   org   Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
   party Party              @relation(fields: [partyId], references: [id])
@@ -572,31 +632,38 @@ model DebitNoteLine {
 // account (1200). Average unit cost is derived as valueOnHand / qtyOnHand.
 // ---------------------------------------------------------------------------
 model InventoryItem {
-  id             String   @id @default(cuid())
-  orgId          String
-  code           String
-  name           String
-  salePrice      BigInt   @default(0)
-  qtyOnHand      Decimal  @default(0) @db.Decimal(18, 3)
-  valueOnHand    BigInt   @default(0)
-  barcode        String?
-  unit           String?
-  reorderLevel   Decimal? @db.Decimal(18, 3)
-  defaultTaxRate Decimal? @db.Decimal(7, 4)
-  createdAt      DateTime @default(now())
+  id                  String   @id @default(cuid())
+  orgId               String
+  code                String
+  name                String
+  salePrice           BigInt   @default(0)
+  qtyOnHand           Decimal  @default(0) @db.Decimal(18, 3)
+  valueOnHand         BigInt   @default(0)
+  barcode             String?
+  unit                String?
+  reorderLevel        Decimal? @db.Decimal(18, 3)
+  defaultTaxRate      Decimal? @db.Decimal(7, 4)
+  // Explicit "always buy this from" supplier for the low-stock reorder/quote
+  // flow. Nullable and optional — when unset, the suggestion falls back to
+  // purchase-history signals (most recent, then most frequent supplier).
+  preferredSupplierId String?
+  createdAt           DateTime @default(now())
 
-  org              Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  receiptLines     GoodsReceiptLine[]
-  writeOffLines    InventoryWriteOffLine[]
-  adjustmentLines  InventoryAdjustmentLine[]
-  salesInvoiceLines SalesInvoiceLine[]
-  salesReceiptLines SalesReceiptLine[]
-  creditNoteLines   CreditNoteLine[]
-  refundReceiptLines RefundReceiptLine[]
-  paymentLines     PaymentLine[]
+  org                        Organization                @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  preferredSupplier          Party?                      @relation("ItemPreferredSupplier", fields: [preferredSupplierId], references: [id])
+  receiptLines               GoodsReceiptLine[]
+  writeOffLines              InventoryWriteOffLine[]
+  adjustmentLines            InventoryAdjustmentLine[]
+  salesInvoiceLines          SalesInvoiceLine[]
+  salesReceiptLines          SalesReceiptLine[]
+  creditNoteLines            CreditNoteLine[]
+  refundReceiptLines         RefundReceiptLine[]
+  paymentLines               PaymentLine[]
+  migrationInventoryBalances MigrationInventoryBalance[]
 
   @@unique([orgId, code])
   @@index([orgId])
+  @@index([preferredSupplierId])
   @@map("inventory_items")
 }
 
@@ -641,19 +708,19 @@ model GoodsReceiptLine {
 // Removing stock (damaged / lost / expired) at average cost.
 // Posts: Dr write-off expense (total) ; Cr Inventory on hand (total).
 model InventoryWriteOff {
-  id              String   @id @default(cuid())
-  orgId           String
-  number          String
-  date            DateTime @db.Date
+  id               String   @id @default(cuid())
+  orgId            String
+  number           String
+  date             DateTime @db.Date
   expenseAccountId String
-  notes           String?
-  total           BigInt   @default(0)
-  journalEntryId  String   @unique
-  createdAt       DateTime @default(now())
+  notes            String?
+  total            BigInt   @default(0)
+  journalEntryId   String   @unique
+  createdAt        DateTime @default(now())
 
-  org           Organization            @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  expenseAccount Account                @relation(fields: [expenseAccountId], references: [id])
-  lines         InventoryWriteOffLine[]
+  org            Organization            @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  expenseAccount Account                 @relation(fields: [expenseAccountId], references: [id])
+  lines          InventoryWriteOffLine[]
 
   @@unique([orgId, number])
   @@index([orgId, date])
@@ -838,4 +905,479 @@ model OrgResetRequest {
 
   @@index([orgId, completedAt, cancelledAt])
   @@map("org_reset_requests")
+}
+
+// ---------------------------------------------------------------------------
+// Migration & Opening Balance Wizard.
+//
+// Everything below is deliberately kept OUT of the ledger's source-of-truth
+// tables (JournalEntry/JournalLine/Account balances, Party subledgers,
+// InventoryItem quantities). Nothing staged here affects a single report or
+// balance until the Finish step (lib/migration/finish.ts) posts it for real,
+// inside one Prisma transaction, through the SAME posting primitives
+// (postEntryWithin, receiveGoods-style helpers) the rest of the app uses.
+//
+// Normalized staging tables (one row per account/party/item) were chosen
+// over a single JSON blob so that:
+//   - live validation (Step 5) and the health score (Step 5C) can aggregate
+//     with plain SQL/Prisma queries instead of parsing JSON in app code;
+//   - "resume exactly where left off" is a plain findMany per step, and
+//     autosave is a per-row upsert (no read-modify-write of one big document
+//     that risks clobbering concurrent edits to a different field);
+//   - each row can carry its own `updatedAt` and be individually validated.
+// ---------------------------------------------------------------------------
+
+enum MigrationWizardStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+}
+
+// One per organization. Tracks step position and status; owns every staged
+// row below via `wizardId`. Everything is reachable from — and therefore
+// org-scoped through — this row's `orgId`.
+model MigrationWizard {
+  id            String                @id @default(cuid())
+  orgId         String                @unique
+  status        MigrationWizardStatus @default(NOT_STARTED)
+  currentStep   Int                   @default(1)
+  openingDate   DateTime?             @db.Date
+  completedAt   DateTime?
+  completedById String?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  completedBy User?        @relation("MigrationWizardCompletedBy", fields: [completedById], references: [id])
+
+  openingBalances      MigrationOpeningBalance[]
+  customerBalances     MigrationCustomerBalance[]
+  supplierBalances     MigrationSupplierBalance[]
+  inventoryBalances    MigrationInventoryBalance[]
+  bankBalances         MigrationBankBalance[]
+  acknowledgedWarnings MigrationAcknowledgedWarning[]
+  importRuns           MigrationImportRun[]
+
+  @@map("migration_wizards")
+}
+
+// Step 3 — a staged balance for a single "plain" balance-sheet account
+// (Fixed assets, Investments, Deposits, Loans, Credit cards, Payroll
+// liabilities, Tax payable, Owner capital, Retained earnings, Opening
+// equity...). Also used to stage AI-suggested balancing adjustments (Step
+// 5A) on Retained earnings / Opening equity before they are ever posted.
+// `amount` is signed on the account's own normal side (see
+// lib/accounts.ts#signedBalance) — positive is a normal balance.
+model MigrationOpeningBalance {
+  id        String   @id @default(cuid())
+  wizardId  String
+  accountId String
+  amount    BigInt   @default(0)
+  updatedAt DateTime @updatedAt
+
+  wizard  MigrationWizard @relation(fields: [wizardId], references: [id], onDelete: Cascade)
+  account Account         @relation(fields: [accountId], references: [id])
+
+  @@unique([wizardId, accountId])
+  @@map("migration_opening_balances")
+}
+
+// Step 4 (AR) — staged opening receivable per customer. The Accounts
+// Receivable control-account total shown in Step 3 is DERIVED as the sum of
+// these rows (see lib/migration/validation.ts), so the two can never
+// silently diverge.
+model MigrationCustomerBalance {
+  id        String   @id @default(cuid())
+  wizardId  String
+  partyId   String
+  amount    BigInt   @default(0)
+  updatedAt DateTime @updatedAt
+
+  wizard MigrationWizard @relation(fields: [wizardId], references: [id], onDelete: Cascade)
+  party  Party           @relation(fields: [partyId], references: [id])
+
+  @@unique([wizardId, partyId])
+  @@map("migration_customer_balances")
+}
+
+// Step 4 (AP) — staged opening payable per supplier. Same derive-don't-
+// duplicate relationship with Step 3's Accounts Payable total as AR above.
+model MigrationSupplierBalance {
+  id        String   @id @default(cuid())
+  wizardId  String
+  partyId   String
+  amount    BigInt   @default(0)
+  updatedAt DateTime @updatedAt
+
+  wizard MigrationWizard @relation(fields: [wizardId], references: [id], onDelete: Cascade)
+  party  Party           @relation(fields: [partyId], references: [id])
+
+  @@unique([wizardId, partyId])
+  @@map("migration_supplier_balances")
+}
+
+// Step 4 (Inventory) — staged opening quantity/cost/value per item.
+// `warehouse` is free text: this schema currently has no Location/warehouse
+// model (checked against migration/out/locations.json, which is external
+// legacy-system export data, not an app model), so multi-location inventory
+// is out of scope for v1 — see report limitations.
+model MigrationInventoryBalance {
+  id         String   @id @default(cuid())
+  wizardId   String
+  itemId     String
+  quantity   Decimal  @default(0) @db.Decimal(18, 3)
+  unit       String?
+  unitCost   BigInt   @default(0)
+  totalValue BigInt   @default(0)
+  warehouse  String?
+  updatedAt  DateTime @updatedAt
+
+  wizard MigrationWizard @relation(fields: [wizardId], references: [id], onDelete: Cascade)
+  item   InventoryItem   @relation(fields: [itemId], references: [id])
+
+  @@unique([wizardId, itemId])
+  @@map("migration_inventory_balances")
+}
+
+// Step 4 (Bank) — staged opening balance per bank/cash account. Also backs
+// Step 3's "Cash & Bank accounts" asset line (same rows, same numbers — see
+// lib/migration/categories.ts) so multiple bank accounts are supported
+// everywhere the wizard shows cash/bank balances.
+model MigrationBankBalance {
+  id        String   @id @default(cuid())
+  wizardId  String
+  accountId String
+  amount    BigInt   @default(0)
+  updatedAt DateTime @updatedAt
+
+  wizard  MigrationWizard @relation(fields: [wizardId], references: [id], onDelete: Cascade)
+  account Account         @relation(fields: [accountId], references: [id])
+
+  @@unique([wizardId, accountId])
+  @@map("migration_bank_balances")
+}
+
+// Step 5B — a dismissed/acknowledged consistency warning, keyed by a stable
+// deterministic `code` (e.g. "dup_customer:<idA>:<idB>",
+// "bank_no_currency:<accountId>"). Once acknowledged for a wizard it is
+// filtered out of future warning lists until the underlying condition
+// changes enough to produce a different code.
+model MigrationAcknowledgedWarning {
+  id        String   @id @default(cuid())
+  wizardId  String
+  code      String
+  createdAt DateTime @default(now())
+
+  wizard MigrationWizard @relation(fields: [wizardId], references: [id], onDelete: Cascade)
+
+  @@unique([wizardId, code])
+  @@map("migration_acknowledged_warnings")
+}
+
+// Step 2 — an audit record of one CSV (or future importer) run against one
+// entity kind. `sourceKind` is the MigrationImportSource registry key
+// ("csv" today); `entityKind` is customers|suppliers|products|services|
+// inventory|chart_of_accounts.
+model MigrationImportRun {
+  id         String   @id @default(cuid())
+  wizardId   String
+  sourceKind String
+  entityKind String
+  fileName   String?
+  imported   Int      @default(0)
+  skipped    Int      @default(0)
+  errors     Json?
+  createdAt  DateTime @default(now())
+
+  wizard MigrationWizard @relation(fields: [wizardId], references: [id], onDelete: Cascade)
+
+  @@map("migration_import_runs")
+}
+
+// ---------------------------------------------------------------------------
+// Commercial / billing foundation.
+//
+// Every limit number lives in lib/billing/plans.ts, NOT here and NOT
+// hardcoded anywhere else — this schema only stores the org's current plan
+// selection/status and usage counters that plan config is checked against.
+// See lib/billing/enforce.ts for the single enforcement entrypoint.
+// ---------------------------------------------------------------------------
+
+enum SubscriptionPlan {
+  FREE
+  BUSINESS
+  ENTERPRISE
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  FREE
+}
+
+// One row per organization. `plan`/`status` are the ADMIN-SET (or
+// self-service, once real payment exists) values; whether they are still
+// *effectively* honored (e.g. a TRIALING row whose trialEndsAt has passed,
+// with no active paid subscription) is computed at read time by
+// lib/billing/subscription.ts#getEffectiveSubscription — never destructively
+// rewritten except to lazily flip an expired trial to FREE/FREE, which is
+// itself non-destructive (no business data is touched).
+model Subscription {
+  id                     String             @id @default(cuid())
+  orgId                  String             @unique
+  plan                   SubscriptionPlan   @default(BUSINESS)
+  status                 SubscriptionStatus @default(TRIALING)
+  trialStartAt           DateTime?
+  trialEndsAt            DateTime?
+  currentPeriodStart     DateTime?
+  currentPeriodEnd       DateTime?
+  // Nullable — populated once a real payment provider (e.g. Stripe) is wired
+  // up. The "manual" provider (lib/billing/provider.ts) never sets these.
+  provider               String?
+  providerCustomerId     String?
+  providerSubscriptionId String?
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  org            Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  paymentRecords PaymentRecord[]
+
+  @@map("subscriptions")
+}
+
+// Append-style per-org-per-month AI credit counter. One row per
+// (orgId, yearMonth); incremented via upsert inside consumeAiCredit() so
+// concurrent requests never lose a count. `yearMonth` is "YYYY-MM" in UTC.
+model AiCreditUsage {
+  id          String   @id @default(cuid())
+  orgId       String
+  yearMonth   String
+  creditsUsed Int      @default(0)
+  updatedAt   DateTime @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, yearMonth])
+  @@map("ai_credit_usage")
+}
+
+// Generic uploaded-file record (receipts, invoices scanned/attached, etc.).
+// `optimizedSizeBytes` is what counts against the org's storage plan limit
+// (see lib/documents/storage.ts) — the running total is computed as
+// SUM(optimizedSizeBytes) rather than a maintained counter column, so it can
+// never drift from the rows that actually exist (e.g. after a future
+// delete-document feature ships, the sum self-corrects with no extra code).
+model Document {
+  id                  String   @id @default(cuid())
+  orgId               String
+  originalFilename    String
+  storedFilename      String
+  // Free-text category: "receipt" | "purchase_invoice" | "sales_invoice" |
+  // "other" ... — intentionally not an enum so new document types never need
+  // a migration.
+  documentType        String
+  // Optional link to whatever record this document is attached to (a
+  // SalesInvoice/PurchaseInvoice/Receipt/Payment id, etc.) — deliberately a
+  // plain string, not a foreign key, since it can point at any one of
+  // several tables.
+  linkedTransactionId String?
+  uploadedById        String
+  originalSizeBytes   Int
+  optimizedSizeBytes  Int
+  thumbnailPath       String?
+  mimeType            String
+  createdAt           DateTime @default(now())
+
+  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  uploadedBy User         @relation("DocumentUploadedBy", fields: [uploadedById], references: [id])
+  pendingTransactionAttachments PendingTransaction[]
+
+  @@index([orgId])
+  @@index([orgId, linkedTransactionId])
+  @@map("documents")
+}
+
+// A referral partner — an individual/agency who refers new businesses to
+// BantooBooks in exchange for a commission. Optionally linked to a User so a
+// partner who is *also* a BantooBooks customer can view their partner
+// dashboard from their normal login (see lib/billing/partners.ts); most
+// partners will have no linked user at all and are managed purely by an
+// admin.
+model Partner {
+  id           String   @id @default(cuid())
+  name         String
+  email        String?  @unique
+  phone        String?
+  referralCode String   @unique
+  userId       String?  @unique
+  createdAt    DateTime @default(now())
+
+  user        User?        @relation(fields: [userId], references: [id])
+  referrals   Referral[]
+  commissions Commission[]
+
+  @@map("partners")
+}
+
+// Attribution of a referred organization to the partner whose code was
+// present (via a 90-day cookie, see lib/billing/partners.ts) at signup time.
+// One row per referred org — first attribution wins, never overwritten.
+model Referral {
+  id           String   @id @default(cuid())
+  orgId        String   @unique
+  partnerId    String
+  attributedAt DateTime @default(now())
+
+  org     Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  partner Partner      @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@index([partnerId])
+  @@map("referrals")
+}
+
+enum CommissionStatus {
+  PENDING
+  APPROVED
+  PAID
+  CANCELLED
+}
+
+// One row per (partner, referred org, calendar month) that had commission-
+// eligible subscription revenue. `amountMinorUnits` follows the same
+// BigInt-minor-units convention as every other money column in this schema.
+model Commission {
+  id               String           @id @default(cuid())
+  partnerId        String
+  orgId            String
+  periodMonth      String
+  amountMinorUnits BigInt           @default(0)
+  status           CommissionStatus @default(PENDING)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  partner Partner      @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  org     Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([partnerId, orgId, periodMonth])
+  @@index([orgId])
+  @@map("commissions")
+}
+
+enum PaymentRecordStatus {
+  SUCCEEDED
+  PENDING
+  FAILED
+  REFUNDED
+}
+
+// Billing-history ledger written by every PaymentProvider implementation
+// (ManualPaymentProvider today; a future StripeProvider/MobileMoneyProvider
+// would write the same shape — see lib/billing/provider.ts).
+model PaymentRecord {
+  id               String              @id @default(cuid())
+  orgId            String
+  subscriptionId   String?
+  amountMinorUnits BigInt
+  currency         String              @default("XAF")
+  periodStart      DateTime
+  periodEnd        DateTime
+  provider         String
+  status           PaymentRecordStatus @default(SUCCEEDED)
+  notes            String?
+  createdById      String?
+  createdAt        DateTime            @default(now())
+
+  org          Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id])
+
+  @@index([orgId])
+  @@map("payment_records")
+}
+
+// ---------------------------------------------------------------------------
+// Roles, permissions & approval workflow.
+//
+// See lib/permissions.ts for the role → permission matrix and lib/approvals/
+// for the engine. A PendingTransaction is a STAGED draft of one of the 7
+// gated transaction types below — nothing it holds ever touches the ledger
+// or inventory subledger until an approver calls approvePendingTransaction
+// (or editThenApprove), which posts `payload` through the exact same
+// creation function the direct-posting path already uses (lib/documents.ts /
+// lib/inventory.ts) — see lib/approvals/payloads.ts for the dispatch table.
+// ---------------------------------------------------------------------------
+
+// Mirrors the 7 transaction types named in the spec. Deliberately a superset
+// of the Prisma model each maps to: "expense" and "supplier_payment" both
+// post through createPayment (lib/documents.ts) — the split exists purely so
+// the Pending Approvals UI can label a draft accurately — and
+// "payment_received" posts through createReceipt, "stock_receipt" through
+// receiveGoods (lib/inventory.ts). See lib/approvals/payloads.ts.
+enum PendingTransactionType {
+  expense
+  purchase_invoice
+  sales_invoice
+  payment_received
+  supplier_payment
+  inventory_adjustment
+  stock_receipt
+}
+
+enum PendingTransactionStatus {
+  pending
+  approved
+  rejected
+  needs_correction
+}
+
+model PendingTransaction {
+  id     String                 @id @default(cuid())
+  orgId  String
+  type   PendingTransactionType
+  // The exact input shape the real creation function for `type` expects
+  // (see lib/approvals/payloads.ts's Stored*Payload types) — Dates as ISO
+  // strings and BigInt amounts as decimal strings, since Prisma Json cannot
+  // round-trip either natively. Never applied to the ledger until approved.
+  payload Json
+
+  submittedById String
+  submittedAt   DateTime                 @default(now())
+  status        PendingTransactionStatus @default(pending)
+
+  // Nullable FK to an uploaded receipt/invoice scan (lib/billing's Document
+  // model, landed alongside this work) — a draft submitted without a photo
+  // simply has no attachment.
+  attachmentId String?
+
+  // AI confidence (0-100), reusing the Ask Bantoo confidence scale (see
+  // lib/bantoo/match.ts's bucketFor) — set only when the draft originated
+  // from an Ask Bantoo extraction. Null for drafts submitted from a normal
+  // form.
+  aiConfidence Int?
+
+  // Deterministic rule-based risk review computed at submission time (see
+  // lib/approvals/risk-review.ts) — { level, score, signals[], aiNarrative? }.
+  // Advisory only: never blocks or auto-rejects an approval.
+  aiRiskReview Json?
+
+  reviewedById String?
+  reviewedAt   DateTime?
+  // Holds either the rejection reason (status = rejected) or the correction
+  // note (status = needs_correction) — the two are mutually exclusive by
+  // construction (one status per row), so one column covers both without
+  // adding a near-duplicate field. See lib/approvals/engine.ts.
+  rejectionReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  submittedBy User         @relation("PendingTransactionSubmittedBy", fields: [submittedById], references: [id])
+  reviewedBy  User?        @relation("PendingTransactionReviewedBy", fields: [reviewedById], references: [id])
+  attachment  Document?    @relation(fields: [attachmentId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, status])
+  @@index([orgId, submittedById, status])
+  @@map("pending_transactions")
 }
