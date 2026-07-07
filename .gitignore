@@ -4,3 +4,16 @@ __pycache__/
 .venv/
 venv/
 .DS_Store
+
+# Root-level Node tooling (generator/ + automation/) — see their READMEs.
+node_modules/
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# One-click recording pipeline output (tutorial-factory/record-tutorial.js)
+# — large generated video/trace binaries, never source of truth. See
+# tutorial-factory/RECORDING.md.
+/recordings/
+automation/.recording-output/

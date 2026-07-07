@@ -1,0 +1,24 @@
+{
+  "name": "whatsapp-accounting",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "generate:tutorials": "node generator/generate-tutorial-assets.js",
+    "verify:tutorials": "node generator/verify.js",
+    "record:tutorial": "playwright test --config=automation/playwright.config.ts",
+    "record:list": "playwright test --config=automation/playwright.config.ts --list",
+    "record:video": "node tutorial-factory/record-tutorial.js",
+    "record:guidde": "node tutorial-factory/record-guidde.js",
+    "typecheck:automation": "tsc -p automation/tsconfig.json",
+    "build:tutorial-index": "node tutorial-factory/build-index.js",
+    "build:dashboard": "node tutorial-factory/build-dashboard.js",
+    "build:checklists": "node tutorial-factory/build-checklists.js",
+    "build:recording-queue": "node tutorial-factory/build-recording-queue.js",
+    "build:tutorial-factory": "npm run build:tutorial-index && npm run build:dashboard && npm run build:checklists && npm run build:recording-queue"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0",
+    "@types/node": "^20.14.0",
+    "typescript": "^5.6.0"
+  }
+}
