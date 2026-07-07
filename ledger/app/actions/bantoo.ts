@@ -113,6 +113,7 @@ const draftSchema = z.object({
   dateTo: z.string().max(40).default(""),
   contactMethod: z.string().max(20).default(""),
   requestedAction: z.string().max(40).default(""),
+  postAction: z.string().max(20).default(""),
 });
 
 const inputSchema = z.object({
@@ -158,6 +159,8 @@ async function ensurePartyId(
     partyName: string;
     type: "customer" | "supplier";
     city?: string | null;
+    phone?: string | null;
+    whatsapp?: string | null;
   },
 ): Promise<string | null> {
   if (input.partyId) {
@@ -189,10 +192,29 @@ async function ensurePartyId(
       name: input.partyName.trim(),
       type: input.type,
       city: input.city?.trim() || null,
+      phone: input.phone?.trim() || null,
+      whatsapp: input.whatsapp?.trim() || null,
     });
     return created.id;
   }
   return null;
+}
+
+// Shared by create_customer/edit_customer: appends a timestamped line to a
+// party's existing notes, mirroring add_customer_note's inline logic exactly
+// (same stamp format) so a note captured as part of a create/edit plan step
+// looks identical to one added via the dedicated add_customer_note command.
+async function appendPartyNote(
+  orgId: string,
+  partyId: string,
+  existingNotes: string | null | undefined,
+  noteText: string,
+  date: Date,
+): Promise<void> {
+  const stamp = date.toISOString().slice(0, 10);
+  const existing = existingNotes?.trim();
+  const appended = existing ? `${existing}\n[${stamp}] ${noteText}` : `[${stamp}] ${noteText}`;
+  await updatePartyNotes(orgId, partyId, appended);
 }
 
 // Trust boundary for selectable inventory items. A client-supplied itemId must
@@ -464,9 +486,12 @@ export async function executeBantooAction(
         if (input.partyId) {
           const found = await prisma.party.findFirst({
             where: { id: input.partyId, orgId: ctx.orgId, type: { in: ["customer", "both"] } },
-            select: { id: true, name: true },
+            select: { id: true, name: true, notes: true },
           });
           if (!found) return { ok: false, error: "That customer was not found." };
+          if (draft.note.trim()) {
+            await appendPartyNote(ctx.orgId, found.id, found.notes, draft.note.trim(), date);
+          }
           return {
             ok: true,
             href: `/customers/${found.id}`,
@@ -481,14 +506,20 @@ export async function executeBantooAction(
           partyName: name,
           type: "customer",
           city: draft.city,
+          phone: draft.phone,
+          whatsapp: draft.whatsapp,
         });
         if (!customerId) return { ok: false, error: "Enter the customer name." };
 
         const party = await prisma.party.findFirst({
           where: { id: customerId, orgId: ctx.orgId },
-          select: { id: true, name: true },
+          select: { id: true, name: true, notes: true },
         });
         if (!party) return { ok: false, error: "Could not save the customer." };
+
+        if (draft.note.trim()) {
+          await appendPartyNote(ctx.orgId, party.id, party.notes, draft.note.trim(), date);
+        }
 
         return {
           ok: true,
@@ -508,7 +539,7 @@ export async function executeBantooAction(
         if (!input.partyId) return { ok: false, error: "Choose the customer to edit." };
         const found = await prisma.party.findFirst({
           where: { id: input.partyId, orgId: ctx.orgId, type: { in: ["customer", "both"] } },
-          select: { id: true },
+          select: { id: true, notes: true },
         });
         if (!found) return { ok: false, error: "That customer was not found." };
 
@@ -520,6 +551,11 @@ export async function executeBantooAction(
           city: draft.city,
         });
         if (!updated) return { ok: false, error: "Could not update that customer." };
+
+        if (draft.note.trim()) {
+          await appendPartyNote(ctx.orgId, updated.id, found.notes, draft.note.trim(), date);
+        }
+
         return {
           ok: true,
           href: `/customers/${updated.id}`,
@@ -666,6 +702,176 @@ export async function executeBantooAction(
       }
 
       case "unsupported_customer_action":
+        return { ok: false, error: "This action is not available yet." };
+
+      // --- Supplier & Purchasing Intelligence Sprint: existing-supplier
+      // workflows. Every case is a field-for-field mirror of the matching
+      // customer_* case above, with the party type filter and hrefs swapped
+      // to /suppliers, and the balance/query messages framed in the
+      // payable/purchasing direction instead of receivable/sales.
+
+      case "edit_supplier": {
+        if (!input.partyId) return { ok: false, error: "Choose the supplier to edit." };
+        const found = await prisma.party.findFirst({
+          where: { id: input.partyId, orgId: ctx.orgId, type: { in: ["supplier", "both"] } },
+          select: { id: true },
+        });
+        if (!found) return { ok: false, error: "That supplier was not found." };
+
+        const updated = await updateParty(ctx.orgId, found.id, {
+          name: draft.newName.trim() || undefined,
+          phone: draft.phone,
+          whatsapp: draft.whatsapp,
+          email: draft.email,
+          city: draft.city,
+        });
+        if (!updated) return { ok: false, error: "Could not update that supplier." };
+        return {
+          ok: true,
+          href: `/suppliers/${updated.id}`,
+          number: updated.name,
+          kind: input.action,
+          message: `${updated.name} was updated.`,
+        };
+      }
+
+      case "view_supplier": {
+        if (draft.view === "list") {
+          return { ok: true, href: "/suppliers", number: "", kind: input.action };
+        }
+        if (!input.partyId) return { ok: false, error: "Choose a supplier." };
+        const found = await prisma.party.findFirst({
+          where: { id: input.partyId, orgId: ctx.orgId, type: { in: ["supplier", "both"] } },
+          select: { id: true, name: true },
+        });
+        if (!found) return { ok: false, error: "That supplier was not found." };
+
+        const hrefByView: Record<string, string> = {
+          profile: `/suppliers/${found.id}`,
+          ledger: `/suppliers/${found.id}?tab=transactions`,
+          documents: `/suppliers/${found.id}?tab=documents`,
+        };
+        return {
+          ok: true,
+          href: hrefByView[draft.view] ?? `/suppliers/${found.id}`,
+          number: found.name,
+          kind: input.action,
+        };
+      }
+
+      case "supplier_balance": {
+        if (!input.partyId) return { ok: false, error: "Choose a supplier." };
+        const found = await prisma.party.findFirst({
+          where: { id: input.partyId, orgId: ctx.orgId, type: { in: ["supplier", "both"] } },
+          select: { id: true, name: true },
+        });
+        if (!found) return { ok: false, error: "That supplier was not found." };
+
+        // getPartyBalance("supplier") is the payable balance: positive means
+        // the org owes this supplier (see lib/party-ledger.ts and the
+        // "Amounts you owe suppliers" framing on reports/supplier-balances) —
+        // the opposite direction from customer_balance's receivable.
+        const balance = await getPartyBalance(ctx.orgId, found.id, "supplier");
+        const formatted = formatAmount(balance < 0n ? -balance : balance, cur);
+        const message =
+          balance > 0n
+            ? `You owe ${found.name} ${formatted} ${cur}.`
+            : balance < 0n
+              ? `${found.name} has a credit balance of ${formatted} ${cur} with you.`
+              : `You have no outstanding balance with ${found.name}.`;
+        return {
+          ok: true,
+          href: `/suppliers/${found.id}?tab=transactions`,
+          number: found.name,
+          kind: input.action,
+          message,
+        };
+      }
+
+      case "add_supplier_note": {
+        if (!input.partyId) return { ok: false, error: "Choose a supplier." };
+        const noteText = draft.note.trim();
+        if (!noteText) return { ok: false, error: "Enter the note text." };
+        const found = await prisma.party.findFirst({
+          where: { id: input.partyId, orgId: ctx.orgId, type: { in: ["supplier", "both"] } },
+          select: { id: true, name: true, notes: true },
+        });
+        if (!found) return { ok: false, error: "That supplier was not found." };
+
+        const stamp = date.toISOString().slice(0, 10);
+        const existing = found.notes?.trim();
+        const appended = existing ? `${existing}\n[${stamp}] ${noteText}` : `[${stamp}] ${noteText}`;
+        const updated = await updatePartyNotes(ctx.orgId, found.id, appended);
+        if (!updated) return { ok: false, error: "Could not save the note." };
+        return {
+          ok: true,
+          href: `/suppliers/${found.id}?tab=notes`,
+          number: found.name,
+          kind: input.action,
+          message: `Note added for ${found.name}.`,
+        };
+      }
+
+      case "contact_supplier": {
+        if (!input.partyId) return { ok: false, error: "Choose a supplier." };
+        const found = await prisma.party.findFirst({
+          where: { id: input.partyId, orgId: ctx.orgId, type: { in: ["supplier", "both"] } },
+          select: { id: true, name: true, phone: true, whatsapp: true, email: true },
+        });
+        if (!found) return { ok: false, error: "That supplier was not found." };
+
+        if (draft.contactMethod === "whatsapp") {
+          const wa = found.whatsapp || found.phone;
+          if (!wa) {
+            return { ok: false, error: "This supplier has no WhatsApp number on file. Add one first." };
+          }
+          const digits = wa.replace(/[^\d]/g, "");
+          return { ok: true, href: `https://wa.me/${digits}`, number: found.name, kind: input.action };
+        }
+        if (draft.contactMethod === "email") {
+          if (!found.email) {
+            return { ok: false, error: "This supplier has no email on file. Add one first." };
+          }
+          return { ok: true, href: `mailto:${found.email}`, number: found.name, kind: input.action };
+        }
+        if (!found.phone) {
+          return { ok: false, error: "This supplier has no phone number on file. Add one first." };
+        }
+        return { ok: true, href: `tel:${found.phone}`, number: found.name, kind: input.action };
+      }
+
+      case "supplier_query": {
+        if (!input.partyId) return { ok: false, error: "Choose a supplier." };
+        const found = await prisma.party.findFirst({
+          where: { id: input.partyId, orgId: ctx.orgId, type: { in: ["supplier", "both"] } },
+          select: { id: true, name: true },
+        });
+        if (!found) return { ok: false, error: "That supplier was not found." };
+
+        const result = await getPartyPurchaseHistoryInRange(
+          ctx.orgId,
+          found.id,
+          "supplier",
+          draft.dateFrom || null,
+          draft.dateTo || null,
+        );
+        const periodSuffix = draft.periodText ? ` (${draft.periodText})` : "";
+        const message =
+          result.items.length > 0
+            ? `You bought from ${found.name}${periodSuffix}: ${result.items
+                .map((i) => `${i.name} (${i.quantity}${i.unit ? ` ${i.unit}` : ""})`)
+                .join(", ")}.`
+            : `No purchases found from ${found.name}${periodSuffix}.`;
+        return {
+          ok: true,
+          href: `/suppliers/${found.id}?tab=products`,
+          number: found.name,
+          kind: input.action,
+          message,
+        };
+      }
+
+      case "unsupported_supplier_action":
         return { ok: false, error: "This action is not available yet." };
 
       default:

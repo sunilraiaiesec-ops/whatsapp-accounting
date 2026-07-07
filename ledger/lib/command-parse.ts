@@ -4,6 +4,7 @@ export type CommandIntent =
   | "create_goods_receipt"
   | "create_customer"
   | "customer_action"
+  | "supplier_action"
   | "unknown";
 
 // Every non-creation customer workflow Ask Bantoo can recognize by rule. The
@@ -48,6 +49,81 @@ export type ParsedCustomerAction = {
   question: string | null;
 };
 
+// Every non-transactional supplier workflow Ask Bantoo can recognize by
+// rule — the Supplier & Purchasing Intelligence Sprint mirror of
+// CustomerActionKind above. There is deliberately no "view_statement": unlike
+// customers, there is no single-supplier statement report page (see
+// lib/ai/actions.ts's supplierViewTarget comment for details).
+export type SupplierActionKind =
+  | "edit"
+  | "view_profile"
+  | "view_ledger"
+  | "view_documents"
+  | "view_list"
+  | "balance"
+  | "add_note"
+  | "contact_call"
+  | "contact_whatsapp"
+  | "contact_email"
+  | "query"
+  | "unsupported_archive"
+  | "unsupported_reactivate"
+  | "unsupported_merge"
+  | "unsupported_upload_document";
+
+export type ParsedSupplierAction = {
+  kind: SupplierActionKind;
+  supplierName: string | null;
+  // Only set for "unsupported_merge" — the second party to merge into/with.
+  secondSupplierName: string | null;
+  // Only set for "add_note".
+  note: string | null;
+  // Only set for "edit" — updates to apply, when present in the command text.
+  phone: string | null;
+  whatsapp: string | null;
+  email: string | null;
+  city: string | null;
+  // Only set for "query" — raw phrase like "last month", resolved to an
+  // actual date range by resolvePeriodToRange.
+  periodText: string | null;
+  // Only set for "query" — the free-text question, for the summary/answer.
+  question: string | null;
+};
+
+// Every sales-document workflow Ask Bantoo can recognize by rule (Sales
+// Intelligence Sprint) — single-line/lump-sum documents only (see
+// lib/bantoo/resolve.ts's "sales_invoice"/"credit_note"/"refund_receipt"
+// cases), never multi-line itemized invoicing via chat. The "unsupported_*"
+// members exist so genuinely-not-buildable commands (editing/voiding/
+// emailing an existing invoice, applying a payment to one specific invoice
+// number) are classified confidently instead of "unknown". "view_list" is
+// intentionally the only view target — there is no per-customer sales
+// invoice filter on /sales-invoices yet, so a name-specific "view" would be
+// misleading; that's a documented MVP limitation, not an oversight.
+export type SalesActionKind =
+  | "invoice"
+  | "credit_note"
+  | "refund"
+  | "view_list"
+  | "unsupported_edit"
+  | "unsupported_void"
+  | "unsupported_email"
+  | "unsupported_apply_payment";
+
+export type ParsedSalesAction = {
+  kind: SalesActionKind;
+  customerName: string | null;
+  // Only set for "invoice"/"credit_note"/"refund" when a "for X"/"pour X"
+  // clause is present after the amount.
+  description: string | null;
+  // Only set for "invoice" — parsed from "due in 30 days" / "net 30" /
+  // "échéance dans 30 jours". The caller resolves this to a concrete ISO date.
+  dueDateDays: number | null;
+  // Only set for the unsupported_* kinds — the referenced invoice/document
+  // number, when present in the command text.
+  invoiceNumber: string | null;
+};
+
 export type PaymentCategory = "supplier" | "expense";
 export type ReceiptCategory = "customer" | "sales";
 
@@ -64,10 +140,24 @@ export type ParsedCommand = {
   receiptCategory: ReceiptCategory | null;
   // Populated only when intent === "customer_action".
   customerAction: ParsedCustomerAction | null;
+  // Populated only when intent === "supplier_action".
+  supplierAction: ParsedSupplierAction | null;
+  // Multi-step Task Planning: best-effort rule-based extraction of the same
+  // extra fields the AI path captures for create_customer (see
+  // extractCreateCustomerDetails) — a simple compound sentence like "Add
+  // Musa as a customer in Garoua, phone 690123456" should work without AI.
+  // Only populated when intent === "create_customer"; more complex phrasing
+  // (e.g. notes, pronoun resolution) is left to the AI path.
+  phone: string | null;
+  whatsapp: string | null;
+  postAction: "open_profile" | null;
   raw: string;
 };
 
-export type LegacyCommandIntent = Exclude<CommandIntent, "create_customer" | "customer_action">;
+export type LegacyCommandIntent = Exclude<
+  CommandIntent,
+  "create_customer" | "customer_action" | "supplier_action"
+>;
 
 export type LegacyParsedCommand = {
   intent: LegacyCommandIntent;
@@ -150,12 +240,20 @@ function stripTrailingPunctuation(text: string): string {
   return text.replace(/[?.!]+\s*$/g, "").trim();
 }
 
-function cleanCustomerName(raw: string): string {
+function cleanPartyNameGeneric(raw: string): string {
   let s = raw.trim();
   s = s.replace(/^[:,-]+/, "").trim();
   s = s.replace(/['’]s$/i, "").trim();
   s = stripTrailingPunctuation(s);
   return cleanLabel(s);
+}
+
+function cleanCustomerName(raw: string): string {
+  return cleanPartyNameGeneric(raw);
+}
+
+function cleanSupplierName(raw: string): string {
+  return cleanPartyNameGeneric(raw);
 }
 
 // Splits a captured tail like "Musa for June" into { name: "Musa", period:
@@ -171,7 +269,10 @@ function splitNameAndPeriod(tail: string): { name: string; period: string | null
   return { name: cleanCustomerName(tail), period: null };
 }
 
-function parseEditTail(tail: string): {
+function parseEditFieldsTail(
+  tail: string,
+  cleanName: (raw: string) => string,
+): {
   name: string;
   phone: string | null;
   whatsapp: string | null;
@@ -181,7 +282,7 @@ function parseEditTail(tail: string): {
   const colonIndex = tail.indexOf(":");
   const namePart = colonIndex >= 0 ? tail.slice(0, colonIndex) : tail;
   const fieldsText = colonIndex >= 0 ? tail.slice(colonIndex + 1).trim() : "";
-  const name = cleanCustomerName(namePart);
+  const name = cleanName(namePart);
 
   let phone: string | null = null;
   let whatsapp: string | null = null;
@@ -203,6 +304,14 @@ function parseEditTail(tail: string): {
   }
 
   return { name, phone, whatsapp, email, city };
+}
+
+function parseEditTail(tail: string) {
+  return parseEditFieldsTail(tail, cleanCustomerName);
+}
+
+function parseSupplierEditTail(tail: string) {
+  return parseEditFieldsTail(tail, cleanSupplierName);
 }
 
 // Ordered most-specific-first: merge/archive/reactivate/upload before the
@@ -453,6 +562,251 @@ function detectCustomerAction(raw: string): ParsedCustomerAction | null {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Supplier-action detection (Ask Bantoo Supplier & Purchasing Intelligence
+// Sprint). Mirror image of the customer-action block above: every pattern
+// below deliberately requires the literal word "supplier"/"fournisseur" so a
+// parallel customer command (e.g. "Call customer Adamou") never gets
+// misclassified here — see the "customer vs supplier confusion" regression
+// tests in lib/command-parse-supplier.test.ts. There is deliberately no
+// "view_statement" kind (see SupplierActionKind's doc comment).
+//
+// Note on supplier_query: the free-text phrasing shown in product examples
+// ("what did we buy from Elhaji last month") does NOT literally contain the
+// word "supplier" — that natural phrasing is handled by the AI extraction
+// path (lib/ai/extract.ts), which has no collision risk since it reasons
+// about full intent rather than matching regexes. This rule-based fallback
+// deliberately requires "supplier"/"fournisseur" explicitly so it can never
+// be confused with a CUSTOMER_QUERY match on the same sentence structure.
+// ---------------------------------------------------------------------------
+
+const SUPPLIER_UNSUPPORTED_MERGE = [
+  /\bmerge\s+(?:duplicate\s+)?suppliers?\s+(.+?)\s+(?:and|with)\s+(.+)$/i,
+  /\bfusionner\s+(?:les\s+)?fournisseurs?\s+(.+?)\s+(?:et|avec)\s+(.+)$/i,
+];
+
+const SUPPLIER_UNSUPPORTED_ARCHIVE = [
+  /\barchive\s+supplier\s+(.+)$/i,
+  /\barchiver\s+(?:le\s+)?fournisseur\s+(.+)$/i,
+];
+
+const SUPPLIER_UNSUPPORTED_REACTIVATE = [
+  /\breactivate\s+supplier\s+(.+)$/i,
+  /\br[ée]activer\s+(?:le\s+)?fournisseur\s+(.+)$/i,
+];
+
+const SUPPLIER_UNSUPPORTED_UPLOAD = [
+  /\bupload\s+(?:a\s+)?document\s+(?:for|to)\s+supplier\s+(.+)$/i,
+  /\b(?:t[ée]l[ée]verser|t[ée]l[ée]charger|importer)\s+(?:un\s+)?document\s+(?:pour|au)\s+fournisseur\s+(.+)$/i,
+];
+
+const SUPPLIER_ADD_NOTE = [
+  /\badd\s+(?:a\s+)?note\s+(?:to|for)\s+supplier\s+(.+?)\s*:\s*(.+)$/i,
+  /\bajouter\s+(?:une\s+)?note\s+(?:au|pour\s+le|pour)\s+fournisseur\s+(.+?)\s*:\s*(.+)$/i,
+];
+
+const SUPPLIER_BALANCE = [
+  /\bwhat(?:'s|\s+is)\s+(?:our\s+)?balance\s+with\s+supplier\s+(.+?)\??$/i,
+  /\bhow\s+much\s+do\s+we\s+owe\s+supplier\s+(.+?)\??$/i,
+  /\b(?:show|view|get)\s+outstanding\s+balance\s+for\s+supplier\s+(.+)$/i,
+  /\bquel\s+est\s+(?:notre\s+)?solde\s+(?:avec|pour)\s+(?:le\s+)?fournisseur\s+(.+?)\s*\??$/i,
+  /\bcombien\s+devons[- ]nous\s+au\s+fournisseur\s+(.+?)\s*\??$/i,
+];
+
+const SUPPLIER_LEDGER = [
+  /\bshow\s+supplier\s+(.+?)'s\s+ledger\b/i,
+  /\b(?:open|view)\s+supplier\s+ledger\s+for\s+(.+)$/i,
+  /\bview\s+supplier\s+(.+?)'s\s+transactions\b/i,
+  /\bafficher\s+le\s+grand\s+livre\s+fournisseur\s+de\s+(.+)$/i,
+  /\bvoir\s+les\s+transactions\s+du\s+fournisseur\s+(.+)$/i,
+];
+
+const SUPPLIER_DOCUMENTS = [
+  /\bshow\s+documents\s+for\s+supplier\s+(.+)$/i,
+  /\bopen\s+supplier\s+(.+?)'s\s+documents\b/i,
+  /\bafficher\s+les\s+documents\s+du\s+fournisseur\s+(.+)$/i,
+];
+
+const SUPPLIER_PROFILE = [
+  /\bopen\s+supplier\s+(.+?)'s\s+profile\b/i,
+  /\bshow\s+supplier\s+profile\s+for\s+(.+)$/i,
+  /\bview\s+supplier\s+(.+)$/i,
+  /\bouvrir\s+la\s+fiche\s+fournisseur\s+de\s+(.+)$/i,
+  /\bafficher\s+le\s+profil\s+du\s+fournisseur\s+(.+)$/i,
+];
+
+const SUPPLIER_SEARCH_NAMED = [
+  /\b(?:search|find)\s+supplier\s+(.+)$/i,
+  /\b(?:rechercher|chercher)\s+(?:le\s+)?fournisseur\s+(.+)$/i,
+];
+
+const SUPPLIER_SEARCH_BARE = [
+  /^\s*search\s+suppliers?\s*$/i,
+  /^\s*(?:rechercher|chercher)\s+(?:des\s+)?fournisseurs?\s*$/i,
+];
+
+const SUPPLIER_CALL = [
+  /\bcall\s+supplier\s+(.+)$/i,
+  /\bappeler\s+(?:le\s+)?fournisseur\s+(.+)$/i,
+];
+
+const SUPPLIER_WHATSAPP = [
+  /\b(?:whatsapp|send\s+(?:a\s+)?whatsapp(?:\s+message)?\s+to)\s+supplier\s+(.+)$/i,
+  /\bwhatsapp\s+fournisseur\s+(.+)$/i,
+  /\benvoyer\s+un\s+whatsapp\s+(?:au|à\s+la|à)\s+fournisseur\s+(.+)$/i,
+];
+
+const SUPPLIER_EMAIL = [
+  /\b(?:email|send\s+(?:an\s+)?email\s+to)\s+supplier\s+(.+)$/i,
+  /\bemail\s+fournisseur\s+(.+)$/i,
+  /\benvoyer\s+un\s+email\s+au\s+fournisseur\s+(.+)$/i,
+];
+
+const SUPPLIER_EDIT = [
+  /\b(?:edit|update|modify)\s+supplier\s+(.+)$/i,
+  /\b(?:modifier|mettre\s+à\s+jour|mettre\s+a\s+jour)\s+(?:le\s+)?fournisseur\s+(.+)$/i,
+];
+
+const SUPPLIER_QUERY = [
+  /\bwhat\s+did\s+we\s+buy\s+from\s+supplier\s+(.+?)\s+(.+?)\??$/i,
+  /\bwhat\s+did\s+we\s+buy\s+from\s+supplier\s+(.+?)\??$/i,
+  /\bwhat\s+have\s+we\s+(?:bought|purchased)\s+from\s+supplier\s+(.+?)\s+(.+?)\??$/i,
+  /\bwhat\s+have\s+we\s+(?:bought|purchased)\s+from\s+supplier\s+(.+?)\??$/i,
+  /\bqu['’]avons-nous\s+achet[ée]\s+(?:chez|au|du)\s+(?:le\s+)?fournisseur\s+(.+?)\s+(.+?)\??$/i,
+  /\bqu['’]avons-nous\s+achet[ée]\s+(?:chez|au|du)\s+(?:le\s+)?fournisseur\s+(.+?)\??$/i,
+];
+
+function detectSupplierAction(raw: string): ParsedSupplierAction | null {
+  let m = firstMatch(SUPPLIER_UNSUPPORTED_MERGE, raw);
+  if (m?.[1] && m[2]) {
+    return {
+      kind: "unsupported_merge",
+      supplierName: cleanSupplierName(m[1]),
+      secondSupplierName: cleanSupplierName(m[2]),
+      note: null,
+      phone: null,
+      whatsapp: null,
+      email: null,
+      city: null,
+      periodText: null,
+      question: null,
+    };
+  }
+
+  const emptyExtras = {
+    secondSupplierName: null,
+    note: null,
+    phone: null,
+    whatsapp: null,
+    email: null,
+    city: null,
+    periodText: null,
+    question: null,
+  } as const;
+
+  m = firstMatch(SUPPLIER_UNSUPPORTED_ARCHIVE, raw);
+  if (m?.[1]) {
+    return { kind: "unsupported_archive", supplierName: cleanSupplierName(m[1]), ...emptyExtras };
+  }
+
+  m = firstMatch(SUPPLIER_UNSUPPORTED_REACTIVATE, raw);
+  if (m?.[1]) {
+    return { kind: "unsupported_reactivate", supplierName: cleanSupplierName(m[1]), ...emptyExtras };
+  }
+
+  m = firstMatch(SUPPLIER_UNSUPPORTED_UPLOAD, raw);
+  if (m?.[1]) {
+    return { kind: "unsupported_upload_document", supplierName: cleanSupplierName(m[1]), ...emptyExtras };
+  }
+
+  m = firstMatch(SUPPLIER_ADD_NOTE, raw);
+  if (m?.[1] && m[2]) {
+    return {
+      kind: "add_note",
+      supplierName: cleanSupplierName(m[1]),
+      note: stripTrailingPunctuation(m[2]),
+      secondSupplierName: null,
+      phone: null,
+      whatsapp: null,
+      email: null,
+      city: null,
+      periodText: null,
+      question: null,
+    };
+  }
+
+  m = firstMatch(SUPPLIER_BALANCE, raw);
+  if (m?.[1]) {
+    return { kind: "balance", supplierName: cleanSupplierName(m[1]), ...emptyExtras };
+  }
+
+  m = firstMatch(SUPPLIER_LEDGER, raw);
+  if (m?.[1]) {
+    return { kind: "view_ledger", supplierName: cleanSupplierName(m[1]), ...emptyExtras };
+  }
+
+  m = firstMatch(SUPPLIER_DOCUMENTS, raw);
+  if (m?.[1]) {
+    return { kind: "view_documents", supplierName: cleanSupplierName(m[1]), ...emptyExtras };
+  }
+
+  m = firstMatch(SUPPLIER_QUERY, raw);
+  if (m?.[1]) {
+    return {
+      kind: "query",
+      supplierName: cleanSupplierName(m[1]),
+      ...emptyExtras,
+      periodText: m[2] ? stripTrailingPunctuation(m[2]) : null,
+      question: raw.trim(),
+    };
+  }
+
+  m = firstMatch(SUPPLIER_CALL, raw);
+  if (m?.[1]) {
+    return { kind: "contact_call", supplierName: cleanSupplierName(m[1]), ...emptyExtras };
+  }
+
+  m = firstMatch(SUPPLIER_WHATSAPP, raw);
+  if (m?.[1]) {
+    return { kind: "contact_whatsapp", supplierName: cleanSupplierName(m[1]), ...emptyExtras };
+  }
+
+  m = firstMatch(SUPPLIER_EMAIL, raw);
+  if (m?.[1]) {
+    return { kind: "contact_email", supplierName: cleanSupplierName(m[1]), ...emptyExtras };
+  }
+
+  m = firstMatch(SUPPLIER_EDIT, raw);
+  if (m?.[1]) {
+    const parsed = parseSupplierEditTail(m[1]);
+    return {
+      kind: "edit",
+      supplierName: parsed.name,
+      ...emptyExtras,
+      phone: parsed.phone,
+      whatsapp: parsed.whatsapp,
+      email: parsed.email,
+      city: parsed.city,
+    };
+  }
+
+  m = firstMatch(SUPPLIER_PROFILE, raw);
+  if (m?.[1]) {
+    return { kind: "view_profile", supplierName: cleanSupplierName(m[1]), ...emptyExtras };
+  }
+
+  m = firstMatch(SUPPLIER_SEARCH_NAMED, raw);
+  if (m?.[1]) {
+    return { kind: "view_profile", supplierName: cleanSupplierName(m[1]), ...emptyExtras };
+  }
+
+  if (firstMatch(SUPPLIER_SEARCH_BARE, raw)) {
+    return { kind: "view_list", supplierName: null, ...emptyExtras };
+  }
+
+  return null;
+}
+
 const MONTH_NAMES: { names: string[]; index: number }[] = [
   { names: ["january", "janvier"], index: 0 },
   { names: ["february", "février", "fevrier"], index: 1 },
@@ -520,6 +874,17 @@ function detectIntent(text: string): CommandIntent {
   const isCreateCustomer = CREATE_CUSTOMER_PATTERNS.some((p) => p.test(lower));
   if (isCreateCustomer) return "create_customer";
 
+  // Supplier detection runs FIRST: every SUPPLIER_* pattern requires the
+  // literal word "supplier"/"fournisseur", so it can never accidentally fire
+  // on customer text. Several CUSTOMER_* patterns are intentionally looser
+  // (e.g. matching a bare possessive "X's profile/ledger/statement" without
+  // requiring the word "customer"/"client" — see the CUSTOMER_PROFILE et al.
+  // comments), so checking customer first would let those loose patterns
+  // swallow a supplier command like "Open supplier Adamou's profile" before
+  // the supplier check ever runs. Checking the stricter supplier patterns
+  // first eliminates that collision without having to tighten every loose
+  // customer pattern.
+  if (detectSupplierAction(text)) return "supplier_action";
   if (detectCustomerAction(text)) return "customer_action";
 
   const isReceipt = RECEIPT_PATTERNS.some((p) => p.test(lower));
@@ -713,6 +1078,52 @@ function stripCustomerNameLead(text: string): string {
   return cleanLabel(text.replace(CUSTOMER_NAME_LEAD, "").replace(/[.,]\s*$/, ""));
 }
 
+// Trailing clauses beyond name/city (phone, WhatsApp, an internal note, a
+// "then open profile" follow-up) confuse the name/city regexes below, which
+// expect the sentence to end right after the optional city — so they're cut
+// off here (searched for in the FULL raw text separately, see
+// extractCreateCustomerPhone/Whatsapp/PostAction) before the name/city
+// extraction ever runs. Includes the clause's leading pronoun + comma (e.g.
+// ", his phone...") so the remaining core clause doesn't end with a dangling
+// "his"/"son".
+const TRAILING_CLAUSE_LEAD =
+  /,?\s*(?:his|her|their|son|sa|ses|leur)?\s*\b(?:phone|t[ée]l[ée]phone|tel|whatsapp|note|then|puis|ensuite|and\s+then|et\s+ensuite)\b/i;
+
+function stripTrailingClauses(raw: string): string {
+  const m = raw.match(TRAILING_CLAUSE_LEAD);
+  if (!m || m.index === undefined) return raw;
+  return raw.slice(0, m.index).replace(/[,.\s]+$/, "").trim();
+}
+
+function extractCreateCustomerPhone(raw: string): string | null {
+  const m = raw.match(
+    /\b(?:phone|t[ée]l[ée]phone|tel)\b(?:\s+number|\s+num[ée]ro)?(?:\s+is|\s+est)?\s*:?\s*([+\d][\d\s-]{5,})/i,
+  );
+  const digits = m?.[1]?.replace(/[\s-]/g, "").trim();
+  return digits && digits.length >= 6 ? digits : null;
+}
+
+function extractCreateCustomerWhatsapp(raw: string, phone: string | null): string | null {
+  const m = raw.match(
+    /\bwhatsapp\b(?:\s+number|\s+num[ée]ro)?(?:\s+is|\s+est)?\s*:?\s*(?:le\s+)?(same(?:\s+number)?|m[êe]me(?:\s+num[ée]ro)?|[+\d][\d\s-]{5,})/i,
+  );
+  if (!m?.[1]) return null;
+  if (/^(?:same|m[êe]me)/i.test(m[1])) return phone;
+  const digits = m[1].replace(/[\s-]/g, "").trim();
+  return digits.length >= 6 ? digits : null;
+}
+
+// Only recognizes the literal "open profile" follow-up (EN/FR) — anything
+// else mentioned after saving (e.g. "then invoice him") is intentionally
+// left for the AI path via unsupported_requests; the rule-based fallback
+// never guesses at unrecognized post-actions.
+function extractCreateCustomerPostAction(raw: string): "open_profile" | null {
+  return /\bopen\b[^.?!]*\bprofile\b/i.test(raw) ||
+    /\bouvrir\b[^.?!]*\b(?:profil|fiche)\b/i.test(raw)
+    ? "open_profile"
+    : null;
+}
+
 function extractCreateCustomerDetails(text: string): { name: string | null; city: string | null } {
   const asRole = text.match(
     /\b(?:add|ajouter)\s+(.+?)\s+(?:as\s+(?:a\s+)?(?:customer|client)|comme\s+client)\b(?:\s+(?:in|à|a|en)\s+(.+?))?$/i,
@@ -766,18 +1177,29 @@ function parseCommandTextFull(text: string): ParsedCommand {
   let receiptCategory: ReceiptCategory | null = null;
   let itemDescription: string | null = null;
   let customerAction: ParsedCustomerAction | null = null;
+  let supplierAction: ParsedSupplierAction | null = null;
+  let phone: string | null = null;
+  let whatsapp: string | null = null;
+  let postAction: "open_profile" | null = null;
 
   if (intent === "create_goods_receipt") {
     itemDescription = extractItemDescription(raw);
     partyName = extractPartyName(raw, "create_receipt");
   } else if (intent === "create_customer") {
-    const details = extractCreateCustomerDetails(raw);
+    const details = extractCreateCustomerDetails(stripTrailingClauses(raw));
     partyName = details.name;
     city = details.city;
+    phone = extractCreateCustomerPhone(raw);
+    whatsapp = extractCreateCustomerWhatsapp(raw, phone);
+    postAction = extractCreateCustomerPostAction(raw);
   } else if (intent === "customer_action") {
     customerAction = detectCustomerAction(raw);
     partyName = customerAction?.customerName ?? null;
     city = customerAction?.city ?? null;
+  } else if (intent === "supplier_action") {
+    supplierAction = detectSupplierAction(raw);
+    partyName = supplierAction?.supplierName ?? null;
+    city = supplierAction?.city ?? null;
   } else if (intent === "create_payment") {
     partyName = extractPartyName(raw, intent);
     const forReason = extractForReason(raw);
@@ -816,6 +1238,10 @@ function parseCommandTextFull(text: string): ParsedCommand {
     paymentCategory,
     receiptCategory,
     customerAction,
+    supplierAction,
+    phone,
+    whatsapp,
+    postAction,
     raw,
   };
 }
@@ -825,10 +1251,17 @@ export function parseBantooCommandText(text: string): ParsedCommand {
   return parseCommandTextFull(text);
 }
 
-/** Legacy command bar parser; create_customer and customer_action are treated as unknown. */
+/**
+ * Legacy command bar parser; create_customer, customer_action, and
+ * supplier_action are treated as unknown.
+ */
 export function parseCommandText(text: string): LegacyParsedCommand {
   const parsed = parseCommandTextFull(text);
-  if (parsed.intent === "create_customer" || parsed.intent === "customer_action") {
+  if (
+    parsed.intent === "create_customer" ||
+    parsed.intent === "customer_action" ||
+    parsed.intent === "supplier_action"
+  ) {
     return { ...parsed, intent: "unknown" };
   }
   return parsed as LegacyParsedCommand;

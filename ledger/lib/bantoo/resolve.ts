@@ -20,9 +20,11 @@ import {
   type EntityPatternCandidate,
 } from "@/lib/command-patterns";
 import { resolvePeriodToRange } from "@/lib/command-parse";
-import { getPartyContact } from "@/lib/parties";
+import { getPartyContact, normalizeText, type PartyContactInfo } from "@/lib/parties";
 import {
   LOW_CONFIDENCE_THRESHOLD,
+  type CreateCustomerAction,
+  type EditCustomerAction,
   type ExtractedAction,
 } from "@/lib/ai/actions";
 import {
@@ -31,6 +33,7 @@ import {
   type BantooFieldReasons,
   type BantooOption,
   type BantooPatternReason,
+  type BantooPlanStep,
   type BantooProposal,
   type BantooWarning,
   type BantooWarningCode,
@@ -182,6 +185,60 @@ function applyValueSuggestion(
   };
 }
 
+// --- Safety fix: silent customer identity merging ---------------------------
+// A name match alone is never enough to silently reuse an existing customer
+// for create_customer — see the module-level warning `possibleDuplicateCustomer`.
+// This only flags a conflict when BOTH sides actually have a value AND they
+// disagree; a field the existing record simply doesn't have yet (so the new
+// request is just filling it in) is not a conflict.
+function fieldConflicts(newValue: string, existingValue: string | null): boolean {
+  if (!newValue.trim() || !existingValue?.trim()) return false;
+  return normalizeText(newValue) !== normalizeText(existingValue);
+}
+
+function customerConflictsWithExisting(
+  existing: PartyContactInfo,
+  fields: { city: string; phone: string; whatsapp: string },
+): boolean {
+  return (
+    fieldConflicts(fields.city, existing.city) ||
+    fieldConflicts(fields.phone, existing.phone) ||
+    fieldConflicts(fields.whatsapp, existing.whatsapp)
+  );
+}
+
+// --- Multi-step Task Planning ------------------------------------------------
+// Builds the ordered checklist shown in the preview from every field the
+// extracted action actually carries — see the BantooPlanStep doc comment in
+// lib/bantoo/types.ts. Reads straight from the ExtractedAction (not the
+// draft) so edit_customer's plan reflects only what was actually REQUESTED to
+// change, never fields merely pre-filled from the existing record.
+function buildCustomerPlan(
+  action: CreateCustomerAction | EditCustomerAction,
+  isEdit: boolean,
+  primaryName: string,
+): BantooPlanStep[] {
+  const steps: BantooPlanStep[] = [
+    {
+      code: isEdit ? "editCustomer" : "createCustomer",
+      status: "ready",
+      ...(primaryName ? { params: { name: primaryName } } : {}),
+    },
+  ];
+  if (action.city?.trim()) steps.push({ code: "setCity", status: "ready", params: { value: action.city.trim() } });
+  if (action.phone?.trim()) steps.push({ code: "setPhone", status: "ready", params: { value: action.phone.trim() } });
+  if (action.whatsapp?.trim())
+    steps.push({ code: "setWhatsapp", status: "ready", params: { value: action.whatsapp.trim() } });
+  if (action.note?.trim()) steps.push({ code: "setNote", status: "ready", params: { value: action.note.trim() } });
+  if (action.post_action === "open_profile") {
+    steps.push({ code: "openProfile", status: "ready" });
+  }
+  for (const request of action.unsupported_requests ?? []) {
+    steps.push({ code: "unsupportedStep", status: "unavailable", params: { request } });
+  }
+  return steps;
+}
+
 // Turn a validated ExtractedAction into a client-ready proposal: fills the
 // editable draft, matches parties/items, and picks sensible default accounts —
 // all scoped to the caller's org. No writes happen here.
@@ -221,6 +278,8 @@ export async function resolveExtraction(
     needsBank: false,
     needsLineAccount: false,
     fieldReasons: {},
+    plan: [],
+    duplicateCandidate: null,
   };
 
   if (action.action === "unknown") {
@@ -257,6 +316,18 @@ export async function resolveExtraction(
       warn("customerNotFound", { name });
     } else if (!target.partyId && target.partyOptions.length > 0) {
       warn("customerAmbiguous", { name });
+    }
+  }
+
+  // Supplier & Purchasing Intelligence Sprint mirror of warnCustomerResolution
+  // above — same trio of precise, actionable codes, never "not sure".
+  function warnSupplierResolution(name: string, target: BantooProposal) {
+    if (!name.trim()) {
+      warn("enterSupplierName");
+    } else if (!target.partyId && target.partyOptions.length === 0) {
+      warn("supplierNotFound", { name });
+    } else if (!target.partyId && target.partyOptions.length > 0) {
+      warn("supplierAmbiguous", { name });
     }
   }
 
@@ -604,14 +675,43 @@ export async function resolveExtraction(
     case "create_customer": {
       draft.partyName = action.customer_name ?? "";
       draft.city = action.city ?? "";
+      draft.phone = action.phone ?? "";
+      draft.whatsapp = action.whatsapp ?? "";
+      draft.note = action.note ?? "";
+      draft.postAction = action.post_action ?? "";
       proposal.partyType = "customer";
       proposal.needsParty = true;
 
       const party = await resolveParty(draft.partyName, "customer");
       proposal.partyOptions = party.options;
-      proposal.partyId = party.id;
-      proposal.createParty = party.create;
+
+      if (party.id) {
+        // Safety fix: a name match is auto-selected here (MATCH_HIGH), but
+        // never silently reused if the new request conflicts with what's
+        // already on file — force the user to explicitly choose instead.
+        const existing = await getPartyContact(ctx.orgId, party.id);
+        if (existing && customerConflictsWithExisting(existing, draft)) {
+          proposal.partyId = null;
+          proposal.createParty = false;
+          proposal.duplicateCandidate = {
+            id: existing.id,
+            name: existing.name,
+            city: existing.city,
+            phone: existing.phone,
+            whatsapp: existing.whatsapp,
+          };
+          warn("possibleDuplicateCustomer", { name: existing.name });
+        } else {
+          proposal.partyId = party.id;
+          proposal.createParty = false;
+        }
+      } else {
+        proposal.partyId = null;
+        proposal.createParty = party.create;
+      }
       if (!draft.partyName) warn("enterCustomerName");
+
+      proposal.plan = buildCustomerPlan(action, false, draft.partyName);
       break;
     }
 
@@ -641,16 +741,21 @@ export async function resolveExtraction(
       draft.whatsapp = action.whatsapp ?? current?.whatsapp ?? "";
       draft.email = action.email ?? current?.email ?? "";
       draft.city = action.city ?? current?.city ?? "";
+      draft.note = action.note ?? "";
+      draft.postAction = action.post_action ?? "";
       if (
         proposal.partyId &&
         !draft.newName &&
         !action.phone &&
         !action.whatsapp &&
         !action.email &&
-        !action.city
+        !action.city &&
+        !action.note?.trim()
       ) {
         warn("noChangesToSave");
       }
+
+      proposal.plan = buildCustomerPlan(action, true, draft.newName || draft.partyName);
       break;
     }
 
@@ -759,6 +864,143 @@ export async function resolveExtraction(
       draft.partyName = action.customer_name ?? "";
       draft.requestedAction = action.requested;
       proposal.partyType = "customer";
+      warn("notYetAvailable");
+      break;
+    }
+
+    // --- Supplier & Purchasing Intelligence Sprint: existing-supplier
+    // workflows. Every case below is a field-for-field mirror of the
+    // matching customer_* case above (resolveParty(..., "supplier"),
+    // createParty always false, warnSupplierResolution instead of
+    // warnCustomerResolution) — see the module doc comment at the top of
+    // this file's customer block for the shared rationale.
+
+    case "edit_supplier": {
+      draft.partyName = action.supplier_name ?? "";
+      proposal.partyType = "supplier";
+      proposal.needsParty = true;
+
+      const party = await resolveParty(draft.partyName, "supplier");
+      proposal.partyOptions = party.options;
+      proposal.partyId = party.id;
+      proposal.createParty = false;
+      warnSupplierResolution(draft.partyName, proposal);
+
+      const current = proposal.partyId ? await getPartyContact(ctx.orgId, proposal.partyId) : null;
+      draft.newName = action.new_name?.trim() ?? "";
+      draft.phone = action.phone ?? current?.phone ?? "";
+      draft.whatsapp = action.whatsapp ?? current?.whatsapp ?? "";
+      draft.email = action.email ?? current?.email ?? "";
+      draft.city = action.city ?? current?.city ?? "";
+      if (
+        proposal.partyId &&
+        !draft.newName &&
+        !action.phone &&
+        !action.whatsapp &&
+        !action.email &&
+        !action.city
+      ) {
+        warn("noChangesToSave");
+      }
+      break;
+    }
+
+    case "view_supplier": {
+      draft.view = action.view;
+      proposal.partyType = "supplier";
+
+      if (action.view === "list") {
+        // Generic "search/list suppliers" — no single party to resolve.
+        break;
+      }
+
+      draft.partyName = action.supplier_name ?? "";
+      proposal.needsParty = true;
+      const party = await resolveParty(draft.partyName, "supplier");
+      proposal.partyOptions = party.options;
+      proposal.partyId = party.id;
+      proposal.createParty = false;
+      warnSupplierResolution(draft.partyName, proposal);
+      break;
+    }
+
+    case "supplier_balance": {
+      draft.partyName = action.supplier_name ?? "";
+      proposal.partyType = "supplier";
+      proposal.needsParty = true;
+
+      const party = await resolveParty(draft.partyName, "supplier");
+      proposal.partyOptions = party.options;
+      proposal.partyId = party.id;
+      proposal.createParty = false;
+      warnSupplierResolution(draft.partyName, proposal);
+      break;
+    }
+
+    case "add_supplier_note": {
+      draft.partyName = action.supplier_name ?? "";
+      draft.note = action.note ?? "";
+      proposal.partyType = "supplier";
+      proposal.needsParty = true;
+
+      const party = await resolveParty(draft.partyName, "supplier");
+      proposal.partyOptions = party.options;
+      proposal.partyId = party.id;
+      proposal.createParty = false;
+      warnSupplierResolution(draft.partyName, proposal);
+      if (!draft.note.trim()) warn("enterNoteText");
+      break;
+    }
+
+    case "contact_supplier": {
+      draft.partyName = action.supplier_name ?? "";
+      draft.contactMethod = action.method;
+      proposal.partyType = "supplier";
+      proposal.needsParty = true;
+
+      const party = await resolveParty(draft.partyName, "supplier");
+      proposal.partyOptions = party.options;
+      proposal.partyId = party.id;
+      proposal.createParty = false;
+      warnSupplierResolution(draft.partyName, proposal);
+
+      if (proposal.partyId) {
+        const current = await getPartyContact(ctx.orgId, proposal.partyId);
+        draft.phone = current?.phone ?? "";
+        draft.whatsapp = current?.whatsapp ?? "";
+        draft.email = current?.email ?? "";
+        // Never invent contact info — a missing channel is reported so the
+        // user can add it first, rather than silently failing at execute.
+        if (action.method === "call" && !draft.phone) warn("supplierMissingPhone");
+        if (action.method === "whatsapp" && !draft.whatsapp) warn("supplierMissingWhatsapp");
+        if (action.method === "email" && !draft.email) warn("supplierMissingEmail");
+      }
+      break;
+    }
+
+    case "supplier_query": {
+      draft.partyName = action.supplier_name ?? "";
+      draft.periodText = action.period_text ?? "";
+      const range = resolvePeriodToRange(action.period_text ?? null);
+      draft.dateFrom = range.from ?? "";
+      draft.dateTo = range.to ?? "";
+      proposal.partyType = "supplier";
+      proposal.needsParty = true;
+
+      const party = await resolveParty(draft.partyName, "supplier");
+      proposal.partyOptions = party.options;
+      proposal.partyId = party.id;
+      proposal.createParty = false;
+      warnSupplierResolution(draft.partyName, proposal);
+      break;
+    }
+
+    case "unsupported_supplier_action": {
+      // Recognized confidently (never "not sure") but genuinely not
+      // buildable without new backend/UI — mirrors unsupported_customer_action.
+      draft.partyName = action.supplier_name ?? "";
+      draft.requestedAction = action.requested;
+      proposal.partyType = "supplier";
       warn("notYetAvailable");
       break;
     }
