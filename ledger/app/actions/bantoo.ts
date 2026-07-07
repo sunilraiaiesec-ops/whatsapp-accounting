@@ -128,6 +128,11 @@ const inputSchema = z.object({
   itemId: z.string().nullable().default(null),
   bankAccountId: z.string().nullable().default(null),
   lineAccountId: z.string().nullable().default(null),
+  // Authoritative record of the user's explicit "use existing" vs "create
+  // new" choice from the possible-duplicate-customer prompt — see the doc
+  // comment on ExecuteBantooInput. Absent/null for every action that never
+  // showed that prompt.
+  duplicateResolution: z.enum(["use_existing", "create_new"]).nullable().default(null),
 });
 
 function parseDate(value: string): Date | null {
@@ -164,6 +169,17 @@ async function ensurePartyId(
     city?: string | null;
     phone?: string | null;
     whatsapp?: string | null;
+    // Skips the fuzzy-match safety net below and always creates a brand-new
+    // party. ONLY set this when the user has already been shown the
+    // possible-duplicate-customer prompt (resolve.ts's duplicateCandidate)
+    // and EXPLICITLY chose "create as a new customer with the same name" —
+    // i.e. `duplicateResolution === "create_new"` at the call site. Without
+    // this escape hatch, the safety net below would re-run the exact same
+    // name match that produced the duplicate prompt and silently reuse the
+    // existing party anyway, discarding the user's explicit choice (and
+    // every new field value they just entered) — see the "Golu Transport"
+    // bug postmortem in app/actions/bantoo.test.ts for the concrete repro.
+    forceCreate?: boolean;
   },
 ): Promise<string | null> {
   if (input.partyId) {
@@ -185,11 +201,18 @@ async function ensurePartyId(
     // creating a near-duplicate; anything less ambiguous is left to the
     // dropdown the user already saw, so this never silently blocks a
     // legitimate "create new" the user explicitly chose.
-    const duplicates = await findPossiblePartyDuplicates(ctx.orgId, {
-      name: input.partyName,
-    });
-    const highConfidence = duplicates.find((d) => d.score >= MATCH_HIGH);
-    if (highConfidence) return highConfidence.id;
+    //
+    // Skipped entirely when forceCreate is set — the user has already made
+    // an explicit, informed "create new" choice in response to a dedicated
+    // duplicate-review prompt, so re-litigating that decision here would
+    // just silently overturn it.
+    if (!input.forceCreate) {
+      const duplicates = await findPossiblePartyDuplicates(ctx.orgId, {
+        name: input.partyName,
+      });
+      const highConfidence = duplicates.find((d) => d.score >= MATCH_HIGH);
+      if (highConfidence) return highConfidence.id;
+    }
 
     const created = await createParty(ctx.orgId, {
       name: input.partyName.trim(),
@@ -492,6 +515,21 @@ export async function executeBantooAction(
             select: { id: true, name: true, notes: true },
           });
           if (!found) return { ok: false, error: "That customer was not found." };
+
+          // "Use existing customer" (whether from the duplicate-choice prompt
+          // or a directly-selected existing match): enrich the existing
+          // record with any new field values actually submitted, rather than
+          // silently discarding them because the party already existed. Only
+          // non-empty draft values are applied — an empty field never clears
+          // something already on file.
+          const enrichment: { city?: string; phone?: string; whatsapp?: string } = {};
+          if (draft.city.trim()) enrichment.city = draft.city;
+          if (draft.phone.trim()) enrichment.phone = draft.phone;
+          if (draft.whatsapp.trim()) enrichment.whatsapp = draft.whatsapp;
+          if (Object.keys(enrichment).length > 0) {
+            await updateParty(ctx.orgId, found.id, enrichment);
+          }
+
           if (draft.note.trim()) {
             await appendPartyNote(ctx.orgId, found.id, found.notes, draft.note.trim(), date);
           }
@@ -511,6 +549,11 @@ export async function executeBantooAction(
           city: draft.city,
           phone: draft.phone,
           whatsapp: draft.whatsapp,
+          // See ensurePartyId's forceCreate doc comment: only true when the
+          // user explicitly chose "create as a new customer with the same
+          // name" in the duplicate-review prompt this exact request already
+          // went through resolve-time.
+          forceCreate: input.duplicateResolution === "create_new",
         });
         if (!customerId) return { ok: false, error: "Enter the customer name." };
 

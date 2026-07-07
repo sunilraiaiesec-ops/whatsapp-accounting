@@ -396,6 +396,220 @@ describe("executeBantooAction org trust boundary", () => {
   });
 });
 
+// --- Bug fix: "create as new" duplicate-choice was silently ignored -------
+// Repro (from the live bug report): an existing customer "golu" (Garoua) is
+// on file. The user asks Ask Bantoo to add "Golu Transport" in Ngoundéré —
+// resolve.ts correctly flags the name-match conflict and the client shows
+// the duplicate-choice prompt. "Golu Transport" contains "golu" as a
+// substring, which scores >= MATCH_HIGH (90) in the shared fuzzy matcher
+// (lib/bantoo/match.ts), so ensurePartyId's OWN independent duplicate
+// re-check used to silently reuse the existing "golu" party — discarding the
+// user's explicit "create as a new customer with the same name" choice and
+// every new field value (city/phone/whatsapp/note) they had just entered.
+// The fix: the client now sends an authoritative `duplicateResolution` flag,
+// and execute() branches on it directly (via ensurePartyId's `forceCreate`)
+// instead of re-deriving party identity via fuzzy matching a second time.
+describe("executeBantooAction — create_customer duplicate-choice resolution (Golu Transport regression)", () => {
+  it('"create as new" choice creates a DIFFERENT party with the new name/city/phone/whatsapp/note, even though the name fuzzy-matches the existing customer at HIGH confidence', async () => {
+    // The existing "golu" (Garoua) record that resolve.ts's duplicateCandidate
+    // pointed at — "Golu Transport" contains "golu" as a substring, which
+    // scores 90 (>= MATCH_HIGH) in the shared matcher, so this is exactly the
+    // scenario that used to be silently re-matched at execute time.
+    partyFindMany.mockResolvedValue([
+      { id: "party_golu_garoua", name: "golu", type: "customer", phone: null, whatsapp: null },
+    ]);
+    createPartySpy.mockResolvedValue({ id: "party_golu_transport", name: "Golu Transport" });
+    partyFindFirst.mockResolvedValue({
+      id: "party_golu_transport",
+      name: "Golu Transport",
+      notes: null,
+    });
+
+    const input: ExecuteBantooInput = {
+      action: "create_customer",
+      draft: draft({
+        partyName: "Golu Transport",
+        city: "Ngoundéré",
+        phone: "+237699123456",
+        whatsapp: "+237699123456",
+        note: "prefers WhatsApp, pays after 14 days, do not confuse with existing Golu in Garoua",
+      }),
+      partyId: null,
+      createParty: true,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+      duplicateResolution: "create_new",
+    };
+
+    const result = await executeBantooAction(input);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // A brand-new party id — NOT the existing "golu"/Garoua record.
+      expect(result.href).toBe("/customers/party_golu_transport");
+      expect(result.href).not.toBe("/customers/party_golu_garoua");
+      // The confirmation message uses the NEW name, never the old "golu".
+      expect(result.number).toBe("Golu Transport");
+    }
+
+    // A genuinely new party was created with every submitted field — the
+    // existing-party fuzzy-match safety net was bypassed, not consulted.
+    expect(createPartySpy).toHaveBeenCalledWith("org_A", {
+      name: "Golu Transport",
+      type: "customer",
+      city: "Ngoundéré",
+      phone: "+237699123456",
+      whatsapp: "+237699123456",
+    });
+    expect(updatePartySpy).not.toHaveBeenCalled();
+    expect(updatePartyNotesSpy).toHaveBeenCalledWith(
+      "org_A",
+      "party_golu_transport",
+      expect.stringContaining("prefers WhatsApp, pays after 14 days"),
+    );
+  });
+
+  it('"use existing customer" choice enriches the EXISTING party (city/phone/whatsapp/note) instead of creating a duplicate, and the confirmation reflects the EXISTING record', async () => {
+    partyFindFirst.mockResolvedValue({
+      id: "party_golu_garoua",
+      name: "golu",
+      notes: "[2026-01-01] Regular customer",
+    });
+
+    const input: ExecuteBantooInput = {
+      action: "create_customer",
+      draft: draft({
+        partyName: "Golu Transport",
+        city: "Ngoundéré",
+        phone: "+237699123456",
+        whatsapp: "+237699123456",
+        note: "prefers WhatsApp, pays after 14 days",
+      }),
+      // The client sets partyId to the existing match's id as soon as "use
+      // existing" is chosen (see duplicateChoiceBlock in BantooCommand.tsx).
+      partyId: "party_golu_garoua",
+      createParty: false,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+      duplicateResolution: "use_existing",
+    };
+
+    const result = await executeBantooAction(input);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // Navigates to (and names) the EXISTING record — never a new one.
+      expect(result.href).toBe("/customers/party_golu_garoua");
+      expect(result.number).toBe("golu");
+    }
+
+    expect(createPartySpy).not.toHaveBeenCalled();
+    // The existing party is enriched with the newly submitted contact
+    // details rather than silently discarding them.
+    expect(updatePartySpy).toHaveBeenCalledWith("org_A", "party_golu_garoua", {
+      city: "Ngoundéré",
+      phone: "+237699123456",
+      whatsapp: "+237699123456",
+    });
+    expect(updatePartyNotesSpy).toHaveBeenCalledWith(
+      "org_A",
+      "party_golu_garoua",
+      expect.stringContaining("prefers WhatsApp, pays after 14 days"),
+    );
+  });
+
+  it("no-duplicate regression guard: a genuinely new name with no close match still creates a single new party without needing a duplicateResolution choice", async () => {
+    partyFindMany.mockResolvedValue([]);
+    createPartySpy.mockResolvedValue({ id: "cust_brand_new", name: "Brand New Person" });
+    partyFindFirst.mockResolvedValue({ id: "cust_brand_new", name: "Brand New Person", notes: null });
+
+    const input: ExecuteBantooInput = {
+      action: "create_customer",
+      draft: draft({ partyName: "Brand New Person", city: "Garoua" }),
+      partyId: null,
+      createParty: true,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+      // No duplicate prompt was ever shown for this request.
+      duplicateResolution: null,
+    };
+
+    const result = await executeBantooAction(input);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.href).toBe("/customers/cust_brand_new");
+      expect(result.number).toBe("Brand New Person");
+    }
+    expect(createPartySpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("safety net still applies when createParty=true but duplicateResolution is omitted (e.g. an older/buggy client) — never silently creates an unreviewed near-duplicate", async () => {
+    partyFindMany.mockResolvedValue([
+      { id: "party_golu_garoua", name: "golu", type: "customer", phone: null, whatsapp: null },
+    ]);
+
+    const input: ExecuteBantooInput = {
+      action: "create_customer",
+      draft: draft({ partyName: "Golu Transport", city: "Ngoundéré" }),
+      partyId: null,
+      createParty: true,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+      // duplicateResolution intentionally omitted — falls back to the
+      // pre-existing safe behavior (reuse on a HIGH-confidence match) rather
+      // than ever assuming "create new" by default.
+    };
+
+    partyFindFirst.mockResolvedValue({ id: "party_golu_garoua", name: "golu", notes: null });
+
+    const result = await executeBantooAction(input);
+    expect(result.ok).toBe(true);
+    expect(createPartySpy).not.toHaveBeenCalled();
+    if (result.ok) {
+      expect(result.href).toBe("/customers/party_golu_garoua");
+    }
+  });
+
+  it("create_supplier's simple non-duplicate path is unaffected by the duplicateResolution plumbing (no dedup-choice UI exists for suppliers yet)", async () => {
+    partyFindMany.mockResolvedValue([]);
+    createPartySpy.mockResolvedValue({ id: "sup_brand_new", name: "New Supplier Co" });
+    partyFindFirst.mockResolvedValue({ id: "sup_brand_new", name: "New Supplier Co", notes: null });
+
+    const input: ExecuteBantooInput = {
+      action: "create_supplier",
+      draft: draft({ partyName: "New Supplier Co", city: "Douala" }),
+      partyId: null,
+      createParty: true,
+      partyType: "supplier",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    };
+
+    const result = await executeBantooAction(input);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.href).toBe("/suppliers/sup_brand_new");
+      expect(result.number).toBe("New Supplier Co");
+    }
+    expect(createPartySpy).toHaveBeenCalledWith("org_A", {
+      name: "New Supplier Co",
+      type: "supplier",
+      city: "Douala",
+      phone: null,
+      whatsapp: null,
+    });
+  });
+});
+
 describe("executeBantooAction — Customer Intelligence Sprint", () => {
   it("edit_customer: updates an in-org party and returns its profile link", async () => {
     partyFindFirst.mockResolvedValue({ id: "cust_1" });

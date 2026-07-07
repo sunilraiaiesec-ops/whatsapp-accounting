@@ -370,6 +370,11 @@ export function BantooCommand() {
       itemId: itemId || null,
       bankAccountId: bankAccountId || null,
       lineAccountId: lineAccountId || null,
+      // Authoritative record of the duplicate-choice radio (see
+      // duplicateChoiceBlock) — execute() branches on this directly instead
+      // of re-deriving party identity via fuzzy matching a second time.
+      duplicateResolution:
+        duplicateChoice === "new" ? "create_new" : duplicateChoice === "existing" ? "use_existing" : null,
     };
     const result = await executeBantooAction(input);
     setExecuting(false);

@@ -311,6 +311,15 @@ export type ExecuteBantooInput = {
   itemId: string | null;
   bankAccountId: string | null;
   lineAccountId: string | null;
+  // Set only when the client showed the possible-duplicate-customer choice
+  // (see BantooDuplicateCandidate/duplicateChoiceBlock) and the user picked
+  // one of the two radio options. This is the AUTHORITATIVE record of that
+  // choice: execute() must branch on it directly rather than re-deriving
+  // party identity via fuzzy matching a second time, so "create new despite
+  // the name match" can never be silently downgraded back into reusing the
+  // existing record. `null`/omitted means no duplicate choice was involved
+  // (the normal, non-conflicting create/other-action path).
+  duplicateResolution?: "use_existing" | "create_new" | null;
 };
 
 export type BantooExecuteResult =
