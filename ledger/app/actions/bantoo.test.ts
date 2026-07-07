@@ -13,6 +13,9 @@ const listInventoryItems = vi.fn();
 const receiveGoods = vi.fn();
 const createInventoryItem = vi.fn();
 const createPayment = vi.fn();
+const createSalesInvoice = vi.fn();
+const createCreditNote = vi.fn();
+const createRefundReceipt = vi.fn();
 const createPartySpy = vi.fn();
 const updatePartySpy = vi.fn();
 const updatePartyNotesSpy = vi.fn();
@@ -70,7 +73,7 @@ vi.mock("@/lib/inventory", async (importActual) => {
 
 vi.mock("@/lib/documents", async (importActual) => {
   const actual = await importActual<typeof import("@/lib/documents")>();
-  return { ...actual, createPayment };
+  return { ...actual, createPayment, createSalesInvoice, createCreditNote, createRefundReceipt };
 });
 
 const { executeBantooAction, getBantooProductDefaults } = await import("@/app/actions/bantoo");
@@ -120,6 +123,9 @@ beforeEach(() => {
   receiveGoods.mockReset();
   createInventoryItem.mockReset();
   createPayment.mockReset();
+  createSalesInvoice.mockReset();
+  createCreditNote.mockReset();
+  createRefundReceipt.mockReset();
   createPartySpy.mockReset().mockImplementation(async (orgId: string, data: { name: string; type: string }) => ({
     id: "new_party_1",
     orgId,
@@ -1114,5 +1120,217 @@ describe("executeBantooAction — Supplier & Purchasing Intelligence Sprint", ()
       lineAccountId: null,
     });
     expect(result).toEqual({ ok: false, error: "This action is not available yet." });
+  });
+});
+
+describe("executeBantooAction — Sales Intelligence Sprint", () => {
+  it("sales_invoice: posts a credit sale with the resolved customer, income account, and due date", async () => {
+    createSalesInvoice.mockResolvedValue({ id: "inv_1", number: "INV-0001" });
+
+    const input: ExecuteBantooInput = {
+      action: "sales_invoice",
+      draft: draft({
+        amount: "50000",
+        description: "Rice delivery",
+        partyName: "Musa",
+        dueDate: "2026-08-15",
+      }),
+      partyId: "cust_1",
+      createParty: false,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: "acct_income",
+    };
+    accountFindFirst.mockResolvedValue({ id: "acct_income" });
+    partyFindFirst.mockResolvedValue({ id: "cust_1" });
+
+    const result = await executeBantooAction(input);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.href).toBe("/sales-invoices/inv_1");
+      expect(result.number).toBe("INV-0001");
+      expect(result.kind).toBe("sales_invoice");
+    }
+    expect(createSalesInvoice).toHaveBeenCalledWith(
+      "org_A",
+      expect.objectContaining({
+        partyId: "cust_1",
+        dueDate: expect.any(Date),
+        lines: [
+          expect.objectContaining({
+            description: "Rice delivery",
+            unitPrice: 50000n,
+            accountId: "acct_income",
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("sales_invoice: rejects a zero/blank amount rather than posting a zero-value invoice", async () => {
+    const input: ExecuteBantooInput = {
+      action: "sales_invoice",
+      draft: draft({ amount: "", partyName: "Musa" }),
+      partyId: "cust_1",
+      createParty: false,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: "acct_income",
+    };
+    accountFindFirst.mockResolvedValue({ id: "acct_income" });
+
+    const result = await executeBantooAction(input);
+    expect(result).toEqual({ ok: false, error: "Enter the sale amount." });
+    expect(createSalesInvoice).not.toHaveBeenCalled();
+  });
+
+  it("sales_invoice: rejects a cross-org income account", async () => {
+    accountFindFirst.mockResolvedValue(null);
+
+    const input: ExecuteBantooInput = {
+      action: "sales_invoice",
+      draft: draft({ amount: "50000", partyName: "Musa" }),
+      partyId: "cust_1",
+      createParty: false,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: "acct_other_org",
+    };
+
+    const result = await executeBantooAction(input);
+    expect(result).toEqual({ ok: false, error: "That account was not found." });
+    expect(createSalesInvoice).not.toHaveBeenCalled();
+  });
+
+  it("credit_note: posts a credit note for the resolved customer", async () => {
+    createCreditNote.mockResolvedValue({ id: "cn_1", number: "CN-0001" });
+    accountFindFirst.mockResolvedValue({ id: "acct_income" });
+    partyFindFirst.mockResolvedValue({ id: "cust_1" });
+
+    const input: ExecuteBantooInput = {
+      action: "credit_note",
+      draft: draft({ amount: "5000", description: "Returned goods", partyName: "Musa" }),
+      partyId: "cust_1",
+      createParty: false,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: "acct_income",
+    };
+
+    const result = await executeBantooAction(input);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.href).toBe("/credit-notes/cn_1");
+      expect(result.number).toBe("CN-0001");
+      expect(result.kind).toBe("credit_note");
+    }
+    expect(createCreditNote).toHaveBeenCalledWith(
+      "org_A",
+      expect.objectContaining({
+        partyId: "cust_1",
+        lines: [expect.objectContaining({ unitPrice: 5000n, accountId: "acct_income" })],
+      }),
+    );
+  });
+
+  it("credit_note: requires a resolved customer before saving", async () => {
+    accountFindFirst.mockResolvedValue({ id: "acct_income" });
+
+    const input: ExecuteBantooInput = {
+      action: "credit_note",
+      draft: draft({ amount: "5000", partyName: "" }),
+      partyId: null,
+      createParty: false,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: "acct_income",
+    };
+
+    const result = await executeBantooAction(input);
+    expect(result).toEqual({ ok: false, error: "Choose the customer to credit." });
+    expect(createCreditNote).not.toHaveBeenCalled();
+  });
+
+  it("refund_receipt: posts a cash refund with no customer attached (walk-in refund)", async () => {
+    createRefundReceipt.mockResolvedValue({ id: "rr_1", number: "RR-0001" });
+    accountFindFirst.mockImplementation(async ({ where }: { where: { id: string } }) =>
+      where.id === "acct_bank" ? { id: "acct_bank" } : { id: "acct_income" },
+    );
+
+    const input: ExecuteBantooInput = {
+      action: "refund_receipt",
+      draft: draft({ amount: "5000", partyName: "" }),
+      partyId: null,
+      createParty: false,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: "acct_bank",
+      lineAccountId: "acct_income",
+    };
+
+    const result = await executeBantooAction(input);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.href).toBe("/refund-receipts/rr_1");
+      expect(result.kind).toBe("refund_receipt");
+    }
+    expect(createRefundReceipt).toHaveBeenCalledWith(
+      "org_A",
+      expect.objectContaining({ bankAccountId: "acct_bank", partyId: null }),
+    );
+  });
+
+  it("refund_receipt: rejects when no bank/cash account is chosen", async () => {
+    const input: ExecuteBantooInput = {
+      action: "refund_receipt",
+      draft: draft({ amount: "5000" }),
+      partyId: null,
+      createParty: false,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: "acct_income",
+    };
+
+    const result = await executeBantooAction(input);
+    expect(result).toEqual({ ok: false, error: "Choose a bank or cash account." });
+    expect(createRefundReceipt).not.toHaveBeenCalled();
+  });
+
+  it("view_sales_invoice: opens the sales invoice list without resolving a party", async () => {
+    const result = await executeBantooAction({
+      action: "view_sales_invoice",
+      draft: draft({ view: "list" }),
+      partyId: null,
+      createParty: false,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(result).toEqual({ ok: true, href: "/sales-invoices", number: "", kind: "view_sales_invoice" });
+    expect(partyFindFirst).not.toHaveBeenCalled();
+  });
+
+  it("unsupported_sales_action: never silently succeeds, always reports not-available", async () => {
+    const result = await executeBantooAction({
+      action: "unsupported_sales_action",
+      draft: draft({ requestedAction: "edit" }),
+      partyId: null,
+      createParty: false,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: null,
+    });
+    expect(result).toEqual({ ok: false, error: "This action is not available yet." });
+    expect(createSalesInvoice).not.toHaveBeenCalled();
+    expect(createCreditNote).not.toHaveBeenCalled();
+    expect(createRefundReceipt).not.toHaveBeenCalled();
   });
 });

@@ -49,9 +49,19 @@ receipts, purchases, and payments by **text, photo, or voice**. Input is sent to
 an AI extraction endpoint (`/api/bantoo/extract`, voice via
 `/api/bantoo/transcribe`), classified into one of `add_inventory_item`,
 `receive_stock`, `supplier_purchase`, `customer_payment`, `expense`,
-`sales_receipt`, or `unknown`, validated with zod, and shown for
-confirm/edit before any write. Writes reuse the existing `lib/documents.ts` /
-`lib/inventory.ts` helpers.
+`sales_receipt`, `create_customer`, `create_supplier`, one of the **customer
+intelligence** actions (`edit_customer`, `view_customer`, `customer_balance`,
+`add_customer_note`, `contact_customer`, `customer_query`,
+`unsupported_customer_action`), one of the **supplier intelligence** actions
+(`edit_supplier`, `view_supplier`, `supplier_balance`, `add_supplier_note`,
+`contact_supplier`, `supplier_query`, `unsupported_supplier_action`), one of
+the **sales** actions (`sales_invoice` for a credit sale/invoice,
+`credit_note`, `refund_receipt`, `view_sales_invoice`, or
+`unsupported_sales_action` for out-of-scope requests like editing/voiding/
+emailing an existing invoice or applying a payment to one specific invoice
+number), or `unknown`, validated with zod, and shown for confirm/edit before
+any write. Writes reuse the existing `lib/documents.ts` / `lib/inventory.ts`
+helpers.
 
 - Set `OPENAI_API_KEY` in `.env` to enable photo, voice, and AI text extraction
   (uses `gpt-4o-mini` for text+vision and `whisper-1` for transcription).
