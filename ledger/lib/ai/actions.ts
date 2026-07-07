@@ -21,6 +21,14 @@ export const BANTOO_ACTION_TYPES = [
   "contact_customer",
   "customer_query",
   "unsupported_customer_action",
+  // --- Supplier & Purchasing Intelligence Sprint -------------------------
+  "edit_supplier",
+  "view_supplier",
+  "supplier_balance",
+  "add_supplier_note",
+  "contact_supplier",
+  "supplier_query",
+  "unsupported_supplier_action",
   "unknown",
 ] as const;
 
@@ -79,6 +87,33 @@ const base = {
   confidence,
   summary: ntext,
 };
+
+// A short, free-text list of additional things the user asked for that this
+// action's schema doesn't (yet) have a field for — e.g. "then invoice him,
+// then email it" tacked onto a create_customer request. Capped small; each
+// entry is rendered as an "unavailable" plan step (see resolve.ts's
+// buildCustomerPlan) instead of being silently dropped or crashing. This is
+// deliberately NOT a generic action queue — see the module doc comment in
+// lib/bantoo/types.ts on BantooPlanStep for why.
+const unsupportedRequests = z.preprocess((v) => {
+  if (v === null || v === undefined) return null;
+  const raw = Array.isArray(v) ? v : typeof v === "string" ? [v] : [];
+  const cleaned = raw
+    .filter((x): x is string => typeof x === "string")
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .slice(0, 5);
+  return cleaned.length ? cleaned : null;
+}, z.array(z.string().max(200)).max(5).nullable());
+
+// What to do right after a create_customer/edit_customer save succeeds, e.g.
+// "then open his profile". Anything unrecognized (including absent/empty)
+// becomes null rather than a guess — the plan simply omits that step.
+const postCustomerAction = z.preprocess((v) => {
+  if (typeof v !== "string") return null;
+  const t = v.trim().toLowerCase().replace(/\s+/g, "_");
+  return t === "open_profile" ? "open_profile" : null;
+}, z.enum(["open_profile"]).nullable());
 
 export const addInventoryItemSchema = z.object({
   action: z.literal("add_inventory_item"),
@@ -156,12 +191,29 @@ export const salesReceiptSchema = z.object({
   ...base,
 });
 
+// Multi-step Task Planning: a single "create a customer" message often carries
+// more than just a name — city, phone, WhatsApp, an internal note, and/or a
+// "then open their profile" follow-up all in one sentence (e.g. "Add Elhaji
+// Adamou, his phone is 690123456, his WhatsApp is the same, leave a note that
+// he pays every Friday, then open his profile"). Every one of those is
+// captured here in the SAME action object instead of being dropped, and
+// resolve.ts turns them into an ordered checklist (see BantooPlanStep).
 export const createCustomerSchema = z.object({
   action: z.literal("create_customer"),
   customer_name: ntext,
   city: ntext,
   phone: ntext,
+  whatsapp: ntext,
   country: ntext,
+  // Internal note to save on the new customer's record (e.g. "pays every
+  // Friday after Jummah") — never a payment/balance, purely a text note.
+  note: ntext,
+  // e.g. "open_profile" when the user asked to view/open the profile once
+  // saved. Null when not requested.
+  post_action: postCustomerAction,
+  // Things the user asked for that aren't part of this action (e.g. "then
+  // invoice him") — surfaced as "not available yet" plan steps, never built.
+  unsupported_requests: unsupportedRequests,
   currency,
   ...base,
 });
@@ -179,6 +231,11 @@ export const editCustomerSchema = z.object({
   phone: ntext,
   whatsapp: ntext,
   email: ntext,
+  // Same Multi-step Task Planning fields as create_customer above — a single
+  // "update Musa's phone and leave a note" message captures both in one shot.
+  note: ntext,
+  post_action: postCustomerAction,
+  unsupported_requests: unsupportedRequests,
   currency,
   ...base,
 });
@@ -237,7 +294,9 @@ export const customerQuerySchema = z.object({
   ...base,
 });
 
-const unsupportedCustomerRequest = z
+// Shared by both customer and supplier "unsupported" schemas — none of these
+// values are party-type-specific.
+const unsupportedPartyRequest = z
   .enum(["archive", "reactivate", "merge", "upload_document"])
   .catch("archive");
 
@@ -247,7 +306,96 @@ const unsupportedCustomerRequest = z
 export const unsupportedCustomerActionSchema = z.object({
   action: z.literal("unsupported_customer_action"),
   customer_name: ntext,
-  requested: unsupportedCustomerRequest,
+  requested: unsupportedPartyRequest,
+  currency,
+  ...base,
+});
+
+// ---------------------------------------------------------------------------
+// Supplier & Purchasing Intelligence Sprint: existing-supplier workflows,
+// mirroring the Customer Intelligence Sprint schemas above field-for-field
+// (customer_name -> supplier_name). See lib/bantoo/resolve.ts and
+// app/actions/bantoo.ts for the resolution/execution mirrors.
+// ---------------------------------------------------------------------------
+
+// Update fields on an EXISTING supplier. `supplier_name` identifies who to
+// resolve; every other field is an optional change to apply — null/absent
+// means "leave unchanged".
+export const editSupplierSchema = z.object({
+  action: z.literal("edit_supplier"),
+  supplier_name: ntext,
+  new_name: ntext,
+  city: ntext,
+  phone: ntext,
+  whatsapp: ntext,
+  email: ntext,
+  currency,
+  ...base,
+});
+
+// Unlike customers, there is no single-supplier "statement" report page
+// (only reports/customer-statement exists; reports/supplier-balances and
+// reports/ap-aging are org-wide, not per-supplier) — so "statement" is
+// deliberately absent from this enum. Any AI/pattern guess of "statement"
+// falls back to "profile" via .catch(), the same convention used everywhere
+// else in this file for an unrecognized/invalid enum value.
+const supplierViewTarget = z.enum(["profile", "ledger", "documents", "list"]).catch("profile");
+
+// Navigation-only: resolve a supplier (or none, for "list") and hand back
+// enough to deep-link into the existing supplier pages. Never writes
+// anything.
+export const viewSupplierSchema = z.object({
+  action: z.literal("view_supplier"),
+  supplier_name: ntext,
+  view: supplierViewTarget,
+  currency,
+  ...base,
+});
+
+// Outstanding PAYABLE balance — how much the org owes this supplier (opposite
+// direction from customer_balance's receivable). Fields: supplier_name.
+export const supplierBalanceSchema = z.object({
+  action: z.literal("supplier_balance"),
+  supplier_name: ntext,
+  currency,
+  ...base,
+});
+
+export const addSupplierNoteSchema = z.object({
+  action: z.literal("add_supplier_note"),
+  supplier_name: ntext,
+  note: ntext,
+  currency,
+  ...base,
+});
+
+export const contactSupplierSchema = z.object({
+  action: z.literal("contact_supplier"),
+  supplier_name: ntext,
+  method: contactMethod,
+  currency,
+  ...base,
+});
+
+// Read-only, free-text question about what was bought FROM a specific
+// supplier (e.g. "what did we buy from Elhaji last month"). Answered from
+// existing org-scoped party data (lib/party-insights.ts) — never writes
+// anything.
+export const supplierQuerySchema = z.object({
+  action: z.literal("supplier_query"),
+  supplier_name: ntext,
+  question: ntext,
+  period_text: ntext,
+  currency,
+  ...base,
+});
+
+// Recognized-but-not-yet-buildable supplier commands (archive/reactivate/
+// merge/upload document) — mirrors unsupported_customer_action exactly.
+export const unsupportedSupplierActionSchema = z.object({
+  action: z.literal("unsupported_supplier_action"),
+  supplier_name: ntext,
+  requested: unsupportedPartyRequest,
   currency,
   ...base,
 });
@@ -273,6 +421,13 @@ export const extractedActionSchema = z.discriminatedUnion("action", [
   contactCustomerSchema,
   customerQuerySchema,
   unsupportedCustomerActionSchema,
+  editSupplierSchema,
+  viewSupplierSchema,
+  supplierBalanceSchema,
+  addSupplierNoteSchema,
+  contactSupplierSchema,
+  supplierQuerySchema,
+  unsupportedSupplierActionSchema,
   unknownSchema,
 ]);
 
@@ -291,6 +446,13 @@ export type AddCustomerNoteAction = z.infer<typeof addCustomerNoteSchema>;
 export type ContactCustomerAction = z.infer<typeof contactCustomerSchema>;
 export type CustomerQueryAction = z.infer<typeof customerQuerySchema>;
 export type UnsupportedCustomerActionAction = z.infer<typeof unsupportedCustomerActionSchema>;
+export type EditSupplierAction = z.infer<typeof editSupplierSchema>;
+export type ViewSupplierAction = z.infer<typeof viewSupplierSchema>;
+export type SupplierBalanceAction = z.infer<typeof supplierBalanceSchema>;
+export type AddSupplierNoteAction = z.infer<typeof addSupplierNoteSchema>;
+export type ContactSupplierAction = z.infer<typeof contactSupplierSchema>;
+export type SupplierQueryAction = z.infer<typeof supplierQuerySchema>;
+export type UnsupportedSupplierActionAction = z.infer<typeof unsupportedSupplierActionSchema>;
 export type UnknownAction = z.infer<typeof unknownSchema>;
 
 // Confidence below this is treated as "not sure" — the UI must warn the user and

@@ -83,7 +83,63 @@ export type BantooWarningCode =
   | "missingPhone"
   | "missingWhatsapp"
   | "missingEmail"
-  | "notYetAvailable";
+  | "notYetAvailable"
+  // Raised for create_customer when the resolved name matches an EXISTING
+  // customer AND the new request conflicts with (or is otherwise ambiguous
+  // against) that customer's stored details — see BantooDuplicateCandidate.
+  // The UI must force an explicit "use existing" vs "create new" choice
+  // before Confirm & Save is enabled; never silently proceed either way.
+  | "possibleDuplicateCustomer"
+  // --- Supplier & Purchasing Intelligence Sprint -------------------------
+  | "supplierNotFound"
+  | "supplierAmbiguous"
+  | "enterSupplierName"
+  | "supplierMissingPhone"
+  | "supplierMissingWhatsapp"
+  | "supplierMissingEmail";
+
+// The existing customer record a create_customer request's name matched,
+// shown side-by-side with the newly-typed details so the user can tell at a
+// glance whether it's really the same person. Never used to silently merge
+// data — see `possibleDuplicateCustomer` above.
+export type BantooDuplicateCandidate = {
+  id: string;
+  name: string;
+  city: string | null;
+  phone: string | null;
+  whatsapp: string | null;
+};
+
+// Multi-step Task Planning (see the module doc comment above BantooProposal's
+// `plan` field for the "why"). "ready" steps will actually execute on
+// Confirm & Save; "unavailable" steps are shown as a plan item but never
+// executed — they exist purely so a compound request like "...then invoice
+// him" doesn't silently drop that clause, it's surfaced and clearly marked
+// as not-yet-buildable instead.
+export type BantooPlanStepStatus = "ready" | "unavailable";
+
+// Deliberately a small, closed set scoped to what create_customer/
+// edit_customer can actually carry today, NOT a generic action registry —
+// see lib/ai/actions.ts's `unsupportedRequests` doc comment for why a full
+// multi-action queue is out of scope for this sprint.
+export type BantooPlanStepCode =
+  | "createCustomer"
+  | "editCustomer"
+  | "setCity"
+  | "setPhone"
+  | "setWhatsapp"
+  | "setNote"
+  | "openProfile"
+  | "unsupportedStep";
+
+export type BantooPlanStep = {
+  code: BantooPlanStepCode;
+  status: BantooPlanStepStatus;
+  // Interpolation params for the localized label, e.g. { name: "Elhaji
+  // Adamou" } for "createCustomer", { value: "690123456" } for "setPhone", or
+  // { request: "then invoice him" } for "unsupportedStep".
+  params?: Record<string, string | number>;
+};
 
 export type BantooWarning = {
   code: BantooWarningCode;
@@ -182,6 +238,11 @@ export type BantooDraft = {
   // unsupported_customer_action: which recognized-but-unbuilt action was
   // requested, purely for potential debugging/analytics — never executed.
   requestedAction: string;
+  // Multi-step Task Planning: what to do right after create_customer/
+  // edit_customer saves successfully. "" | "open_profile" — plain string
+  // like every other draft field, resolved into a real navigation by the
+  // caller once the save succeeds (see BantooCommand.tsx).
+  postAction: string;
 };
 
 // The proposal returned to the client after AI extraction + org-scoped
@@ -213,6 +274,18 @@ export type BantooProposal = {
   // learning (lib/command-patterns.ts), for the small muted hint under a field.
   // Absent/empty when no pattern signal applied.
   fieldReasons: BantooFieldReasons;
+  // Multi-step Task Planning: ordered checklist built from every field this
+  // action carries (see buildCustomerPlan in resolve.ts). Empty for actions
+  // that don't have a plan representation yet (everything except
+  // create_customer/edit_customer, for now).
+  plan: BantooPlanStep[];
+  // Set only for create_customer when the resolved party name matched an
+  // EXISTING customer AND the incoming request conflicts with (or is
+  // otherwise ambiguous against) that customer's stored details. When set,
+  // `partyId` is deliberately left null and `createParty` false — the client
+  // MUST require the user to explicitly choose "use existing" vs "create
+  // new" (see the `possibleDuplicateCustomer` warning) before Confirm & Save.
+  duplicateCandidate: BantooDuplicateCandidate | null;
 };
 
 // What the client sends back on Confirm. The server re-validates everything and
@@ -263,5 +336,6 @@ export function emptyDraft(): BantooDraft {
     dateTo: "",
     contactMethod: "",
     requestedAction: "",
+    postAction: "",
   };
 }
