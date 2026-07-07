@@ -198,6 +198,19 @@ const RECEIPT_PATTERNS = [
   /\b(aaya|aya|aayi|aaye)\b/i,
   /\bpayment\s+(?:milli|mila|mili|received|aayi|aaya|mil gayi|mil gaya)\b/i,
   /\b(humko|hame|humein|humne)\b.+\b(milli|mila|mili|aaya|aya)\b/i,
+  // QA Reliability Swarm (Track 7) fix: the noun form "payment"/"paiement"
+  // (as opposed to the verb "pay(?:é)?"/"paid" already covered by
+  // PAYMENT_PATTERNS) previously matched neither list — "Record a payment
+  // of 50,000 XAF from Golu Transport Ltd." fell all the way through to
+  // "unknown". Adding the bare noun here (and mirrored in PAYMENT_PATTERNS
+  // below) makes BOTH `isReceipt` and `isPayment` true for it, which is
+  // intentional: the existing from/to preposition tie-break just below
+  // (lines checking `from|de|client` vs `to|à|fournisseur|supplier|for|pour`)
+  // already correctly resolves the direction from context, exactly as it
+  // does today for sentences that already contain both a receipt AND a
+  // payment keyword.
+  /\bpayments?\b/i,
+  /\bpaiements?\b/i,
 ];
 
 const STOCK_RECEIPT_PATTERNS = [
@@ -224,6 +237,11 @@ const PAYMENT_PATTERNS = [
   /\b(diya|diye|di gayi|de diya|de diye|bheja|bheje|pay kiya|pay kar diya)\b/i,
   /\bpaid\s+to\b/i,
   /\bpay\s+(?:to|ko)\b/i,
+  // See the matching comment on RECEIPT_PATTERNS above — noun-form
+  // "payment"/"paiement" must set both signals so the from/to preposition
+  // check can disambiguate direction instead of defaulting to "unknown".
+  /\bpayments?\b/i,
+  /\bpaiements?\b/i,
 ];
 
 const HINDI_FROM_SUFFIX =
@@ -242,6 +260,12 @@ const TO_PARTY_PATTERN =
   /\b(?:to|à|au|a|supplier|fournisseur|vendor)\s+(.+?)(?:\s+(?:for|pour|on|le|today|hier|yesterday)|$)/i;
 
 const FOR_REASON_PATTERN = /\b(?:for|pour)\s+(.+)$/i;
+
+// QA Reliability Swarm (Track 7) fix: used to detect an explicit "sale"/
+// "vente" noun inside a "for/pour <reason>" clause so a named-party receipt
+// with that reason gets classified as a cash sale rather than a generic
+// customer-balance payment (see the create_receipt branch below).
+const SALE_REASON_PATTERN = /\b(?:sale|sales|vente|ventes)\b/i;
 
 // Launch-blocking bug fix: the verb group below was originally just
 // "add|create|new" (EN) / "ajouter|créer|creer|nouveau" (FR) — too narrow for
@@ -365,26 +389,40 @@ function parseSupplierEditTail(tail: string) {
   return parseEditFieldsTail(tail, cleanSupplierName);
 }
 
+// QA Reliability Swarm (Track 6) precision fix: the literal noun
+// "customer(s)"/"client(s)" used to be REQUIRED immediately after the verb
+// in every pattern below, so natural phrasings with no explicit noun at all
+// ("Archive Musa.", "Merge Musa Trading and Musa Ltd.", "Upload this
+// document for Musa's profile.") fell through to a generic "unknown"
+// instead of the confident "not available yet" response this sprint was
+// built to provide. The noun is now OPTIONAL (still recognized/preferred
+// when present) — these patterns only ever produce an `unsupported_*`
+// classification (never a write), so the cost of a slightly looser match is
+// low, and it's exactly the precision the product brief asked for. The FR
+// merge pattern is also brought in line with its archive/reactivate
+// siblings, which already accepted the optional singular article
+// `(?:le\s+)?client` — merge previously only accepted the plural.
+//
 // Ordered most-specific-first: merge/archive/reactivate/upload before the
 // generic edit/view/search patterns so they never get shadowed.
 const CUSTOMER_UNSUPPORTED_MERGE = [
-  /\bmerge\s+(?:duplicate\s+)?customers?\s+(.+?)\s+(?:and|with)\s+(.+)$/i,
-  /\bfusionner\s+(?:les\s+)?clients?\s+(.+?)\s+(?:et|avec)\s+(.+)$/i,
+  /\bmerge\s+(?:duplicate\s+)?(?:customers?\s+)?(.+?)\s+(?:and|with)\s+(.+)$/i,
+  /\bfusionner\s+(?:les?\s+)?(?:clients?\s+)?(.+?)\s+(?:et|avec)\s+(.+)$/i,
 ];
 
 const CUSTOMER_UNSUPPORTED_ARCHIVE = [
-  /\barchive\s+customer\s+(.+)$/i,
-  /\barchiver\s+(?:le\s+)?client\s+(.+)$/i,
+  /\barchive\s+(?:customer\s+)?(.+)$/i,
+  /\barchiver\s+(?:le\s+)?(?:client\s+)?(.+)$/i,
 ];
 
 const CUSTOMER_UNSUPPORTED_REACTIVATE = [
-  /\breactivate\s+customer\s+(.+)$/i,
-  /\br[ée]activer\s+(?:le\s+)?client\s+(.+)$/i,
+  /\breactivate\s+(?:customer\s+)?(.+)$/i,
+  /\br[ée]activer\s+(?:le\s+)?(?:client\s+)?(.+)$/i,
 ];
 
 const CUSTOMER_UNSUPPORTED_UPLOAD = [
-  /\bupload\s+(?:a\s+)?document\s+(?:for|to)\s+customer\s+(.+)$/i,
-  /\b(?:t[ée]l[ée]verser|t[ée]l[ée]charger|importer)\s+(?:un\s+)?document\s+(?:pour|au)\s+client\s+(.+)$/i,
+  /\bupload\s+(?:this\s+|a\s+|the\s+)?document\s+(?:for|to)\s+(?:customer\s+)?(.+?)(?:'s\s+profile\b.*)?$/i,
+  /\b(?:t[ée]l[ée]verser|t[ée]l[ée]charger|importer)\s+(?:ce\s+|un\s+|le\s+)?document\s+(?:pour|au)\s+(?:client\s+)?(.+)$/i,
 ];
 
 const CUSTOMER_ADD_NOTE = [
@@ -984,6 +1022,23 @@ function splitSalesTail(tail: string): {
   const dueDateDays = extractSalesDueDateDays(tail);
   const withoutDueDate = dueDateDays ? tail.replace(SALES_DUE_DATE_DAYS, "").trim() : tail;
 
+  // QA Reliability Swarm (Track 7) fix: a colon right after the customer's
+  // name ("Musa: 25 bags of rice at 12,000 XAF each.") is an unambiguous
+  // name/item-description boundary. Handling it first avoids the generic
+  // for/pour/de/of split below, which — being a first-match, not
+  // last-match, split — can land mid-clause on an "of" that occurs
+  // naturally inside an itemized quantity phrase ("bags OF rice") well
+  // before the real end of the name.
+  const colonMatch = withoutDueDate.match(/^([^:]+):\s*(.+)$/);
+  if (colonMatch?.[1] && colonMatch[2]) {
+    const description = cleanDescription(stripTrailingPunctuation(colonMatch[2]));
+    return {
+      name: cleanCustomerName(colonMatch[1]),
+      description: description || null,
+      dueDateDays,
+    };
+  }
+
   const m = withoutDueDate.match(/\s+(?:for|pour|de|of)\s+(.+)$/i);
   if (m?.[1]) {
     const description = cleanDescription(stripTrailingPunctuation(m[1]));
@@ -1191,6 +1246,20 @@ function detectIntent(text: string): CommandIntent {
   if (detectCustomerAction(text)) return "customer_action";
   if (detectSalesAction(text)) return "sales_action";
 
+  // QA Reliability Swarm (Track 6/7) regression guard: adding the bare noun
+  // forms "payment"/"paiement" to PAYMENT_PATTERNS (below) so that commands
+  // like "Record a payment of..." classify correctly (Fix G) had a side
+  // effect on "Apply a payment to Musa's oldest invoice" — a phrasing
+  // SALES_UNSUPPORTED_APPLY_PAYMENT doesn't match (it's scoped to an
+  // explicit invoice NUMBER, a documented, out-of-scope gap) — which used to
+  // safely fall through to "unknown" but would otherwise now be
+  // misclassified as a real create_payment/expense transaction. Any mention
+  // of applying a payment to an invoice — with or without an explicit
+  // number — must never be silently treated as an unrelated transaction.
+  if (/\bapply\b.*\bpayment\b.*\binvoice\b/i.test(text) || /\bappliquer\b.*\bpaiement\b.*\bfacture\b/i.test(text)) {
+    return "unknown";
+  }
+
   if (CASH_SALE_PATTERNS.some((p) => p.test(lower))) return "create_receipt";
 
   const isReceipt = RECEIPT_PATTERNS.some((p) => p.test(lower));
@@ -1251,24 +1320,32 @@ function extractAmount(text: string): string | null {
     .trim();
 
   const patterns = [
-    /(\d[\d\s,.'']*(?:\.\d+)?)\s*(?:million|millions|mio|m\b)/i,
-    /(\d[\d\s,.'']*(?:\.\d+)?)/,
+    /(\d[\d\s,.'']*(?:\.\d+)?)\s*(?:million|millions|mio|m\b)/gi,
+    /(\d[\d\s,.'']*(?:\.\d+)?)/g,
   ];
 
   for (const pattern of patterns) {
-    const match = normalized.match(pattern);
-    if (!match?.[1]) continue;
-    const matchIndex = match.index ?? 0;
-    if (isQuantityNumber(normalized, matchIndex)) continue;
-    let raw = match[1].replace(/[\s,.'']/g, "");
-    const slice = normalized.slice(match.index ?? 0, (match.index ?? 0) + match[0].length + 10);
-    if (/million|millions|mio|\bm\b/i.test(slice)) {
-      const base = Number.parseFloat(raw);
-      if (!Number.isNaN(base)) {
-        raw = String(Math.round(base * 1_000_000));
+    // QA Reliability Swarm (Track 7) fix: this used to call `.match()`
+    // (no `/g` flag), which only ever inspects the FIRST numeric match in
+    // the text — if that first number turned out to be a quantity (e.g.
+    // "25" in "25 bags of rice at 12,000 XAF each."), the function gave up
+    // entirely instead of continuing to scan for the actual amount later in
+    // the sentence. `matchAll` (with the patterns above now global) lets it
+    // keep walking forward past quantity numbers to find the real one.
+    for (const match of normalized.matchAll(pattern)) {
+      if (!match[1]) continue;
+      const matchIndex = match.index ?? 0;
+      if (isQuantityNumber(normalized, matchIndex)) continue;
+      let raw = match[1].replace(/[\s,.'']/g, "");
+      const slice = normalized.slice(matchIndex, matchIndex + match[0].length + 10);
+      if (/million|millions|mio|\bm\b/i.test(slice)) {
+        const base = Number.parseFloat(raw);
+        if (!Number.isNaN(base)) {
+          raw = String(Math.round(base * 1_000_000));
+        }
       }
+      if (raw && raw !== "0") return raw;
     }
-    if (raw && raw !== "0") return raw;
   }
   return null;
 }
@@ -1392,7 +1469,14 @@ function extractCashSaleCustomerName(raw: string): string | null {
     stripped = stripped.replace(pattern, " ");
   }
 
-  const enMatch = stripped.match(/\b(?:from|by)\s+(.+)$/i);
+  // QA Reliability Swarm (Track 7) fix: this used to capture `(.+)$` — the
+  // entire remainder of the string — so a trailing "for <item>" clause (e.g.
+  // "Cash sale of 25,000 XAF from Musa for rice.") got swallowed into the
+  // name ("Musa for rice"). Bounded the capture the same way FROM_PATTERN
+  // already does, stopping before a trailing for/pour/on/le/today/etc clause.
+  const enMatch = stripped.match(
+    /\b(?:from|by)\s+(.+?)(?:\s+(?:for|pour|on|le|today|hier|yesterday)|$)/i,
+  );
   if (enMatch?.[1]) {
     const cleaned = cleanLabel(enMatch[1]);
     if (cleaned.length >= 2) return cleaned;
@@ -1402,7 +1486,9 @@ function extractCashSaleCustomerName(raw: string): string | null {
   // e.g. "Record A cash sale..." → would otherwise misfire); only the
   // accented French forms are matched. Uses NOT_WORD_BOUNDARY (not \b) since
   // "à" is itself an accented character — see its doc comment above.
-  const frMatch = stripped.match(new RegExp(`${NOT_WORD_BOUNDARY}(?:à|au)\\s+(.+)$`, "i"));
+  const frMatch = stripped.match(
+    new RegExp(`${NOT_WORD_BOUNDARY}(?:à|au)\\s+(.+?)(?:\\s+(?:for|pour|on|le|today|hier|yesterday)|$)`, "i"),
+  );
   if (frMatch?.[1]) {
     const cleaned = cleanLabel(frMatch[1]);
     if (cleaned.length >= 2) return cleaned;
@@ -1434,13 +1520,46 @@ function stripSupplierNameLead(text: string): string {
 // ", his phone...") so the remaining core clause doesn't end with a dangling
 // "his"/"son".
 const TRAILING_CLAUSE_LEAD =
-  /,?\s*(?:his|her|their|son|sa|ses|leur)?\s*\b(?:phone|t[ée]l[ée]phone|tel|whatsapp|note|then|puis|ensuite|and\s+then|et\s+ensuite)\b/i;
+  /,?\s*(?:his|her|their|son|sa|ses|leur)?\s*\b(?:phone|t[ée]l[ée]phone|tel|whatsapp|email|tax\s*id|payment\s+terms?|credit\s+limit|default\s+discount|note|then|puis|ensuite|and\s+then|et\s+ensuite)\b/i;
 
-function stripTrailingClauses(raw: string): string {
-  const m = raw.match(TRAILING_CLAUSE_LEAD);
-  if (!m || m.index === undefined) return raw;
-  return raw.slice(0, m.index).replace(/[,.\s]+$/, "").trim();
+// QA Reliability Swarm (Track 5) fix: this used to search the FULL raw text
+// for the first TRAILING_CLAUSE_LEAD keyword anywhere, direction-blind — so
+// a field-order-scrambled message with a phone/whatsapp/note clause stated
+// BEFORE the actual create-clause (e.g. "Phone 690112233, save Bafia Timber
+// Exports as a supplier.") got sliced down to an empty string before
+// name/city extraction ever ran, because "Phone" was the very first word.
+// Fix: only strip a clause that appears AFTER the role noun
+// ("customer"/"client"/"supplier"/"vendor"/"fournisseur") — i.e. genuinely
+// TRAILING the create-clause, never a clause that precedes it in a scrambled
+// sentence. `roleNounPattern` is optional so non-create-party callers (none
+// today, but keeps this general) still get the old whole-string behavior.
+function stripTrailingClauses(raw: string, roleNounPattern?: RegExp): string {
+  const searchFrom = roleNounPattern ? (raw.match(roleNounPattern)?.index ?? 0) : 0;
+  const tail = raw.slice(searchFrom);
+  const m = tail.match(TRAILING_CLAUSE_LEAD);
+  const cut = m && m.index !== undefined ? raw.slice(0, searchFrom + m.index) : raw;
+  // Trailing sentence punctuation (a period/exclamation/question mark ending
+  // the message, e.g. "Add Olam as a supplier.") must never block the
+  // name/city regexes below, which anchor to end-of-string — this single
+  // shared strip covers both create_customer and create_supplier, since both
+  // route through this same function (QA Reliability Swarm Track 2 finding).
+  //
+  // QA Reliability Swarm (Track 5) fix: cutting right before a clause-lead
+  // keyword (e.g. "...based in Bafia, and note that...") can leave a
+  // dangling conjunction ("and"/"et") immediately before the cut point —
+  // the keyword itself is gone, but the word that joined it to the
+  // preceding clause is still there, and TRAILING_CITY_CLAUSE's end-anchored
+  // capture happily swallows it into the city ("Bafia, and"). Strip a
+  // trailing bare conjunction the same way trailing punctuation is stripped.
+  return cut
+    .replace(/[,.!?\s]+$/, "")
+    .replace(/,?\s*\b(?:and|et)\s*$/i, "")
+    .replace(/[,.!?\s]+$/, "")
+    .trim();
 }
+
+const CUSTOMER_ROLE_NOUN = /\b(?:customers?|clients?)\b/i;
+const SUPPLIER_ROLE_NOUN = /\b(?:suppliers?|vendors?|fournisseurs?)\b/i;
 
 function extractCreateCustomerPhone(raw: string): string | null {
   const m = raw.match(
@@ -1484,10 +1603,19 @@ function extractCreateCustomerPaymentTermsDays(raw: string): number | null {
 }
 
 function extractCreateCustomerCreditLimit(raw: string): string | null {
-  const m = raw.match(/\bcredit\s+limit\b(?:\s+of)?\s*:?\s*([\d\s,.'']+)/i);
+  // QA Reliability Swarm (Track 5) fix: honor an "X million" shorthand
+  // (e.g. "credit limit 2 million XAF") the same way extractAmount() already
+  // does for transaction amounts, instead of silently truncating to the
+  // bare leading digit(s).
+  const m = raw.match(/\bcredit\s+limit\b(?:\s+of)?\s*:?\s*([\d\s,.'']+)\s*(million|millions|mio|m)?\b/i);
   if (!m?.[1]) return null;
   const digits = m[1].replace(/[\s,.'']/g, "");
-  return digits && digits !== "0" ? digits : null;
+  if (!digits || digits === "0") return null;
+  if (m[2]) {
+    const base = Number.parseFloat(digits);
+    if (!Number.isNaN(base)) return String(Math.round(base * 1_000_000));
+  }
+  return digits;
 }
 
 function extractCreateCustomerDefaultDiscount(raw: string): string | null {
@@ -1506,9 +1634,44 @@ function extractCreateCustomerPostAction(raw: string): "open_profile" | null {
     : null;
 }
 
+// QA Reliability Swarm (Track 5) fix — trailing-city capture group shared by
+// every pattern below: originally `(?:\s+(?:in|à|a|en)\s+(.+?))?$`, which
+// required the city clause to follow the role noun with nothing but bare
+// whitespace in between. A comma ("...as a customer, in Garoua") or a common
+// linking word ("...as a customer based in Garoua") is extremely natural
+// phrasing and made the ENTIRE name+city capture fail (not just the city),
+// since the whole regex is anchored to end-of-string. Now tolerates an
+// optional leading comma and "based"/"located" before "in/à/a/en".
+//
+// The mandatory `\s+` immediately before the optional "based"/"located" (and
+// therefore also before a bare "in|à|a|en") is load-bearing, not decorative:
+// an earlier version made ALL whitespace ahead of the location keyword
+// optional (to allow "based in"/"located in"), which then let "in"/"a"/"en"
+// match as a bare substring INSIDE an ordinary word in the lazily-growing
+// name capture — e.g. the "in" inside "Grain" (as in "Sahel Grain
+// Traders") — truncating the name mid-word ("Sahel Gra") with the rest
+// swallowed into "city" ("Traders in Maroua"). A `\b` word-boundary assertion
+// looks like the obvious fix, but JS's `\b` is ASCII-only: it doesn't treat
+// "à" as a word character, so `\b` right before "à" silently fails to match
+// the (correct, working) French "à Maroua" phrasing at all. Requiring a real
+// `\s+` here instead fixes the substring-collision bug (an in-word "in" is
+// never preceded by whitespace) without any Unicode-boundary pitfalls.
+const TRAILING_CITY_CLAUSE = "(?:,?\\s+(?:(?:based|located)\\s+)?(?:in|à|a|en)\\s+(.+?))?$";
+
 function extractCreateCustomerDetails(text: string): { name: string | null; city: string | null } {
+  // QA Reliability Swarm (Track 5) fix: "new" ends up in the generic
+  // create-verb alternation (see the `prefixed` pattern below, kept for
+  // "create a NEW customer X" phrasing) but that same word is exactly the
+  // adjective naturally used in "...as a NEW customer" — without this
+  // explicit `(?:new\s+)?` allowance here, that phrasing fails to match this
+  // (correct, name-preserving) `asRole` pattern at all and falls through to
+  // `prefixed`, which then mismatches "new" itself as the leading verb and
+  // discards the real name entirely.
   const asRole = text.match(
-    /\b(?:add|save|register|ajouter|enregistrer|enregistrez|enregistre)\s+(.+?)\s+(?:as\s+(?:a\s+)?(?:customer|client)|comme\s+cliente?s?)\b(?:\s+(?:in|à|a|en)\s+(.+?))?$/i,
+    new RegExp(
+      `\\b(?:add|save|register|ajouter|enregistrer|enregistrez|enregistre)\\s+(.+?)\\s+(?:as\\s+(?:a\\s+)?(?:new\\s+)?(?:customer|client)|comme\\s+(?:nouvelle?\\s+)?cliente?s?)\\b${TRAILING_CITY_CLAUSE}`,
+      "i",
+    ),
   );
   if (asRole?.[1]) {
     const name = stripCustomerNameLead(asRole[1]);
@@ -1517,7 +1680,10 @@ function extractCreateCustomerDetails(text: string): { name: string | null; city
   }
 
   const namedRole = text.match(
-    /\b(?:client|customer|un\s+client)\s+(?:nommé|nomme|named|called|appelé|appele|appellé)\s+(.+?)(?:\s+(?:in|à|a|en)\s+(.+?))?$/i,
+    new RegExp(
+      `\\b(?:client|customer|un\\s+client)\\s+(?:nommé|nomme|named|called|appelé|appele|appellé)\\s+(.+?)${TRAILING_CITY_CLAUSE}`,
+      "i",
+    ),
   );
   if (namedRole?.[1]) {
     const name = stripCustomerNameLead(namedRole[1]);
@@ -1526,7 +1692,10 @@ function extractCreateCustomerDetails(text: string): { name: string | null; city
   }
 
   const prefixed = text.match(
-    /\b(?:add|create|new|save|register|ajouter|cr[ée]er|nouveau|enregistrer|enregistrez|enregistre)\s+(?:a\s+)?(?:customers?|clients?|un\s+client)\s+(.+?)(?:\s+(?:in|à|a|en)\s+(.+?))?$/i,
+    new RegExp(
+      `\\b(?:add|create|new|save|register|ajouter|cr[ée]er|nouveau|enregistrer|enregistrez|enregistre)\\s+(?:a\\s+)?(?:customers?|clients?|un\\s+client)\\s+(.+?)${TRAILING_CITY_CLAUSE}`,
+      "i",
+    ),
   );
   if (prefixed?.[1]) {
     const name = stripCustomerNameLead(prefixed[1]);
@@ -1535,7 +1704,7 @@ function extractCreateCustomerDetails(text: string): { name: string | null; city
   }
 
   const bareClient = text.match(
-    /\b(?:add|ajouter)\s+clients?\s+(.+?)(?:\s+(?:in|à|a|en)\s+(.+?))?$/i,
+    new RegExp(`\\b(?:add|ajouter)\\s+clients?\\s+(.+?)${TRAILING_CITY_CLAUSE}`, "i"),
   );
   if (bareClient?.[1]) {
     const name = stripCustomerNameLead(bareClient[1]);
@@ -1554,8 +1723,13 @@ function extractCreateCustomerDetails(text: string): { name: string | null; city
 // customer/supplier pair in this file (cleanCustomerName/cleanSupplierName,
 // parseEditTail/parseSupplierEditTail, etc).
 function extractCreateSupplierDetails(text: string): { name: string | null; city: string | null } {
+  // See extractCreateCustomerDetails's doc comment above for why "new" needs
+  // an explicit allowance here (mirrors the same "as a new supplier" hijack).
   const asRole = text.match(
-    /\b(?:add|save|register|ajouter|enregistrer|enregistrez|enregistre)\s+(.+?)\s+(?:as\s+(?:a\s+)?(?:supplier|vendor)|comme\s+fournisseurs?)\b(?:\s+(?:in|à|a|en)\s+(.+?))?$/i,
+    new RegExp(
+      `\\b(?:add|save|register|ajouter|enregistrer|enregistrez|enregistre)\\s+(.+?)\\s+(?:as\\s+(?:a\\s+)?(?:new\\s+)?(?:supplier|vendor)|comme\\s+(?:nouveau\\s+)?fournisseurs?)\\b${TRAILING_CITY_CLAUSE}`,
+      "i",
+    ),
   );
   if (asRole?.[1]) {
     const name = stripSupplierNameLead(asRole[1]);
@@ -1564,7 +1738,10 @@ function extractCreateSupplierDetails(text: string): { name: string | null; city
   }
 
   const namedRole = text.match(
-    /\b(?:supplier|vendor|fournisseur|un\s+fournisseur)\s+(?:nommé|nomme|named|called|appelé|appele|appellé)\s+(.+?)(?:\s+(?:in|à|a|en)\s+(.+?))?$/i,
+    new RegExp(
+      `\\b(?:supplier|vendor|fournisseur|un\\s+fournisseur)\\s+(?:nommé|nomme|named|called|appelé|appele|appellé)\\s+(.+?)${TRAILING_CITY_CLAUSE}`,
+      "i",
+    ),
   );
   if (namedRole?.[1]) {
     const name = stripSupplierNameLead(namedRole[1]);
@@ -1573,7 +1750,10 @@ function extractCreateSupplierDetails(text: string): { name: string | null; city
   }
 
   const prefixed = text.match(
-    /\b(?:add|create|new|save|register|ajouter|cr[ée]er|nouveau|enregistrer|enregistrez|enregistre)\s+(?:a\s+)?(?:suppliers?|fournisseurs?|un\s+fournisseur)\s+(.+?)(?:\s+(?:in|à|a|en)\s+(.+?))?$/i,
+    new RegExp(
+      `\\b(?:add|create|new|save|register|ajouter|cr[ée]er|nouveau|enregistrer|enregistrez|enregistre)\\s+(?:a\\s+)?(?:suppliers?|fournisseurs?|un\\s+fournisseur)\\s+(.+?)${TRAILING_CITY_CLAUSE}`,
+      "i",
+    ),
   );
   if (prefixed?.[1]) {
     const name = stripSupplierNameLead(prefixed[1]);
@@ -1582,7 +1762,7 @@ function extractCreateSupplierDetails(text: string): { name: string | null; city
   }
 
   const bareSupplier = text.match(
-    /\b(?:add|ajouter)\s+fournisseurs?\s+(.+?)(?:\s+(?:in|à|a|en)\s+(.+?))?$/i,
+    new RegExp(`\\b(?:add|ajouter)\\s+fournisseurs?\\s+(.+?)${TRAILING_CITY_CLAUSE}`, "i"),
   );
   if (bareSupplier?.[1]) {
     const name = stripSupplierNameLead(bareSupplier[1]);
@@ -1621,7 +1801,7 @@ function parseCommandTextFull(text: string): ParsedCommand {
     itemDescription = extractItemDescription(raw);
     partyName = extractPartyName(raw, "create_receipt");
   } else if (intent === "create_customer") {
-    const details = extractCreateCustomerDetails(stripTrailingClauses(raw));
+    const details = extractCreateCustomerDetails(stripTrailingClauses(raw, CUSTOMER_ROLE_NOUN));
     partyName = details.name;
     city = details.city;
     phone = extractCreateCustomerPhone(raw);
@@ -1633,12 +1813,23 @@ function parseCommandTextFull(text: string): ParsedCommand {
     creditLimit = extractCreateCustomerCreditLimit(raw);
     defaultDiscount = extractCreateCustomerDefaultDiscount(raw);
   } else if (intent === "create_supplier") {
-    const details = extractCreateSupplierDetails(stripTrailingClauses(raw));
+    const details = extractCreateSupplierDetails(stripTrailingClauses(raw, SUPPLIER_ROLE_NOUN));
     partyName = details.name;
     city = details.city;
     phone = extractCreateCustomerPhone(raw);
     whatsapp = extractCreateCustomerWhatsapp(raw, phone);
     postAction = extractCreateCustomerPostAction(raw);
+    // QA Reliability Swarm (Track 2) field-persistence parity fix: these
+    // extractors are already party-type-agnostic (none of them inspect
+    // "customer" vs "supplier" wording) — create_supplier just never called
+    // them before, so email/taxId/paymentTerms/creditLimit/discount were
+    // silently unreachable for suppliers even though the underlying regexes
+    // worked identically for both party types.
+    email = extractCreateCustomerEmail(raw);
+    taxId = extractCreateCustomerTaxId(raw);
+    paymentTermsDays = extractCreateCustomerPaymentTermsDays(raw);
+    creditLimit = extractCreateCustomerCreditLimit(raw);
+    defaultDiscount = extractCreateCustomerDefaultDiscount(raw);
   } else if (intent === "customer_action") {
     customerAction = detectCustomerAction(raw);
     partyName = customerAction?.customerName ?? null;
@@ -1671,7 +1862,20 @@ function parseCommandTextFull(text: string): ParsedCommand {
       if (forReason) expenseDescription = forReason;
     } else {
       partyName = extractPartyName(raw, intent);
-      if (partyName) {
+      // QA Reliability Swarm (Track 7) fix: previously, ANY named party in a
+      // "received ... from <name>" sentence was unconditionally bucketed as
+      // "customer" (a balance-paydown), even when the sentence explicitly
+      // says what the money was FOR — e.g. "Received 25,000 XAF cash from
+      // Musa for rice sale." Reusing the same "for/pour <reason>" clause
+      // already extracted below, if that reason clause itself names a sale
+      // ("...sale"/"...vente"), this is unambiguously a cash sale to that
+      // person, not a payment against an existing receivable — the wrong
+      // choice here has a real accounting impact (Dr Bank/Cr Receivable vs
+      // Dr Bank/Cr Income), not just a cosmetic label difference.
+      if (partyName && forReason && SALE_REASON_PATTERN.test(forReason)) {
+        receiptCategory = "sales";
+        expenseDescription = forReason;
+      } else if (partyName) {
         receiptCategory = "customer";
       } else if (forReason) {
         expenseDescription = forReason;
