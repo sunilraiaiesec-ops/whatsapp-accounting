@@ -15,6 +15,8 @@ import {
 } from "@/lib/auth/account";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
 import { readReferralCookieCode } from "@/lib/billing/partners";
+import { isDemoAccountEmail } from "@/lib/demo-accounts";
+import { maybeRefreshDemoAccount } from "@/lib/demo-refresh";
 
 export type AuthState = { error?: string; done?: boolean };
 
@@ -109,6 +111,16 @@ export async function loginAction(
   }
 
   await createSession({ userId: user.id, orgId: membership.orgId });
+
+  if (isDemoAccountEmail(email)) {
+    try {
+      await maybeRefreshDemoAccount(membership.orgId);
+    } catch (err) {
+      // Demo refresh must never block login.
+      console.error("Demo refresh on login failed:", err);
+    }
+  }
+
   redirect("/dashboard");
 }
 

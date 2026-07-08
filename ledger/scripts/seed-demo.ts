@@ -17,6 +17,8 @@
  *  Usage (writes to whatever DATABASE_URL points at — intended for prod Neon):
  *      SEED_DEMO=1 npx tsx scripts/seed-demo.ts
  *      SEED_DEMO=1 DEMO_RESEED=1 npx tsx scripts/seed-demo.ts   # purge + rebuild
+ *      SEED_DEMO=1 npx tsx scripts/refresh-demo.ts              # roll dates only
+ *      npm run seed:demo / npm run refresh:demo
  * ============================================================================
  */
 import { Prisma } from "@prisma/client";
@@ -58,6 +60,11 @@ import {
   type Category,
   type CatalogItem,
 } from "./demo-data";
+import { DEMO_PASSWORD } from "@/lib/demo-accounts";
+import {
+  listDemoOrgIds,
+  refreshDemoAccountData,
+} from "@/lib/demo-refresh";
 
 if (!process.env.SEED_DEMO) {
   console.error(
@@ -71,7 +78,6 @@ if (!process.env.SEED_DEMO) {
 const DB = process.env.DATABASE_URL ?? "";
 const RESEED = !!process.env.DEMO_RESEED;
 const CURRENCY = "XAF"; // Cameroon — zero-decimal, amounts are whole francs.
-const DEMO_PASSWORD = "DemoBooks2025!";
 const START = new Date(Date.UTC(2025, 0, 1));
 const END = new Date();
 
@@ -514,7 +520,15 @@ async function weekOfSales(c: Company, weekStart: Date, count: number) {
       bump(c, "salesReceipt");
     } else {
       const due = new Date(date);
-      due.setUTCDate(due.getUTCDate() + 30);
+      // Mix of short, medium and longer credit terms so the seeder does not
+      // leave hundreds of identical +30-day invoices that all go overdue.
+      if (rng() < 0.2) {
+        due.setUTCDate(due.getUTCDate() + Math.floor(jitter(rng, 7, 21)));
+      } else if (rng() < 0.45) {
+        due.setUTCDate(due.getUTCDate() + Math.floor(jitter(rng, 22, 45)));
+      } else {
+        due.setUTCDate(due.getUTCDate() + 30);
+      }
       await createSalesInvoice(c.orgId, { partyId: party, date, dueDate: due, lines });
       c.ar.set(party, (c.ar.get(party) ?? 0n) + total);
       bump(c, "salesInvoice");
@@ -733,6 +747,30 @@ async function monthEnd(c: Company, monthDate: Date) {
   }
 }
 
+async function reconcileInvoiceStatuses(orgId: string) {
+  const unpaid = await withRetry(() =>
+    prisma.salesInvoice.count({ where: { orgId, status: { not: "paid" }, dueDate: { not: null } } }),
+  );
+  const keepOpen = 25;
+  const excess = unpaid - keepOpen;
+  if (excess <= 0) return;
+  const old = await withRetry(() =>
+    prisma.salesInvoice.findMany({
+      where: { orgId, status: { not: "paid" } },
+      orderBy: { date: "asc" },
+      take: excess,
+      select: { id: true },
+    }),
+  );
+  if (old.length === 0) return;
+  await withRetry(() =>
+    prisma.salesInvoice.updateMany({
+      where: { id: { in: old.map((o) => o.id) } },
+      data: { status: "paid" },
+    }),
+  );
+}
+
 // --- Drive one company through the full window ------------------------------
 async function driveCompany(c: Company) {
   const rng = c.rng;
@@ -750,6 +788,8 @@ async function driveCompany(c: Company) {
     await collectFromCustomers(c, cursor);
     await payToSuppliers(c, cursor);
     await occasionalOps(c, cursor);
+
+    await reconcileInvoiceStatuses(c.orgId);
 
     // Fire month-end entries once, on the first week we enter a new month.
     if (month !== lastMonth) {
@@ -867,8 +907,42 @@ async function main() {
     }),
   );
 
+  const seededOrgIds = new Set(companies.map((c) => c.orgId));
+
+  // Refresh every existing demo org (including ones we skipped because they
+  // already exist) so dashboards stay current without a full DEMO_RESEED.
+  const allDemoOrgIds = await listDemoOrgIds();
+  const toRefresh = allDemoOrgIds.filter((id) => !seededOrgIds.has(id));
+  if (toRefresh.length > 0) {
+    console.log(`\nRefreshing ${toRefresh.length} existing demo org(s)…`);
+    for (const orgId of toRefresh) {
+      const result = await refreshDemoAccountData(orgId);
+      if (result) {
+        console.log(
+          `  ✓ ${orgId}: shifted ${result.shiftedDays}d, ${result.unpaidInvoices} reminders (${result.overdueInvoices} overdue), ${result.lowStockItems} low-stock`,
+        );
+      }
+    }
+  }
+
+  if (companies.length === 0 && toRefresh.length === 0) {
+    console.log("\nNothing to do — no demo companies found.\n");
+    await prisma.$disconnect();
+    return;
+  }
+
+  // Align freshly seeded orgs to today's dashboard profile.
+  for (const c of companies) {
+    const result = await refreshDemoAccountData(c.orgId);
+    if (result) {
+      console.log(
+        `  ✓ ${c.cfg.name}: ${result.unpaidInvoices} reminders (${result.overdueInvoices} overdue), ${result.lowStockItems} low-stock`,
+      );
+    }
+  }
+
   if (companies.length === 0) {
-    console.log("\nNothing to do — all demo companies already exist.\n");
+    console.log("\nExisting demo companies refreshed.\n");
     await prisma.$disconnect();
     return;
   }
