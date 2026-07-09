@@ -43,7 +43,6 @@ const { getPaymentReminderCount, getDueSoonAndOverdueInvoices } = await import("
 const { countLowStockItems } = await import("@/lib/reorder");
 const {
   addDays,
-  buildReminderDueOffsets,
   demoOrgSeed,
   needsDemoRefresh,
   refreshDemoAccountData,
@@ -80,43 +79,34 @@ describe("date helpers", () => {
   });
 });
 
-describe("buildReminderDueOffsets", () => {
-  it("returns 6–8 offsets with 2–3 overdue and 1 due today", () => {
-    const offsets = buildReminderDueOffsets(DEMO_ORG);
-    expect(offsets.length).toBeGreaterThanOrEqual(6);
-    expect(offsets.length).toBeLessThanOrEqual(8);
-    expect(offsets.filter((d) => d < 0).length).toBeGreaterThanOrEqual(2);
-    expect(offsets.filter((d) => d < 0).length).toBeLessThanOrEqual(3);
-    expect(offsets.filter((d) => d === 0).length).toBe(1);
-    expect(offsets.filter((d) => d > 0 && d <= 7).length).toBeGreaterThanOrEqual(2);
-  });
-
-  it("is stable for the same org", () => {
-    expect(buildReminderDueOffsets(DEMO_ORG)).toEqual(buildReminderDueOffsets(DEMO_ORG));
-    expect(buildReminderDueOffsets(DEMO_ORG)).not.toEqual(buildReminderDueOffsets("other-org-id"));
-  });
-});
-
 describe("needsDemoRefresh", () => {
-  it("returns true when reminder count is too high", async () => {
-    vi.mocked(getPaymentReminderCount).mockResolvedValue(679);
-    vi.mocked(countLowStockItems).mockResolvedValue(4);
+  it("returns true when there are any payment reminders", async () => {
+    vi.mocked(getPaymentReminderCount).mockResolvedValue(1);
+    vi.mocked(countLowStockItems).mockResolvedValue(0);
+    queryRaw.mockResolvedValue([{ max_date: new Date("2026-07-07") }]);
+
+    expect(await needsDemoRefresh(DEMO_ORG, NOW)).toBe(true);
+  });
+
+  it("returns true when there are any low-stock items", async () => {
+    vi.mocked(getPaymentReminderCount).mockResolvedValue(0);
+    vi.mocked(countLowStockItems).mockResolvedValue(1);
     queryRaw.mockResolvedValue([{ max_date: new Date("2026-07-07") }]);
 
     expect(await needsDemoRefresh(DEMO_ORG, NOW)).toBe(true);
   });
 
   it("returns true when activity is more than 2 days behind", async () => {
-    vi.mocked(getPaymentReminderCount).mockResolvedValue(5);
-    vi.mocked(countLowStockItems).mockResolvedValue(4);
+    vi.mocked(getPaymentReminderCount).mockResolvedValue(0);
+    vi.mocked(countLowStockItems).mockResolvedValue(0);
     queryRaw.mockResolvedValue([{ max_date: new Date("2026-07-01") }]);
 
     expect(await needsDemoRefresh(DEMO_ORG, NOW)).toBe(true);
   });
 
   it("returns false when the dashboard already looks healthy", async () => {
-    vi.mocked(getPaymentReminderCount).mockResolvedValue(6);
-    vi.mocked(countLowStockItems).mockResolvedValue(4);
+    vi.mocked(getPaymentReminderCount).mockResolvedValue(0);
+    vi.mocked(countLowStockItems).mockResolvedValue(0);
     queryRaw.mockResolvedValue([{ max_date: new Date("2026-07-08") }]);
 
     expect(await needsDemoRefresh(DEMO_ORG, NOW)).toBe(false);
@@ -135,23 +125,17 @@ describe("refreshDemoAccountData", () => {
     membershipFindFirst.mockResolvedValue(null);
     queryRaw.mockResolvedValue([{ max_date: new Date("2026-07-08") }]);
     salesInvoiceUpdateMany.mockResolvedValue({ count: 0 });
-    salesInvoiceFindMany.mockResolvedValue([{ id: "inv_1" }]);
-    salesInvoiceUpdate.mockResolvedValue({});
     inventoryItemFindMany.mockResolvedValue([]);
-    vi.mocked(countLowStockItems).mockResolvedValue(4);
+    vi.mocked(countLowStockItems).mockResolvedValue(0);
 
     const result = await refreshDemoAccountData("any-org", NOW, { force: true });
     expect(result).not.toBeNull();
     expect(salesInvoiceUpdateMany).toHaveBeenCalled();
   });
 
-  it("reduces 600+ stale unpaid invoices to 6–8 reminders with max 3 overdue", async () => {
+  it("settles every unpaid invoice and leaves zero reminders", async () => {
     queryRaw.mockResolvedValue([{ max_date: new Date("2025-02-01") }]);
     salesInvoiceUpdateMany.mockResolvedValue({ count: 668 });
-    salesInvoiceFindMany.mockResolvedValue(
-      Array.from({ length: 80 }, (_, i) => ({ id: `inv_${i}` })),
-    );
-    salesInvoiceUpdate.mockResolvedValue({});
     inventoryItemFindMany.mockResolvedValue([
       {
         id: "item_1",
@@ -160,7 +144,7 @@ describe("refreshDemoAccountData", () => {
         reorderLevel: new (await import("@prisma/client")).Prisma.Decimal(40),
       },
     ]);
-    vi.mocked(countLowStockItems).mockResolvedValue(5);
+    vi.mocked(countLowStockItems).mockResolvedValue(0);
 
     const result = await refreshDemoAccountData(DEMO_ORG, NOW);
 
@@ -169,62 +153,50 @@ describe("refreshDemoAccountData", () => {
       where: { orgId: DEMO_ORG, status: { not: "paid" } },
       data: { status: "paid" },
     });
-    expect(salesInvoiceUpdateMany.mock.calls[0]).toBeDefined();
-    expect(salesInvoiceUpdate.mock.calls.length).toBeGreaterThanOrEqual(6);
-    expect(salesInvoiceUpdate.mock.calls.length).toBeLessThanOrEqual(8);
-    expect(result!.unpaidInvoices).toBeGreaterThanOrEqual(6);
-    expect(result!.unpaidInvoices).toBeLessThanOrEqual(8);
-    expect(result!.overdueInvoices).toBeGreaterThanOrEqual(2);
-    expect(result!.overdueInvoices).toBeLessThanOrEqual(3);
+    expect(salesInvoiceUpdate).not.toHaveBeenCalled();
+    expect(result!.unpaidInvoices).toBe(0);
+    expect(result!.overdueInvoices).toBe(0);
+    expect(result!.dueSoonInvoices).toBe(0);
     expect(result!.shiftedDays).toBeGreaterThan(0);
   });
 
-  it("marks the backlog paid and reopens a small curated set", async () => {
+  it("restocks every item above its reorder level, leaving zero low-stock", async () => {
     queryRaw.mockResolvedValue([{ max_date: new Date("2026-07-08") }]);
     salesInvoiceUpdateMany.mockResolvedValue({ count: 500 });
-    salesInvoiceFindMany.mockResolvedValue(
-      Array.from({ length: 20 }, (_, i) => ({ id: `inv_${i}` })),
-    );
-    salesInvoiceUpdate.mockResolvedValue({});
     inventoryItemFindMany.mockResolvedValue([
       {
         id: "item_1",
-        qtyOnHand: "100",
-        valueOnHand: 1_000_000n,
+        qtyOnHand: "5",
+        valueOnHand: 50_000n,
         reorderLevel: new (await import("@prisma/client")).Prisma.Decimal(40),
       },
     ]);
-    vi.mocked(countLowStockItems).mockResolvedValue(4);
+    vi.mocked(countLowStockItems).mockResolvedValue(0);
 
     const result = await refreshDemoAccountData(DEMO_ORG, NOW);
 
     expect(result).not.toBeNull();
-    expect(salesInvoiceUpdateMany).toHaveBeenCalledWith({
-      where: { orgId: DEMO_ORG, status: { not: "paid" } },
-      data: { status: "paid" },
-    });
-    expect(salesInvoiceUpdate).toHaveBeenCalled();
-    expect(result!.unpaidInvoices).toBeGreaterThanOrEqual(6);
-    expect(result!.unpaidInvoices).toBeLessThanOrEqual(8);
-    expect(result!.overdueInvoices).toBeGreaterThanOrEqual(2);
-    expect(result!.overdueInvoices).toBeLessThanOrEqual(3);
+    expect(inventoryItemUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "item_1" } }),
+    );
+    const [[updateCall]] = inventoryItemUpdate.mock.calls;
+    expect(Number(updateCall.data.qtyOnHand)).toBeGreaterThan(40); // above reorder level
+    expect(result!.lowStockItems).toBe(0);
   });
 });
 
 describe("maybeRefreshDemoAccount", () => {
   it("skips when data is fresh and cooldown has not expired", async () => {
-    vi.mocked(getPaymentReminderCount).mockResolvedValue(6);
-    vi.mocked(countLowStockItems).mockResolvedValue(4);
+    vi.mocked(getPaymentReminderCount).mockResolvedValue(0);
+    vi.mocked(countLowStockItems).mockResolvedValue(0);
     queryRaw.mockResolvedValue([{ max_date: new Date("2026-07-08") }]);
     salesInvoiceUpdateMany.mockResolvedValue({ count: 0 });
-    salesInvoiceFindMany.mockResolvedValue([{ id: "inv_1" }]);
-    salesInvoiceUpdate.mockResolvedValue({});
     inventoryItemFindMany.mockResolvedValue([]);
 
     await refreshDemoAccountData(DEMO_ORG, NOW);
 
-    vi.mocked(getPaymentReminderCount).mockResolvedValue(6);
-    vi.mocked(countLowStockItems).mockResolvedValue(4);
+    vi.mocked(getPaymentReminderCount).mockResolvedValue(0);
+    vi.mocked(countLowStockItems).mockResolvedValue(0);
     queryRaw.mockResolvedValue([{ max_date: new Date("2026-07-08") }]);
 
     const result = await maybeRefreshDemoAccount(DEMO_ORG, NOW);
@@ -236,8 +208,6 @@ describe("maybeRefreshDemoAccount", () => {
     vi.mocked(countLowStockItems).mockResolvedValue(0);
     queryRaw.mockResolvedValue([{ max_date: new Date("2025-01-01") }]);
     salesInvoiceUpdateMany.mockResolvedValue({ count: 600 });
-    salesInvoiceFindMany.mockResolvedValue([{ id: "inv_1" }, { id: "inv_2" }, { id: "inv_3" }]);
-    salesInvoiceUpdate.mockResolvedValue({});
     inventoryItemFindMany.mockResolvedValue([]);
 
     await refreshDemoAccountData(DEMO_ORG, NOW);

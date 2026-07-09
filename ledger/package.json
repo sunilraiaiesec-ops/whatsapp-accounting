@@ -15,7 +15,8 @@
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
     "seed:demo": "SEED_DEMO=1 npx tsx scripts/seed-demo.ts",
-    "refresh:demo": "SEED_DEMO=1 npx tsx scripts/refresh-demo.ts"
+    "refresh:demo": "SEED_DEMO=1 npx tsx scripts/refresh-demo.ts",
+    "verify:demo": "npx tsx scripts/verify-demo-health.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",

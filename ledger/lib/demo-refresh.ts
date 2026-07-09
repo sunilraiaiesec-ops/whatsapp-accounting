@@ -8,10 +8,11 @@ import { isDemoOrgId } from "@/lib/demo-accounts";
 // ---------------------------------------------------------------------------
 // Rolling maintenance for the three Bantoo Books demo organizations.
 //
-// Keeps dashboard widgets realistic every day:
-//   • 6–8 payment reminders (1–3 overdue, rest due soon)
+// Keeps dashboard widgets clean every day:
+//   • Zero payment reminders — every invoice is paid, nothing overdue
 //   • Fresh month-to-date sales & expenses (dates shifted to today)
-//   • 1–3 low-stock reorder alerts, a few near-reorder, rest healthy
+//   • Zero low-stock alerts — every item assumed reordered, stocked well
+//     above its reorder level
 //
 // Only runs for demo orgs — real customer data is never touched.
 // ---------------------------------------------------------------------------
@@ -155,78 +156,22 @@ async function shiftOrgDates(orgId: string, days: number): Promise<void> {
   ]);
 }
 
-// Build a realistic reminder profile: 6–8 total, 2–3 overdue, 1 due today,
-// the rest due within the next 7 days.
-export function buildReminderDueOffsets(orgId: string): number[] {
-  const rng = seededRng(demoOrgSeed(orgId));
-  const total = 6 + Math.floor(rng() * 3); // 6–8
-  const overdueCount = 2 + Math.floor(rng() * 2); // 2–3
-  const dueTodayCount = 1;
-  const dueSoonCount = Math.max(0, total - overdueCount - dueTodayCount);
-
-  const overdueOffsets = [-14, -10, -7, -5, -3, -2].slice(0, overdueCount);
-  const dueSoonOffsets: number[] = [];
-  for (let i = 0; i < dueSoonCount; i++) {
-    dueSoonOffsets.push(1 + Math.floor(rng() * 7));
-  }
-
-  return [...overdueOffsets, ...Array(dueTodayCount).fill(0), ...dueSoonOffsets];
-}
-
-async function normalizePaymentReminders(orgId: string, today: Date): Promise<{
+// Every demo invoice is settled — no overdue, no due-soon, no reminders.
+async function normalizePaymentReminders(orgId: string): Promise<{
   unpaid: number;
   overdue: number;
   dueSoon: number;
 }> {
-  // Close out the backlog — hundreds of stale unpaid invoices are what break
-  // the dashboard. Real businesses mostly have settled AR; we keep a handful
-  // open for the reminder widget.
   await prisma.salesInvoice.updateMany({
     where: { orgId, status: { not: "paid" } },
     data: { status: "paid" },
   });
 
-  const dueOffsets = buildReminderDueOffsets(orgId);
-  const candidates = await prisma.salesInvoice.findMany({
-    where: { orgId, dueDate: { not: null } },
-    orderBy: [{ total: "desc" }, { date: "desc" }],
-    take: 80,
-    select: { id: true },
-  });
-
-  const rng = seededRng(demoOrgSeed(orgId) ^ 0x9e3779b9);
-  const picked = new Set<string>();
-  while (picked.size < dueOffsets.length && picked.size < candidates.length) {
-    const idx = Math.floor(rng() * candidates.length);
-    picked.add(candidates[idx].id);
-  }
-  const selected = [...picked];
-
-  const todayUtc = startOfUtcDay(today);
-  let overdue = 0;
-  let dueSoon = 0;
-
-  for (let i = 0; i < selected.length; i++) {
-    const dueOffset = dueOffsets[i] ?? 7;
-    const dueDate = addDays(todayUtc, dueOffset);
-    const issueDate = addDays(dueDate, -(7 + Math.floor(rng() * 21)));
-
-    await prisma.salesInvoice.update({
-      where: { id: selected[i] },
-      data: {
-        status: "unpaid",
-        date: issueDate,
-        dueDate,
-      },
-    });
-
-    if (dueOffset < 0) overdue++;
-    else dueSoon++;
-  }
-
-  return { unpaid: selected.length, overdue, dueSoon };
+  return { unpaid: 0, overdue: 0, dueSoon: 0 };
 }
 
+// Every low/near-reorder item is assumed reordered — restocked comfortably
+// above its reorder level, same as a healthy item would be.
 async function normalizeInventoryLevels(orgId: string): Promise<number> {
   const items = await prisma.inventoryItem.findMany({
     where: { orgId, reorderLevel: { not: null } },
@@ -236,33 +181,12 @@ async function normalizeInventoryLevels(orgId: string): Promise<number> {
   if (items.length === 0) return 0;
 
   const rng = seededRng(demoOrgSeed(orgId) ^ 0x85ebca6b);
-  const shuffled = [...items];
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-  }
-
-  const lowCount = 1 + Math.floor(rng() * 3); // 1–3 below reorder
-  const nearCount = 3 + Math.floor(rng() * 3); // 3–5 at reorder level
-
-  const lowIds = new Set(shuffled.slice(0, lowCount).map((it) => it.id));
-  const nearIds = new Set(shuffled.slice(lowCount, lowCount + nearCount).map((it) => it.id));
 
   for (const item of items) {
     const reorder = new Prisma.Decimal(item.reorderLevel!);
     if (reorder.lte(0)) continue;
 
-    let targetQty: Prisma.Decimal;
-    if (lowIds.has(item.id)) {
-      targetQty = reorder.times(0.35 + rng() * 0.15).floor(); // well below reorder
-      if (targetQty.gte(reorder)) targetQty = reorder.minus(1).floor();
-    } else if (nearIds.has(item.id)) {
-      targetQty = reorder; // exactly at reorder → shows as low stock
-    } else {
-      targetQty = reorder.times(2.2 + rng() * 1.8).floor(); // healthy stock
-    }
-
-    if (targetQty.lt(0)) targetQty = new Prisma.Decimal(0);
+    const targetQty = reorder.times(2.2 + rng() * 1.8).floor(); // healthy stock
 
     const currentQty = new Prisma.Decimal(item.qtyOnHand);
     if (targetQty.eq(currentQty)) continue;
@@ -326,8 +250,8 @@ export async function needsDemoRefresh(orgId: string, now: Date = new Date()): P
     getMaxActivityDate(orgId),
   ]);
 
-  if (reminderCount > 10) return true;
-  if (lowStock === 0 || lowStock > 10) return true;
+  if (reminderCount > 0) return true;
+  if (lowStock > 0) return true;
   if (!maxDate) return true;
 
   const daysBehind = daysBetween(today, maxDate);
@@ -340,8 +264,9 @@ export type RefreshDemoOptions = {
 };
 
 /**
- * Re-aligns a single demo organization's dates, payment reminders, and
- * inventory levels so the dashboard always looks like an active business.
+ * Re-aligns a single demo organization's dates, settles every invoice, and
+ * restocks every item above its reorder level — the dashboard always shows
+ * a healthy, caught-up business with nothing due and nothing to reorder.
  * Always runs immediately — no cooldown. No-op for non-demo orgs unless force.
  */
 export async function refreshDemoAccountData(
@@ -359,7 +284,7 @@ export async function refreshDemoAccountData(
     await shiftOrgDates(orgId, shiftDays);
   }
 
-  const reminders = await normalizePaymentReminders(orgId, today);
+  const reminders = await normalizePaymentReminders(orgId);
   const lowStock = await normalizeInventoryLevels(orgId);
 
   const result = {

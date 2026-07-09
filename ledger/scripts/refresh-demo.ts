@@ -1,8 +1,9 @@
 /**
  * Force-refresh the three Bantoo Books demo organizations without a full reseed.
  *
- * Rolls document dates forward, trims payment reminders to a realistic count,
- * and rebalances inventory so dashboards look active every day.
+ * Rolls document dates forward, settles every invoice (zero payment
+ * reminders), and restocks every item above its reorder level (zero
+ * low-stock alerts) so dashboards always look caught up.
  *
  * Usage (writes to whatever DATABASE_URL points at):
  *   SEED_DEMO=1 npx tsx scripts/refresh-demo.ts
@@ -78,12 +79,10 @@ async function main() {
     );
 
     const healthy =
-      after.paymentReminders >= 6 &&
-      after.paymentReminders <= 8 &&
-      after.overdueInvoices <= 3 &&
-      after.unpaidInvoices <= 8 &&
-      after.lowStockItems >= 3 &&
-      after.lowStockItems <= 8;
+      after.paymentReminders === 0 &&
+      after.overdueInvoices === 0 &&
+      after.unpaidInvoices === 0 &&
+      after.lowStockItems === 0;
 
     if (!healthy) {
       console.log(`   ✗ Health check FAILED for ${company.name}`);
