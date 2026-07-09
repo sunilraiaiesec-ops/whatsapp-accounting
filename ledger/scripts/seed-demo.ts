@@ -60,11 +60,8 @@ import {
   type Category,
   type CatalogItem,
 } from "./demo-data";
-import { DEMO_PASSWORD } from "@/lib/demo-accounts";
-import {
-  listDemoOrgIds,
-  refreshDemoAccountData,
-} from "@/lib/demo-refresh";
+import { DEMO_PASSWORD, listDemoOrgIds } from "@/lib/demo-accounts";
+import { refreshDemoAccountData } from "@/lib/demo-refresh";
 
 if (!process.env.SEED_DEMO) {
   console.error(
