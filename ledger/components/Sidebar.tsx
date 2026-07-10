@@ -8,7 +8,6 @@ import { usePathname } from "next/navigation";
 import { logoutAction } from "@/app/actions/auth";
 import { BrandLogo } from "@/components/BrandLogo";
 import { CreateMenu } from "@/components/CreateMenu";
-import type { SidebarCounts } from "@/lib/sidebar";
 
 type NavItem = {
   href: string;
@@ -20,7 +19,6 @@ type NavItem = {
 type NavGroup = {
   key: string;
   labelKey: string;
-  icon: string;
   items: NavItem[];
 };
 
@@ -36,7 +34,6 @@ const NAV_GROUPS: NavGroup[] = [
   {
     key: "sales",
     labelKey: "groupSales",
-    icon: "📄",
     items: [
       { href: "/customers", labelKey: "customers", icon: "👤" },
       { href: "/sales-invoices", labelKey: "salesInvoices", icon: "📄" },
@@ -49,7 +46,6 @@ const NAV_GROUPS: NavGroup[] = [
   {
     key: "purchases",
     labelKey: "groupPurchases",
-    icon: "📥",
     items: [
       { href: "/suppliers", labelKey: "suppliers", icon: "🏭" },
       { href: "/purchase-invoices", labelKey: "purchaseInvoices", icon: "📥" },
@@ -61,7 +57,6 @@ const NAV_GROUPS: NavGroup[] = [
   {
     key: "inventoryAssets",
     labelKey: "groupInventoryAssets",
-    icon: "▦",
     items: [
       { href: "/inventory-items", labelKey: "inventory", icon: "▦" },
       { href: "/inventory-write-offs", labelKey: "writeOffs", icon: "✕" },
@@ -72,7 +67,6 @@ const NAV_GROUPS: NavGroup[] = [
   {
     key: "banking",
     labelKey: "groupBanking",
-    icon: "◉",
     items: [
       { href: "/bank-and-cash-accounts", labelKey: "bankCash", icon: "◉" },
       { href: "/receipts", labelKey: "receipts", icon: "↓" },
@@ -84,13 +78,40 @@ const NAV_GROUPS: NavGroup[] = [
   {
     key: "accounting",
     labelKey: "groupAccounting",
-    icon: "≡",
     items: [
       { href: "/journal", labelKey: "journal", icon: "≡" },
       { href: "/settings", labelKey: "settings", icon: "⚙" },
     ],
   },
 ];
+
+// Monochrome line-icon paths for the 5 group headers (20x20 viewBox, same
+// stroke style as components/ui/StatCards.tsx) — replaces the mismatched
+// color-emoji/plain-unicode mix that made the collapsed headers look messy.
+const GROUP_ICON_PATHS: Record<string, string> = {
+  sales: "M6 3.5h6.2L16 7.3V16a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 014 16V5A1.5 1.5 0 015.5 3.5H6zm6 0V7h3.5",
+  purchases: "M10 3l6 3.2v6.6L10 16l-6-3.2V6.2L10 3zm0 0v13M4 6.3l6 3.2 6-3.2",
+  inventoryAssets: "M4 4h5v5H4V4zm7 0h5v5h-5V4zM4 11h5v5H4v-5zm7 0h5v5h-5v-5z",
+  banking: "M3.5 6.5h11A1.5 1.5 0 0116 8v6a1.5 1.5 0 01-1.5 1.5h-10A1.5 1.5 0 013 14V6.5zm0 0V5.5A1.5 1.5 0 015 4h8M13 11h1.5",
+  accounting: "M5 5.5h10M5 9h10M5 12.5h10M5 16h6",
+};
+
+function GroupIcon({ groupKey }: { groupKey: string }) {
+  return (
+    <svg
+      className="h-[18px] w-[18px]"
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.6}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d={GROUP_ICON_PATHS[groupKey]} />
+    </svg>
+  );
+}
 
 function isItemActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(href + "/");
@@ -100,14 +121,12 @@ function NavLink({
   item,
   label,
   active,
-  count,
   onNavigate,
   soonLabel,
 }: {
   item: NavItem;
   label: string;
   active: boolean;
-  count?: number;
   onNavigate?: () => void;
   soonLabel: string;
 }) {
@@ -141,22 +160,17 @@ function NavLink({
         {item.icon}
       </span>
       <span className="truncate">{label}</span>
-      {typeof count === "number" && count > 0 ? (
-        <span className="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-xs tabular-nums text-slate-500">
-          {count}
-        </span>
-      ) : null}
     </Link>
   );
 }
 
 function GroupHeader({
-  group,
+  groupKey,
   label,
   isOpen,
   onToggle,
 }: {
-  group: NavGroup;
+  groupKey: string;
   label: string;
   isOpen: boolean;
   onToggle: () => void;
@@ -168,8 +182,8 @@ function GroupHeader({
       aria-expanded={isOpen}
       className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
     >
-      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-50 text-base">
-        {group.icon}
+      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-50 text-slate-500">
+        <GroupIcon groupKey={groupKey} />
       </span>
       <span className="truncate">{label}</span>
       <svg
@@ -192,7 +206,6 @@ export const Sidebar = forwardRef<
   HTMLElement,
   {
     orgName: string;
-    counts: SidebarCounts;
     open?: boolean;
     onNavigate?: () => void;
     onClose?: () => void;
@@ -203,7 +216,6 @@ export const Sidebar = forwardRef<
 >(function Sidebar(
   {
     orgName,
-    counts,
     open = false,
     onNavigate,
     onClose,
@@ -290,7 +302,6 @@ export const Sidebar = forwardRef<
             item={item}
             label={t(item.labelKey)}
             active={isItemActive(pathname, item.href)}
-            count={counts[item.href]}
             onNavigate={onNavigate}
             soonLabel={tc("soon")}
           />
@@ -304,7 +315,7 @@ export const Sidebar = forwardRef<
           return (
             <div key={group.key}>
               <GroupHeader
-                group={group}
+                groupKey={group.key}
                 label={t(group.labelKey)}
                 isOpen={isOpen}
                 onToggle={() => toggleGroup(group.key)}
@@ -317,7 +328,6 @@ export const Sidebar = forwardRef<
                       item={item}
                       label={t(item.labelKey)}
                       active={isItemActive(pathname, item.href)}
-                      count={counts[item.href]}
                       onNavigate={onNavigate}
                       soonLabel={tc("soon")}
                     />

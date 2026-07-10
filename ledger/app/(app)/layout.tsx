@@ -1,5 +1,4 @@
 import { requireContext } from "@/lib/auth/current";
-import { getSidebarCounts } from "@/lib/sidebar";
 import { AppShell } from "@/components/AppShell";
 import { EmailVerifyBanner } from "@/components/EmailVerifyBanner";
 import { TrialBanner } from "@/components/TrialBanner";
@@ -12,15 +11,11 @@ export default async function AppLayout({
   children: React.ReactNode;
 }) {
   const ctx = await requireContext();
-  const [counts, trialBanner] = await Promise.all([
-    getSidebarCounts(ctx.orgId),
-    getTrialBannerInfo(ctx.orgId),
-  ]);
+  const trialBanner = await getTrialBannerInfo(ctx.orgId);
 
   return (
     <AppShell
       orgName={ctx.orgName}
-      counts={counts}
       userName={ctx.userName}
       userEmail={ctx.userEmail}
     >

@@ -8,7 +8,6 @@ import { BrandLogo } from "@/components/BrandLogo";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { Sidebar } from "@/components/Sidebar";
 import { UserMenu } from "@/components/UserMenu";
-import type { SidebarCounts } from "@/lib/sidebar";
 
 const SIDEBAR_CLOSE_DELAY = 250;
 const LEFT_EDGE_WIDTH = 14;
@@ -27,13 +26,11 @@ function useHoverCapable() {
 
 export function AppShell({
   orgName,
-  counts,
   userName,
   userEmail,
   children,
 }: {
   orgName: string;
-  counts: SidebarCounts;
   userName: string;
   userEmail: string;
   children: React.ReactNode;
@@ -129,7 +126,6 @@ export function AppShell({
       <Sidebar
         ref={sidebarRef}
         orgName={orgName}
-        counts={counts}
         open={sidebarOpen}
         onNavigate={closeSidebar}
         onClose={closeSidebar}
