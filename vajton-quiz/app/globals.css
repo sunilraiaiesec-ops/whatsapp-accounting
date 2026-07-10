@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+:root {
+  --brand: #0f766e;
+  --brand-dark: #0d5c56;
+  --surface: #f8fafb;
+  --ink: #0f172a;
+}
+
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: radial-gradient(circle at top left, #ecfdf5, transparent 40%),
+    radial-gradient(circle at bottom right, #e0f2fe, transparent 35%), var(--surface);
+  color: var(--ink);
+  min-height: 100vh;
+}
+
+.card {
+  @apply rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm backdrop-blur;
+}
+
+.btn-primary {
+  @apply rounded-xl bg-[var(--brand)] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--brand-dark)] disabled:opacity-50;
+}
+
+.btn-secondary {
+  @apply rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50;
+}
+
+.option {
+  @apply flex w-full cursor-pointer items-start gap-3 rounded-xl border border-slate-200 px-4 py-3 text-left text-sm transition hover:border-teal-300 hover:bg-teal-50/50;
+}
+
+.option-selected {
+  @apply border-teal-500 bg-teal-50 ring-2 ring-teal-200;
+}
+
+.option-correct {
+  @apply border-emerald-500 bg-emerald-50;
+}
+
+.option-wrong {
+  @apply border-rose-400 bg-rose-50;
+}
