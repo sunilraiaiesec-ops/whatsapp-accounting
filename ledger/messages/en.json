@@ -68,6 +68,11 @@
   "nav": {
     "menu": "Menu",
     "business": "Business",
+    "groupSales": "Sales",
+    "groupPurchases": "Purchases",
+    "groupInventoryAssets": "Inventory & Assets",
+    "groupBanking": "Banking",
+    "groupAccounting": "Accounting",
     "home": "Home",
     "reports": "Reports",
     "bankCash": "Bank & Cash",

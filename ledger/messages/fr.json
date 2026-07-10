@@ -68,6 +68,11 @@
   "nav": {
     "menu": "Menu",
     "business": "Activité",
+    "groupSales": "Ventes",
+    "groupPurchases": "Achats",
+    "groupInventoryAssets": "Stock & Immobilisations",
+    "groupBanking": "Banque",
+    "groupAccounting": "Comptabilité",
     "home": "Accueil",
     "reports": "Rapports",
     "bankCash": "Banque & Caisse",
