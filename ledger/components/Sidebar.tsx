@@ -154,13 +154,11 @@ function GroupHeader({
   group,
   label,
   isOpen,
-  count,
   onToggle,
 }: {
   group: NavGroup;
   label: string;
   isOpen: boolean;
-  count: number;
   onToggle: () => void;
 }) {
   return (
@@ -174,13 +172,8 @@ function GroupHeader({
         {group.icon}
       </span>
       <span className="truncate">{label}</span>
-      {count > 0 ? (
-        <span className="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-xs tabular-nums text-slate-500">
-          {count}
-        </span>
-      ) : null}
       <svg
-        className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${count > 0 ? "" : "ml-auto"} ${isOpen ? "rotate-90" : ""}`}
+        className={`ml-auto h-4 w-4 shrink-0 text-slate-400 transition-transform ${isOpen ? "rotate-90" : ""}`}
         viewBox="0 0 20 20"
         fill="currentColor"
         aria-hidden
@@ -308,14 +301,12 @@ export const Sidebar = forwardRef<
         </p>
         {NAV_GROUPS.map((group) => {
           const isOpen = openGroups.has(group.key);
-          const groupCount = group.items.reduce((sum, item) => sum + (counts[item.href] ?? 0), 0);
           return (
             <div key={group.key}>
               <GroupHeader
                 group={group}
                 label={t(group.labelKey)}
                 isOpen={isOpen}
-                count={groupCount}
                 onToggle={() => toggleGroup(group.key)}
               />
               {isOpen ? (
