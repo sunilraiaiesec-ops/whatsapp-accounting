@@ -85,15 +85,40 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-// Monochrome line-icon paths for the 5 group headers (20x20 viewBox, same
-// stroke style as components/ui/StatCards.tsx) — replaces the mismatched
-// color-emoji/plain-unicode mix that made the collapsed headers look messy.
-const GROUP_ICON_PATHS: Record<string, string> = {
-  sales: "M6 3.5h6.2L16 7.3V16a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 014 16V5A1.5 1.5 0 015.5 3.5H6zm6 0V7h3.5",
-  purchases: "M10 3l6 3.2v6.6L10 16l-6-3.2V6.2L10 3zm0 0v13M4 6.3l6 3.2 6-3.2",
-  inventoryAssets: "M4 4h5v5H4V4zm7 0h5v5h-5V4zM4 11h5v5H4v-5zm7 0h5v5h-5v-5z",
-  banking: "M3.5 6.5h11A1.5 1.5 0 0116 8v6a1.5 1.5 0 01-1.5 1.5h-10A1.5 1.5 0 013 14V6.5zm0 0V5.5A1.5 1.5 0 015 4h8M13 11h1.5",
-  accounting: "M5 5.5h10M5 9h10M5 12.5h10M5 16h6",
+// Line-icon paths + tint for the 5 group headers (20x20 viewBox, same stroke
+// style as components/ui/StatCards.tsx) — one distinct color per group,
+// approximating the reference mockup's concepts (trend chart / inbox tray /
+// package / bank building / ledger) without copying its multi-tone shading.
+// Scoped to just these 5 group icons; every other icon in the sidebar
+// (individual items, buttons) stays the existing plain monochrome style.
+const GROUP_ICON_STYLE: Record<string, { paths: string[]; tone: string }> = {
+  sales: {
+    paths: ["M4 16v-4M8 16V9M12 16V6", "M3 11l3.5-3.5L9 10l6-6", "M12 4h3v3"],
+    tone: "bg-emerald-50 text-emerald-600",
+  },
+  purchases: {
+    paths: [
+      "M10 3v8m0 0l-3-3m3 3l3-3",
+      "M4 12v3.5a1 1 0 001 1h10a1 1 0 001-1V12",
+      "M4 12h4l1 2h2l1-2h4",
+    ],
+    tone: "bg-blue-50 text-blue-600",
+  },
+  inventoryAssets: {
+    paths: ["M10 3l6 3.2v6.6L10 16l-6-3.2V6.2L10 3zm0 0v13M4 6.3l6 3.2 6-3.2"],
+    tone: "bg-violet-50 text-violet-600",
+  },
+  banking: {
+    paths: ["M3 8l7-4.5L17 8", "M3 8h14", "M4.5 8v7M8 8v7M12 8v7M15.5 8v7", "M2.5 17h15"],
+    tone: "bg-amber-50 text-amber-600",
+  },
+  accounting: {
+    paths: [
+      "M6 3.5h6.2L16 7.3V16a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 014 16V5A1.5 1.5 0 015.5 3.5H6zm6 0V7h3.5",
+      "M7 10h6M7 12.5h6",
+    ],
+    tone: "bg-teal-50 text-teal-600",
+  },
 };
 
 function GroupIcon({ groupKey }: { groupKey: string }) {
@@ -108,7 +133,9 @@ function GroupIcon({ groupKey }: { groupKey: string }) {
       strokeLinejoin="round"
       aria-hidden
     >
-      <path d={GROUP_ICON_PATHS[groupKey]} />
+      {GROUP_ICON_STYLE[groupKey].paths.map((d, i) => (
+        <path key={i} d={d} />
+      ))}
     </svg>
   );
 }
@@ -182,7 +209,9 @@ function GroupHeader({
       aria-expanded={isOpen}
       className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
     >
-      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-50 text-slate-500">
+      <span
+        className={`flex h-8 w-8 items-center justify-center rounded-lg ${GROUP_ICON_STYLE[groupKey].tone}`}
+      >
         <GroupIcon groupKey={groupKey} />
       </span>
       <span className="truncate">{label}</span>
