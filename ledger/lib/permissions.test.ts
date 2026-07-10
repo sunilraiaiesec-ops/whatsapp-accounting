@@ -71,6 +71,20 @@ describe("permissions — role/permission matrix", () => {
     }
   });
 
+  it.each(["OWNER", "ADMIN", "ACCOUNTANT", "MANAGER"] as const)(
+    "%s can manage fixed assets",
+    (role) => {
+      expect(can(role, "manageFixedAssets")).toBe(true);
+    },
+  );
+
+  it.each(["CASHIER", "WAREHOUSE_STAFF", "SALESPERSON", "VIEWER"] as const)(
+    "%s cannot manage fixed assets",
+    (role) => {
+      expect(can(role, "manageFixedAssets")).toBe(false);
+    },
+  );
+
   it("fails closed for an unknown/invalid role", () => {
     expect(can("NOT_A_REAL_ROLE", "viewReports")).toBe(false);
     expect(can("staff", "createTransactions")).toBe(false); // old lowercase/legacy value

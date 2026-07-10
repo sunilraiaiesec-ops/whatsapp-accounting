@@ -31,16 +31,16 @@ enum OnboardingChoice {
 }
 
 model Organization {
-  id               String            @id @default(cuid())
-  name             String
-  baseCurrency     String            @default("XAF")
-  onboardingChoice OnboardingChoice?
+  id                      String            @id @default(cuid())
+  name                    String
+  baseCurrency            String            @default("XAF")
+  onboardingChoice        OnboardingChoice?
   // Business+ feature gate (see lib/permissions.ts §11 and the report's plan-
   // tier note). Independent org-level boolean for now — a placeholder for
   // when lib/billing/plans.ts feature flags land; this is the flag they
   // should eventually wrap (org can only flip it on if their plan allows it).
-  approvalWorkflowEnabled Boolean     @default(false)
-  createdAt        DateTime          @default(now())
+  approvalWorkflowEnabled Boolean           @default(false)
+  createdAt               DateTime          @default(now())
 
   memberships          Membership[]
   accounts             Account[]
@@ -76,6 +76,11 @@ model Organization {
 
   // --- Roles, permissions & approval workflow (see lib/permissions.ts, lib/approvals/*) ---
   pendingTransactions PendingTransaction[]
+
+  // --- Fixed assets (see lib/fixed-assets/*) ---
+  fixedAssets                     FixedAsset[]
+  fixedAssetCategories            FixedAssetCategory[]
+  fixedAssetDepreciationSchedules FixedAssetDepreciationSchedule[]
 
   @@map("organizations")
 }
@@ -215,6 +220,19 @@ model Account {
   migrationOpeningBalances MigrationOpeningBalance[]
   migrationBankBalances    MigrationBankBalance[]
 
+  // --- Fixed assets: each asset/category stores its own resolved accounts
+  // (not just via category, since the spec requires the user to be able to
+  // choose/override them per asset) — one named relation per role an account
+  // can play, matching the SalesReceiptBank/RefundReceiptBank style above.
+  fixedAssetsAsFixedAssetAccount             FixedAsset[]         @relation("AssetFixedAssetAccount")
+  fixedAssetsAsAccumDeprecAccount            FixedAsset[]         @relation("AssetAccumDeprecAccount")
+  fixedAssetsAsDeprecExpenseAccount          FixedAsset[]         @relation("AssetDeprecExpenseAccount")
+  fixedAssetsAsSourceAccount                 FixedAsset[]         @relation("AssetSourceAccount")
+  fixedAssetsAsDisposalReceivingAccount      FixedAsset[]         @relation("AssetDisposalReceivingAccount")
+  fixedAssetCategoriesAsFixedAssetAccount    FixedAssetCategory[] @relation("CategoryFixedAssetAccount")
+  fixedAssetCategoriesAsAccumDeprecAccount   FixedAssetCategory[] @relation("CategoryAccumDeprecAccount")
+  fixedAssetCategoriesAsDeprecExpenseAccount FixedAssetCategory[] @relation("CategoryDeprecExpenseAccount")
+
   @@unique([orgId, code])
   @@index([orgId, type])
   @@map("accounts")
@@ -278,6 +296,8 @@ model Party {
   preferredForItems         InventoryItem[]            @relation("ItemPreferredSupplier")
   migrationCustomerBalances MigrationCustomerBalance[]
   migrationSupplierBalances MigrationSupplierBalance[]
+  // Optional supplier a fixed asset was purchased from.
+  fixedAssets               FixedAsset[]
 
   @@index([orgId])
   @@map("parties")
@@ -1190,8 +1210,8 @@ model Document {
   mimeType            String
   createdAt           DateTime @default(now())
 
-  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  uploadedBy User         @relation("DocumentUploadedBy", fields: [uploadedById], references: [id])
+  org                           Organization         @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  uploadedBy                    User                 @relation("DocumentUploadedBy", fields: [uploadedById], references: [id])
   pendingTransactionAttachments PendingTransaction[]
 
   @@index([orgId])
@@ -1332,9 +1352,9 @@ enum PendingTransactionStatus {
 }
 
 model PendingTransaction {
-  id     String                 @id @default(cuid())
-  orgId  String
-  type   PendingTransactionType
+  id      String                 @id @default(cuid())
+  orgId   String
+  type    PendingTransactionType
   // The exact input shape the real creation function for `type` expects
   // (see lib/approvals/payloads.ts's Stored*Payload types) — Dates as ISO
   // strings and BigInt amounts as decimal strings, since Prisma Json cannot
@@ -1361,8 +1381,8 @@ model PendingTransaction {
   // Advisory only: never blocks or auto-rejects an approval.
   aiRiskReview Json?
 
-  reviewedById String?
-  reviewedAt   DateTime?
+  reviewedById    String?
+  reviewedAt      DateTime?
   // Holds either the rejection reason (status = rejected) or the correction
   // note (status = needs_correction) — the two are mutually exclusive by
   // construction (one status per row), so one column covers both without
@@ -1380,4 +1400,155 @@ model PendingTransaction {
   @@index([orgId, status])
   @@index([orgId, submittedById, status])
   @@map("pending_transactions")
+}
+
+// ---------------------------------------------------------------------------
+// Fixed assets (Phase 1) — see lib/fixed-assets/*.
+//
+// A purchase always posts Dr fixedAssetAccount / Cr sourceAccount immediately
+// at creation (see lib/fixed-assets/assets.ts#createFixedAsset), same as every
+// other document type here. journalEntryId is a plain unique column, not a
+// formal Prisma relation — matching Receipt/Payment/GoodsReceipt/etc., none of
+// which relate back to JournalEntry either.
+//
+// accumulatedDepreciation is a denormalized running total advanced only by
+// POSTED FixedAssetDepreciationSchedule rows (never by SCHEDULED/SKIPPED ones),
+// so "book value" is always cost - accumulatedDepreciation with no extra query.
+// ---------------------------------------------------------------------------
+
+enum FixedAssetStatus {
+  ACTIVE
+  DISPOSED
+}
+
+enum DepreciationMethod {
+  STRAIGHT_LINE
+  DECLINING_BALANCE
+}
+
+enum DepreciationScheduleStatus {
+  SCHEDULED
+  POSTED
+  SKIPPED
+}
+
+// A reusable template of default accounts/method/useful-life for a class of
+// assets (Vehicles, Computers, ...). Assets copy these onto their own row at
+// creation time — the category is never a live dependency for posting, so
+// deleting/editing a category can never change how an already-created asset
+// depreciates.
+model FixedAssetCategory {
+  id                           String             @id @default(cuid())
+  orgId                        String
+  name                         String
+  fixedAssetAccountId          String
+  accumulatedDeprecAccountId   String
+  depreciationExpenseAccountId String
+  usefulLifeMonths             Int
+  depreciationMethod           DepreciationMethod @default(STRAIGHT_LINE)
+  // Annual rate as a percent (e.g. 20 = 20%/year), only used when method is
+  // DECLINING_BALANCE. Nullable — defaults to double-declining
+  // (200 / usefulLifeYears) at asset-creation time when left unset.
+  decliningBalanceRate         Decimal?           @db.Decimal(7, 4)
+  createdAt                    DateTime           @default(now())
+
+  org                        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  fixedAssetAccount          Account      @relation("CategoryFixedAssetAccount", fields: [fixedAssetAccountId], references: [id])
+  accumulatedDeprecAccount   Account      @relation("CategoryAccumDeprecAccount", fields: [accumulatedDeprecAccountId], references: [id])
+  depreciationExpenseAccount Account      @relation("CategoryDeprecExpenseAccount", fields: [depreciationExpenseAccountId], references: [id])
+  assets                     FixedAsset[]
+
+  @@unique([orgId, name])
+  @@index([orgId])
+  @@map("fixed_asset_categories")
+}
+
+model FixedAsset {
+  id         String  @id @default(cuid())
+  orgId      String
+  code       String
+  name       String
+  categoryId String?
+  // Supplier the asset was purchased from — optional, same as Receipt/Payment.
+  partyId    String?
+
+  purchaseDate         DateTime           @db.Date
+  placedInServiceDate  DateTime           @db.Date
+  purchaseCost         BigInt
+  salvageValue         BigInt             @default(0)
+  usefulLifeMonths     Int
+  depreciationMethod   DepreciationMethod @default(STRAIGHT_LINE)
+  decliningBalanceRate Decimal?           @db.Decimal(7, 4)
+
+  // Chosen (and, pre-depreciation, editable) per asset — see lib/fixed-assets/assets.ts.
+  fixedAssetAccountId          String
+  accumulatedDeprecAccountId   String
+  depreciationExpenseAccountId String
+  // Bank/cash/AP account credited (or debited, if a liability) at purchase.
+  sourceAccountId              String
+
+  reference String?
+  notes     String?
+
+  // Running total advanced only by POSTED schedule rows (see module comment).
+  accumulatedDepreciation BigInt           @default(0)
+  status                  FixedAssetStatus @default(ACTIVE)
+
+  // --- Disposal (set once, when status becomes DISPOSED) ---
+  disposalDate               DateTime? @db.Date
+  disposalProceeds           BigInt?
+  disposalReceivingAccountId String?
+  disposalGainLoss           BigInt?
+  disposalNotes              String?
+  disposalJournalEntryId     String?   @unique
+
+  // Purchase/capitalization journal entry (plain column — see module comment).
+  journalEntryId String   @unique
+  createdAt      DateTime @default(now())
+
+  org                        Organization                     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  category                   FixedAssetCategory?              @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  party                      Party?                           @relation(fields: [partyId], references: [id])
+  fixedAssetAccount          Account                          @relation("AssetFixedAssetAccount", fields: [fixedAssetAccountId], references: [id])
+  accumulatedDeprecAccount   Account                          @relation("AssetAccumDeprecAccount", fields: [accumulatedDeprecAccountId], references: [id])
+  depreciationExpenseAccount Account                          @relation("AssetDeprecExpenseAccount", fields: [depreciationExpenseAccountId], references: [id])
+  sourceAccount              Account                          @relation("AssetSourceAccount", fields: [sourceAccountId], references: [id])
+  disposalReceivingAccount   Account?                         @relation("AssetDisposalReceivingAccount", fields: [disposalReceivingAccountId], references: [id])
+  schedule                   FixedAssetDepreciationSchedule[]
+
+  @@unique([orgId, code])
+  @@index([orgId, status])
+  @@index([categoryId])
+  @@map("fixed_assets")
+}
+
+// One row per depreciation period from placed-in-service through useful life.
+// Generated in full at asset-creation time; posting only ever flips a row's
+// status (never inserts/deletes), so @@unique([assetId, periodStart]) plus the
+// SCHEDULED-only guard in postDepreciationPeriod is the actual duplicate-post
+// safeguard — see lib/fixed-assets/depreciation.ts.
+model FixedAssetDepreciationSchedule {
+  id      String @id @default(cuid())
+  orgId   String
+  assetId String
+
+  periodStart DateTime @db.Date
+  periodEnd   DateTime @db.Date
+
+  depreciationAmount           BigInt
+  accumulatedDepreciationAfter BigInt
+  bookValueAfter               BigInt
+
+  status         DepreciationScheduleStatus @default(SCHEDULED)
+  journalEntryId String?                    @unique
+  postedAt       DateTime?
+  createdAt      DateTime                   @default(now())
+
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  asset FixedAsset   @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([assetId, periodStart])
+  @@index([orgId])
+  @@index([assetId, status])
+  @@map("fixed_asset_depreciation_schedules")
 }

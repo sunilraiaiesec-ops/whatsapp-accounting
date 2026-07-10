@@ -77,6 +77,26 @@ export function paymentCounterpartAccounts(orgId: string) {
   });
 }
 
+// Asset-type accounts suitable for fixed-asset account pickers (the asset
+// account, the accumulated-depreciation account) — every ASSET account except
+// the ones that are subledger-backed control accounts for something else
+// (bank/cash, receivable, inventory). Uses the same NULL-safe `notIn` shape as
+// receiptCounterpartAccounts/paymentCounterpartAccounts above — a bare `notIn`
+// would silently exclude every account whose subtype is unset.
+export function fixedAssetCapableAccounts(orgId: string) {
+  return prisma.account.findMany({
+    where: {
+      orgId,
+      type: "ASSET",
+      OR: [
+        { subtype: null },
+        { subtype: { notIn: ["bank", "cash", "receivable", "inventory", "tax_recoverable"] } },
+      ],
+    },
+    orderBy: { code: "asc" },
+  });
+}
+
 async function attachBalances<T extends { id: string }>(orgId: string, accounts: T[]) {
   if (accounts.length === 0) return [] as (T & { balance: bigint })[];
 
@@ -184,6 +204,108 @@ export async function ensureTaxPayableAccount(
       name: "Tax payable",
       type: "LIABILITY",
       subtype: "tax",
+    },
+  });
+}
+
+// Fixed assets at cost — created on demand for organizations that pre-date
+// the fixed-assets feature (new orgs get it seeded, see chart-of-accounts.ts).
+export async function ensureFixedAssetAccount(
+  tx: Prisma.TransactionClient,
+  orgId: string,
+) {
+  const existing = await tx.account.findFirst({
+    where: { orgId, subtype: "fixed_asset" },
+  });
+  if (existing) return existing;
+  return tx.account.create({
+    data: {
+      orgId,
+      code: "1500",
+      name: "Fixed assets",
+      type: "ASSET",
+      subtype: "fixed_asset",
+    },
+  });
+}
+
+// Contra-asset — typed ASSET (this schema has no separate "contra" type) but
+// naturally carries a credit balance; signedBalance() already nets debit-credit
+// for ASSET accounts, so it correctly reduces total assets on reports.
+export async function ensureAccumulatedDepreciationAccount(
+  tx: Prisma.TransactionClient,
+  orgId: string,
+) {
+  const existing = await tx.account.findFirst({
+    where: { orgId, subtype: "accumulated_depreciation" },
+  });
+  if (existing) return existing;
+  return tx.account.create({
+    data: {
+      orgId,
+      code: "1510",
+      name: "Accumulated depreciation",
+      type: "ASSET",
+      subtype: "accumulated_depreciation",
+    },
+  });
+}
+
+export async function ensureDepreciationExpenseAccount(
+  tx: Prisma.TransactionClient,
+  orgId: string,
+) {
+  const existing = await tx.account.findFirst({
+    where: { orgId, subtype: "depreciation_expense" },
+  });
+  if (existing) return existing;
+  return tx.account.create({
+    data: {
+      orgId,
+      code: "6400",
+      name: "Depreciation expense",
+      type: "EXPENSE",
+      subtype: "depreciation_expense",
+    },
+  });
+}
+
+// Resolved automatically at disposal-posting time — not a user-chosen field
+// on the asset (see lib/fixed-assets/disposal.ts).
+export async function ensureGainOnDisposalAccount(
+  tx: Prisma.TransactionClient,
+  orgId: string,
+) {
+  const existing = await tx.account.findFirst({
+    where: { orgId, subtype: "gain_on_disposal" },
+  });
+  if (existing) return existing;
+  return tx.account.create({
+    data: {
+      orgId,
+      code: "4910",
+      name: "Gain on disposal of assets",
+      type: "INCOME",
+      subtype: "gain_on_disposal",
+    },
+  });
+}
+
+export async function ensureLossOnDisposalAccount(
+  tx: Prisma.TransactionClient,
+  orgId: string,
+) {
+  const existing = await tx.account.findFirst({
+    where: { orgId, subtype: "loss_on_disposal" },
+  });
+  if (existing) return existing;
+  return tx.account.create({
+    data: {
+      orgId,
+      code: "6410",
+      name: "Loss on disposal of assets",
+      type: "EXPENSE",
+      subtype: "loss_on_disposal",
     },
   });
 }

@@ -398,4 +398,96 @@ export async function inventoryValuation(orgId: string) {
   return { rows, total };
 }
 
+// ---------------------------------------------------------------------------
+// Fixed assets — see lib/fixed-assets/*.
+// ---------------------------------------------------------------------------
+
+export async function fixedAssetRegister(orgId: string) {
+  const assets = await prisma.fixedAsset.findMany({
+    where: { orgId },
+    include: { category: true },
+    orderBy: { code: "asc" },
+  });
+
+  const rows = assets.map((a) => ({
+    id: a.id,
+    code: a.code,
+    name: a.name,
+    category: a.category?.name ?? null,
+    purchaseDate: a.purchaseDate,
+    placedInServiceDate: a.placedInServiceDate,
+    cost: a.purchaseCost,
+    accumulatedDepreciation: a.accumulatedDepreciation,
+    bookValue: a.purchaseCost - a.accumulatedDepreciation,
+    status: a.status,
+  }));
+
+  return {
+    rows,
+    totalCost: rows.reduce((s, r) => s + r.cost, 0n),
+    totalAccumulatedDepreciation: rows.reduce((s, r) => s + r.accumulatedDepreciation, 0n),
+    totalBookValue: rows.reduce((s, r) => s + r.bookValue, 0n),
+  };
+}
+
+export async function fixedAssetDepreciationReport(
+  orgId: string,
+  opts: { from?: Date; to?: Date } = {},
+) {
+  const rows = await prisma.fixedAssetDepreciationSchedule.findMany({
+    where: {
+      orgId,
+      status: "POSTED",
+      ...(opts.from || opts.to
+        ? {
+            periodStart: {
+              ...(opts.from ? { gte: opts.from } : {}),
+              ...(opts.to ? { lte: opts.to } : {}),
+            },
+          }
+        : {}),
+    },
+    include: { asset: { select: { id: true, code: true, name: true } } },
+    orderBy: [{ periodStart: "asc" }, { asset: { code: "asc" } }],
+  });
+
+  const mapped = rows.map((r) => ({
+    scheduleId: r.id,
+    asset: r.asset,
+    periodStart: r.periodStart,
+    periodEnd: r.periodEnd,
+    depreciationPosted: r.depreciationAmount,
+    accumulatedDepreciation: r.accumulatedDepreciationAfter,
+    bookValue: r.bookValueAfter,
+  }));
+
+  return {
+    rows: mapped,
+    totalDepreciation: mapped.reduce((s, r) => s + r.depreciationPosted, 0n),
+  };
+}
+
+export async function fixedAssetDisposalReport(orgId: string) {
+  const assets = await prisma.fixedAsset.findMany({
+    where: { orgId, status: "DISPOSED" },
+    orderBy: { disposalDate: "asc" },
+  });
+
+  const rows = assets.map((a) => ({
+    id: a.id,
+    code: a.code,
+    name: a.name,
+    disposalDate: a.disposalDate!,
+    proceeds: a.disposalProceeds ?? 0n,
+    bookValue: a.purchaseCost - a.accumulatedDepreciation,
+    gainOrLoss: a.disposalGainLoss ?? 0n,
+  }));
+
+  return {
+    rows,
+    totalProceeds: rows.reduce((s, r) => s + r.proceeds, 0n),
+    totalGainOrLoss: rows.reduce((s, r) => s + r.gainOrLoss, 0n),
+  };
+}
+
 export { isDebitNormal };

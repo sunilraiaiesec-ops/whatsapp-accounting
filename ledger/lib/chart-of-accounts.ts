@@ -36,6 +36,15 @@ export const DEFAULT_CHART_OF_ACCOUNTS: SeedAccount[] = [
     subtype: "tax_recoverable",
   },
   { code: "1500", name: "Fixed assets", type: "ASSET", subtype: "fixed_asset" },
+  // Contra-asset: typed ASSET (this schema has no separate "contra" type) but
+  // naturally carries a credit balance — signedBalance() already nets
+  // debit-credit for ASSET accounts, so it correctly reduces total assets.
+  {
+    code: "1510",
+    name: "Accumulated depreciation",
+    type: "ASSET",
+    subtype: "accumulated_depreciation",
+  },
 
   // Liabilities
   {
@@ -59,6 +68,12 @@ export const DEFAULT_CHART_OF_ACCOUNTS: SeedAccount[] = [
   // Income
   { code: "4000", name: "Sales", type: "INCOME", subtype: "sales" },
   { code: "4900", name: "Other income", type: "INCOME" },
+  {
+    code: "4910",
+    name: "Gain on disposal of assets",
+    type: "INCOME",
+    subtype: "gain_on_disposal",
+  },
 
   // Expenses
   { code: "5000", name: "Cost of goods sold", type: "EXPENSE", subtype: "cogs" },
@@ -66,5 +81,17 @@ export const DEFAULT_CHART_OF_ACCOUNTS: SeedAccount[] = [
   { code: "6100", name: "Salaries & wages", type: "EXPENSE" },
   { code: "6200", name: "Rent", type: "EXPENSE" },
   { code: "6300", name: "Transport & fuel", type: "EXPENSE" },
+  {
+    code: "6400",
+    name: "Depreciation expense",
+    type: "EXPENSE",
+    subtype: "depreciation_expense",
+  },
+  {
+    code: "6410",
+    name: "Loss on disposal of assets",
+    type: "EXPENSE",
+    subtype: "loss_on_disposal",
+  },
   { code: "6900", name: "Bank charges", type: "EXPENSE" },
 ];

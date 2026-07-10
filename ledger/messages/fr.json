@@ -86,6 +86,7 @@
     "inventory": "Stock",
     "writeOffs": "Pertes de stock",
     "inventoryAdjustments": "Ajustements",
+    "fixedAssets": "Immobilisations",
     "journal": "Journal",
     "settings": "Paramètres",
     "bankRecon": "Rapprochement",

@@ -86,6 +86,7 @@
     "inventory": "Inventory",
     "writeOffs": "Write-offs",
     "inventoryAdjustments": "Adjustments",
+    "fixedAssets": "Fixed Assets",
     "journal": "Journal",
     "settings": "Settings",
     "bankRecon": "Bank Recon",

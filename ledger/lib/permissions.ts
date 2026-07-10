@@ -68,7 +68,8 @@ export type PermissionKey =
   | "manageBilling"
   | "manageSettings"
   | "viewReports"
-  | "exportData";
+  | "exportData"
+  | "manageFixedAssets";
 
 export const PERMISSION_KEYS: PermissionKey[] = [
   "createTransactions",
@@ -81,6 +82,7 @@ export const PERMISSION_KEYS: PermissionKey[] = [
   "manageSettings",
   "viewReports",
   "exportData",
+  "manageFixedAssets",
 ];
 
 type PermissionRow = Record<PermissionKey, boolean>;
@@ -97,6 +99,7 @@ function all(value: boolean): PermissionRow {
     manageSettings: value,
     viewReports: value,
     exportData: value,
+    manageFixedAssets: value,
   };
 }
 
@@ -123,6 +126,15 @@ function all(value: boolean): PermissionRow {
 // - VIEWER: read-only — can view reports but nothing else, including export
 //   (export is a step up from view, reserved for roles that also touch the
 //   books).
+//
+// manageFixedAssets (lib/fixed-assets/*): create/edit/dispose an asset and
+// post depreciation. Deliberately its own key rather than reusing
+// createTransactions — that key is also true for CASHIER/WAREHOUSE_STAFF/
+// SALESPERSON, which the Fixed Assets spec explicitly excludes. True for
+// OWNER/ADMIN/ACCOUNTANT/MANAGER only. Viewing the asset register/reports
+// uses the existing viewReports key (already OWNER/ADMIN/ACCOUNTANT/MANAGER/
+// VIEWER, already excluding the three front-line roles) — no new key needed
+// for that half.
 const MATRIX: Record<Role, PermissionRow> = {
   OWNER: all(true),
   ADMIN: { ...all(true), manageBilling: false },
@@ -137,6 +149,7 @@ const MATRIX: Record<Role, PermissionRow> = {
     manageSettings: false,
     viewReports: true,
     exportData: true,
+    manageFixedAssets: true,
   },
   MANAGER: {
     createTransactions: true,
@@ -149,6 +162,7 @@ const MATRIX: Record<Role, PermissionRow> = {
     manageSettings: false,
     viewReports: true,
     exportData: true,
+    manageFixedAssets: true,
   },
   CASHIER: {
     ...all(false),

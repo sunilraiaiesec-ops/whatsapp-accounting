@@ -39,6 +39,7 @@ const NAV: NavItem[] = [
   { href: "/inventory-items", labelKey: "inventory", icon: "▦" },
   { href: "/inventory-write-offs", labelKey: "writeOffs", icon: "✕" },
   { href: "/inventory-adjustments", labelKey: "inventoryAdjustments", icon: "⇅" },
+  { href: "/fixed-assets", labelKey: "fixedAssets", icon: "🏛" },
   { href: "/journal", labelKey: "journal", icon: "≡" },
   { href: "/settings", labelKey: "settings", icon: "⚙" },
   { href: "/bank-reconciliations", labelKey: "bankRecon", soon: true, icon: "◎" },
