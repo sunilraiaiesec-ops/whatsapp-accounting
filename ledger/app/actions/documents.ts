@@ -26,6 +26,7 @@ import {
 import { LedgerError } from "@/lib/ledger";
 import { checkPlanLimit } from "@/lib/billing/enforce";
 import { gateTransaction } from "@/lib/approvals/gate";
+import { resolvePartyId } from "@/lib/parties";
 
 export type DocState = { error?: string; info?: string };
 
@@ -160,10 +161,18 @@ export async function createReceiptAction(
   if (lines === null) return { error: "Could not read line items" };
   const fx = parseCurrency(formData);
 
+  const resolvedParty = await resolvePartyId(
+    ctx.orgId,
+    String(formData.get("partyId") || ""),
+    String(formData.get("partyName") || ""),
+    "customer",
+  );
+  if (!resolvedParty.ok) return { error: resolvedParty.error };
+
   const payload = {
     date: parseDate(formData.get("date")),
     bankAccountId,
-    partyId: String(formData.get("partyId") || "") || null,
+    partyId: resolvedParty.partyId || null,
     reference: String(formData.get("reference") || "") || null,
     description: String(formData.get("description") || "") || null,
     paymentMethod: String(formData.get("paymentMethod") || "") || null,
@@ -216,10 +225,18 @@ export async function createSalesReceiptAction(
       itemId: l.itemId || null,
     }));
 
+  const resolvedParty = await resolvePartyId(
+    ctx.orgId,
+    String(formData.get("partyId") || ""),
+    String(formData.get("partyName") || ""),
+    "customer",
+  );
+  if (!resolvedParty.ok) return { error: resolvedParty.error };
+
   try {
     await createSalesReceipt(ctx.orgId, {
       bankAccountId,
-      partyId: String(formData.get("partyId") || "") || null,
+      partyId: resolvedParty.partyId || null,
       date: parseDate(formData.get("date")),
       reference: String(formData.get("reference") || "") || null,
       notes: String(formData.get("notes") || "") || null,
@@ -243,10 +260,18 @@ export async function createRefundReceiptAction(
   const lines = parseInvoiceLines(formData, ctx.baseCurrency);
   if (lines === null) return { error: "Could not read line items" };
 
+  const resolvedParty = await resolvePartyId(
+    ctx.orgId,
+    String(formData.get("partyId") || ""),
+    String(formData.get("partyName") || ""),
+    "customer",
+  );
+  if (!resolvedParty.ok) return { error: resolvedParty.error };
+
   try {
     await createRefundReceipt(ctx.orgId, {
       bankAccountId,
-      partyId: String(formData.get("partyId") || "") || null,
+      partyId: resolvedParty.partyId || null,
       date: parseDate(formData.get("date")),
       reference: String(formData.get("reference") || "") || null,
       notes: String(formData.get("notes") || "") || null,
@@ -271,7 +296,15 @@ export async function createPaymentAction(
   if (lines === null) return { error: "Could not read line items" };
   const itemLines = parseItemLines(formData, ctx.baseCurrency);
   const fx = parseCurrency(formData);
-  const partyId = String(formData.get("partyId") || "") || null;
+
+  const resolvedParty = await resolvePartyId(
+    ctx.orgId,
+    String(formData.get("partyId") || ""),
+    String(formData.get("partyName") || ""),
+    "supplier",
+  );
+  if (!resolvedParty.ok) return { error: resolvedParty.error };
+  const partyId = resolvedParty.partyId || null;
 
   const payload = {
     date: parseDate(formData.get("date")),
@@ -310,7 +343,14 @@ export async function createSalesInvoiceAction(
   formData: FormData,
 ): Promise<DocState> {
   const ctx = await requireContext();
-  const partyId = String(formData.get("partyId") || "");
+  const resolvedParty = await resolvePartyId(
+    ctx.orgId,
+    String(formData.get("partyId") || ""),
+    String(formData.get("partyName") || ""),
+    "customer",
+  );
+  if (!resolvedParty.ok) return { error: resolvedParty.error };
+  const partyId = resolvedParty.partyId;
   if (!partyId) return { error: "Choose a customer" };
 
   let raw: {
@@ -367,7 +407,14 @@ export async function createPurchaseInvoiceAction(
   formData: FormData,
 ): Promise<DocState> {
   const ctx = await requireContext();
-  const partyId = String(formData.get("partyId") || "");
+  const resolvedParty = await resolvePartyId(
+    ctx.orgId,
+    String(formData.get("partyId") || ""),
+    String(formData.get("partyName") || ""),
+    "supplier",
+  );
+  if (!resolvedParty.ok) return { error: resolvedParty.error };
+  const partyId = resolvedParty.partyId;
   if (!partyId) return { error: "Choose a supplier" };
 
   let raw: {
@@ -446,7 +493,14 @@ export async function createCreditNoteAction(
   formData: FormData,
 ): Promise<DocState> {
   const ctx = await requireContext();
-  const partyId = String(formData.get("partyId") || "");
+  const resolvedParty = await resolvePartyId(
+    ctx.orgId,
+    String(formData.get("partyId") || ""),
+    String(formData.get("partyName") || ""),
+    "customer",
+  );
+  if (!resolvedParty.ok) return { error: resolvedParty.error };
+  const partyId = resolvedParty.partyId;
   if (!partyId) return { error: "Choose a customer" };
 
   const lines = parseInvoiceLines(formData, ctx.baseCurrency);
@@ -472,7 +526,14 @@ export async function createDebitNoteAction(
   formData: FormData,
 ): Promise<DocState> {
   const ctx = await requireContext();
-  const partyId = String(formData.get("partyId") || "");
+  const resolvedParty = await resolvePartyId(
+    ctx.orgId,
+    String(formData.get("partyId") || ""),
+    String(formData.get("partyName") || ""),
+    "supplier",
+  );
+  if (!resolvedParty.ok) return { error: resolvedParty.error };
+  const partyId = resolvedParty.partyId;
   if (!partyId) return { error: "Choose a supplier" };
 
   const lines = parseInvoiceLines(formData, ctx.baseCurrency);

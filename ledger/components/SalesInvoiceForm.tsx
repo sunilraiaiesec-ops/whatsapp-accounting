@@ -7,6 +7,8 @@ import {
   type DocState,
 } from "@/app/actions/documents";
 import { updateSalesInvoiceAction } from "@/app/actions/document-update";
+import { searchBantooEntities } from "@/app/actions/bantoo";
+import { BantooCombobox } from "@/components/BantooCombobox";
 import { parseAmount, formatAmount } from "@/lib/money";
 
 type Option = { id: string; label: string };
@@ -66,6 +68,11 @@ export function SalesInvoiceForm({
     defaults?.lines?.length
       ? defaults.lines
       : [{ ...emptyRow(), accountId: defaultAccount }],
+  );
+
+  const [partyId, setPartyId] = useState(defaults?.partyId ?? "");
+  const [partyName, setPartyName] = useState(
+    () => customers.find((c) => c.id === defaults?.partyId)?.label ?? "",
   );
 
   const lineTotal = (r: Row): bigint => {
@@ -143,22 +150,23 @@ export function SalesInvoiceForm({
           Invoice details
         </h2>
         <div className="grid gap-4 sm:grid-cols-2">
-          <label className="block">
-            <span className={labelClass}>Customer</span>
-            <select
-              name="partyId"
-              defaultValue={defaults?.partyId ?? ""}
-              className="input-modern"
-              required
-            >
-              <option value="">Select customer…</option>
-              {customers.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <BantooCombobox
+            label="Customer"
+            text={partyName}
+            selectedId={partyId || null}
+            options={customers}
+            onSearch={(q) => searchBantooEntities("customer", q).then((r) => r.candidates)}
+            placeholder="Search or type a new customer…"
+            createLabel={(name) => `Create new customer "${name}"`}
+            onSelectExisting={(opt) => {
+              setPartyId(opt.id);
+              setPartyName(opt.label);
+            }}
+            onTextChange={(v) => {
+              setPartyName(v);
+              setPartyId("");
+            }}
+          />
           <label className="block">
             <span className={labelClass}>Reference (optional)</span>
             <input
@@ -345,6 +353,8 @@ export function SalesInvoiceForm({
         </label>
       </div>
 
+      <input type="hidden" name="partyId" value={partyId} />
+      <input type="hidden" name="partyName" value={partyId ? "" : partyName} />
       <input type="hidden" name="lines" value={JSON.stringify(linesPayload)} />
 
       <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">

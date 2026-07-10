@@ -21,6 +21,7 @@ import {
   updateFixedAssetCategory,
   type CreateFixedAssetCategoryInput,
 } from "@/lib/fixed-assets/categories";
+import { resolvePartyId } from "@/lib/parties";
 
 export type FixedAssetState = { error?: string; info?: string };
 
@@ -46,11 +47,23 @@ function fail(err: unknown): FixedAssetState {
   return { error: "Could not save. Please try again." };
 }
 
-function readAssetInput(formData: FormData, currency: string): CreateFixedAssetInput {
-  return {
+async function readAssetInput(
+  orgId: string,
+  formData: FormData,
+  currency: string,
+): Promise<{ ok: true; input: CreateFixedAssetInput } | { ok: false; error: string }> {
+  const resolvedParty = await resolvePartyId(
+    orgId,
+    String(formData.get("partyId") || ""),
+    String(formData.get("partyName") || ""),
+    "supplier",
+  );
+  if (!resolvedParty.ok) return { ok: false, error: resolvedParty.error };
+
+  const input: CreateFixedAssetInput = {
     name: String(formData.get("name") || ""),
     categoryId: String(formData.get("categoryId") || "") || null,
-    partyId: String(formData.get("partyId") || "") || null,
+    partyId: resolvedParty.partyId || null,
     purchaseDate: parseDate(formData.get("purchaseDate")),
     placedInServiceDate: parseDate(formData.get("placedInServiceDate")),
     purchaseCost: parseAmount(String(formData.get("purchaseCost") || "0"), currency),
@@ -68,6 +81,7 @@ function readAssetInput(formData: FormData, currency: string): CreateFixedAssetI
     reference: String(formData.get("reference") || "") || null,
     notes: String(formData.get("notes") || "") || null,
   };
+  return { ok: true, input };
 }
 
 // --- Asset -------------------------------------------------------------------
@@ -81,7 +95,9 @@ export async function createFixedAssetAction(
     return { error: "You don't have permission to add fixed assets." };
   }
 
-  const input = readAssetInput(formData, ctx.baseCurrency);
+  const result = await readAssetInput(ctx.orgId, formData, ctx.baseCurrency);
+  if (!result.ok) return { error: result.error };
+  const { input } = result;
   if (!input.fixedAssetAccountId || !input.accumulatedDeprecAccountId) {
     return { error: "Choose the fixed asset and accumulated depreciation accounts" };
   }
@@ -112,7 +128,9 @@ export async function updateFixedAssetAction(
 
   const id = String(formData.get("id") || "");
   if (!id) return { error: "Missing asset id" };
-  const input = readAssetInput(formData, ctx.baseCurrency);
+  const result = await readAssetInput(ctx.orgId, formData, ctx.baseCurrency);
+  if (!result.ok) return { error: result.error };
+  const { input } = result;
 
   try {
     await updateFixedAsset(ctx.orgId, id, input);

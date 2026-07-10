@@ -326,19 +326,47 @@ async function setupCompany(cfg: CompanyConfig, index: number): Promise<Company>
   const acc: Record<string, string> = {};
   for (const a of accounts) acc[a.code] = a.id;
 
-  // Extra accounts a real distributor keeps beyond the starter chart.
-  const petty = await withRetry(() => prisma.account.create({
-    data: { orgId: org.id, code: "1020", name: "Petty cash", type: "ASSET", subtype: "cash", currency: CURRENCY },
-  }));
-  const card = await withRetry(() => prisma.account.create({
-    data: { orgId: org.id, code: "2200", name: "Company credit card", type: "LIABILITY", subtype: "credit_card", currency: CURRENCY },
-  }));
-  const accumDepr = await withRetry(() => prisma.account.create({
-    data: { orgId: org.id, code: "1600", name: "Accumulated depreciation", type: "ASSET", subtype: "fixed_asset", currency: CURRENCY },
-  }));
-  const deprExp = await withRetry(() => prisma.account.create({
-    data: { orgId: org.id, code: "6400", name: "Depreciation expense", type: "EXPENSE", currency: CURRENCY },
-  }));
+  // Extra accounts a real distributor keeps beyond the starter chart. Some of
+  // these codes (e.g. 6400) now overlap with the Fixed Assets starter chart
+  // (lib/chart-of-accounts.ts), so reuse the existing account instead of
+  // creating a duplicate that would violate the (orgId, code) unique index.
+  async function ensureExtraAccount(data: {
+    code: string;
+    name: string;
+    type: Prisma.AccountUncheckedCreateInput["type"];
+    subtype?: string;
+  }) {
+    if (acc[data.code]) return { id: acc[data.code] };
+    const created = await withRetry(() =>
+      prisma.account.create({ data: { orgId: org.id, currency: CURRENCY, ...data } }),
+    );
+    acc[data.code] = created.id;
+    return created;
+  }
+
+  const petty = await ensureExtraAccount({
+    code: "1020",
+    name: "Petty cash",
+    type: "ASSET",
+    subtype: "cash",
+  });
+  const card = await ensureExtraAccount({
+    code: "2200",
+    name: "Company credit card",
+    type: "LIABILITY",
+    subtype: "credit_card",
+  });
+  const accumDepr = await ensureExtraAccount({
+    code: "1600",
+    name: "Accumulated depreciation",
+    type: "ASSET",
+    subtype: "fixed_asset",
+  });
+  const deprExp = await ensureExtraAccount({
+    code: "6400",
+    name: "Depreciation expense",
+    type: "EXPENSE",
+  });
 
   // --- Items ---
   const chosen = selectCatalog(cfg);

@@ -5,6 +5,8 @@ import { useActionState, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 
 import type { DocState } from "@/app/actions/documents";
+import { searchBantooEntities } from "@/app/actions/bantoo";
+import { BantooCombobox } from "@/components/BantooCombobox";
 import { parseAmount, formatAmount } from "@/lib/money";
 
 type Option = { id: string; label: string };
@@ -135,6 +137,10 @@ export function CashDocForm({
   const today = new Date().toISOString().slice(0, 10);
 
   const [bankAccountId, setBankAccountId] = useState(defaults?.bankAccountId ?? "");
+  const [partyId, setPartyId] = useState(defaults?.partyId ?? "");
+  const [partyName, setPartyName] = useState(
+    () => parties.find((p) => p.id === defaults?.partyId)?.label ?? "",
+  );
   const [rows, setRows] = useState<Row[]>(
     defaults?.lines?.length ? defaults.lines : [emptyRow(defaultLineAccountId)],
   );
@@ -285,21 +291,29 @@ export function CashDocForm({
 
         <div className="border-b border-[var(--border)] bg-slate-50/60 px-5 py-5 sm:px-6">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <label className="block">
-              <span className={labelClass}>{partyLabel}</span>
-              <select
-                name="partyId"
-                defaultValue={defaults?.partyId ?? ""}
-                className="input-modern"
-              >
-                <option value="">{t("payeePlaceholder")}</option>
-                {parties.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <BantooCombobox
+              label={partyLabel}
+              text={partyName}
+              selectedId={partyId || null}
+              options={parties}
+              onSearch={(q) =>
+                searchBantooEntities(isReceipt ? "customer" : "supplier", q).then(
+                  (r) => r.candidates,
+                )
+              }
+              placeholder={t("payeePlaceholder")}
+              createLabel={(name) =>
+                isReceipt ? `Create new customer "${name}"` : `Create new supplier "${name}"`
+              }
+              onSelectExisting={(opt) => {
+                setPartyId(opt.id);
+                setPartyName(opt.label);
+              }}
+              onTextChange={(v) => {
+                setPartyName(v);
+                setPartyId("");
+              }}
+            />
             <label className="block">
               <span className={labelClass}>{bankLabel}</span>
               <select
@@ -792,6 +806,8 @@ export function CashDocForm({
           </label>
         </div>
 
+        <input type="hidden" name="partyId" value={partyId} />
+        <input type="hidden" name="partyName" value={partyId ? "" : partyName} />
         <input type="hidden" name="lines" value={JSON.stringify(linesPayload)} />
         <input type="hidden" name="itemLines" value={JSON.stringify(itemLinesPayload)} />
         <input type="hidden" name="currency" value={isForeign ? docCurrency : ""} />

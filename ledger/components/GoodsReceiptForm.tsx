@@ -6,6 +6,8 @@ import {
   createGoodsReceiptAction,
   type InvState,
 } from "@/app/actions/inventory";
+import { searchBantooEntities } from "@/app/actions/bantoo";
+import { BantooCombobox } from "@/components/BantooCombobox";
 import { parseAmount, formatAmount } from "@/lib/money";
 
 type Option = { id: string; label: string };
@@ -13,6 +15,8 @@ type Row = { itemId: string; quantity: string; unitCost: string };
 
 const initial: InvState = {};
 const emptyRow = (): Row => ({ itemId: "", quantity: "1", unitCost: "" });
+
+const labelClass = "mb-1.5 block text-sm font-medium text-slate-700";
 
 export function GoodsReceiptForm({
   suppliers,
@@ -31,6 +35,9 @@ export function GoodsReceiptForm({
   const [rows, setRows] = useState<Row[]>([
     { ...emptyRow(), itemId: items[0]?.id ?? "" },
   ]);
+
+  const [partyId, setPartyId] = useState("");
+  const [partyName, setPartyName] = useState("");
 
   const lineTotal = (r: Row): bigint => {
     const qty = Number(r.quantity || "0");
@@ -58,152 +65,155 @@ export function GoodsReceiptForm({
     setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
 
   return (
-    <form action={action} className="mt-6 space-y-5">
-      <div className="grid gap-4 sm:grid-cols-2">
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">Supplier</span>
-          <select
-            name="partyId"
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-          >
-            <option value="">Select supplier…</option>
-            {suppliers.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">Date</span>
-          <input
-            type="date"
-            name="date"
-            defaultValue={today}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+    <form action={action} className="space-y-6">
+      <div className="card-surface p-5 sm:p-6">
+        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
+          Goods receipt details
+        </h2>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <BantooCombobox
+            label="Supplier"
+            text={partyName}
+            selectedId={partyId || null}
+            options={suppliers}
+            onSearch={(q) => searchBantooEntities("supplier", q).then((r) => r.candidates)}
+            placeholder="Search or type a new supplier…"
+            createLabel={(name) => `Create new supplier "${name}"`}
+            onSelectExisting={(opt) => {
+              setPartyId(opt.id);
+              setPartyName(opt.label);
+            }}
+            onTextChange={(v) => {
+              setPartyName(v);
+              setPartyId("");
+            }}
           />
-        </label>
-        <label className="block sm:col-span-2">
-          <span className="text-sm font-medium text-slate-700">Reference (optional)</span>
-          <input
-            name="reference"
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-          />
-        </label>
+          <label className="block">
+            <span className={labelClass}>Date</span>
+            <input type="date" name="date" defaultValue={today} className="input-modern" />
+          </label>
+          <label className="block sm:col-span-2">
+            <span className={labelClass}>Reference (optional)</span>
+            <input name="reference" className="input-modern" />
+          </label>
+        </div>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-              <th className="px-3 py-2 font-medium">Item</th>
-              <th className="w-24 px-3 py-2 text-right font-medium">Qty</th>
-              <th className="w-32 px-3 py-2 text-right font-medium">Unit cost</th>
-              <th className="w-32 px-3 py-2 text-right font-medium">Total</th>
-              <th className="w-10" />
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, i) => (
-              <tr key={i} className="border-b border-slate-100 last:border-0">
-                <td className="px-3 py-2">
-                  <select
-                    value={row.itemId}
-                    onChange={(e) => update(i, { itemId: e.target.value })}
-                    className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-                  >
-                    <option value="">Select item…</option>
-                    {items.map((it) => (
-                      <option key={it.id} value={it.id}>
-                        {it.label}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td className="px-3 py-2">
-                  <input
-                    inputMode="decimal"
-                    value={row.quantity}
-                    onChange={(e) => update(i, { quantity: e.target.value })}
-                    className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-right text-sm"
-                  />
-                </td>
-                <td className="px-3 py-2">
-                  <input
-                    inputMode="decimal"
-                    value={row.unitCost}
-                    onChange={(e) => update(i, { unitCost: e.target.value })}
-                    className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-right text-sm"
-                  />
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums">
-                  {formatAmount(lineTotal(row), currency)}
-                </td>
-                <td className="px-2 py-2 text-center">
-                  {rows.length > 1 ? (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setRows((prev) => prev.filter((_, idx) => idx !== i))
-                      }
-                      className="text-slate-400 hover:text-red-600"
-                      aria-label="Remove line"
-                    >
-                      ×
-                    </button>
-                  ) : null}
-                </td>
+      <div className="card-surface overflow-hidden">
+        <div className="border-b border-[var(--border)] px-5 py-4 sm:px-6">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
+            Line items
+          </h2>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px] text-sm">
+            <thead>
+              <tr className="border-b border-[var(--border)] bg-slate-50/80 text-left text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+                <th className="px-4 py-3">Item</th>
+                <th className="w-24 px-4 py-3 text-right">Qty</th>
+                <th className="w-32 px-4 py-3 text-right">Unit cost</th>
+                <th className="w-32 px-4 py-3 text-right">Total</th>
+                <th className="w-10" />
               </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr className="border-t border-slate-200 bg-slate-50 font-medium">
-              <td className="px-3 py-2" colSpan={3}>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setRows((prev) => [
-                      ...prev,
-                      { ...emptyRow(), itemId: items[0]?.id ?? "" },
-                    ])
-                  }
-                  className="text-sm text-slate-600 hover:text-slate-900"
-                >
-                  + Add line
-                </button>
-              </td>
-              <td className="px-3 py-2 text-right tabular-nums">
-                {formatAmount(total, currency)}
-              </td>
-              <td />
-            </tr>
-          </tfoot>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((row, i) => (
+                <tr key={i} className="border-b border-slate-100 last:border-0">
+                  <td className="px-4 py-2.5">
+                    <select
+                      value={row.itemId}
+                      onChange={(e) => update(i, { itemId: e.target.value })}
+                      className="input-modern py-2"
+                    >
+                      <option value="">Select item…</option>
+                      {items.map((it) => (
+                        <option key={it.id} value={it.id}>
+                          {it.label}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <input
+                      inputMode="decimal"
+                      value={row.quantity}
+                      onChange={(e) => update(i, { quantity: e.target.value })}
+                      className="input-modern py-2 text-right tabular-nums"
+                    />
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <input
+                      inputMode="decimal"
+                      value={row.unitCost}
+                      onChange={(e) => update(i, { unitCost: e.target.value })}
+                      className="input-modern py-2 text-right tabular-nums"
+                    />
+                  </td>
+                  <td className="px-4 py-2.5 text-right font-medium tabular-nums text-slate-900">
+                    {formatAmount(lineTotal(row), currency)}
+                  </td>
+                  <td className="px-2 py-2.5 text-center">
+                    {rows.length > 1 ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setRows((prev) => prev.filter((_, idx) => idx !== i))
+                        }
+                        className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition hover:bg-red-50 hover:text-red-600"
+                        aria-label="Remove line"
+                      >
+                        ×
+                      </button>
+                    ) : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="flex flex-col gap-3 border-t border-[var(--border)] bg-slate-50/50 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <button
+            type="button"
+            onClick={() =>
+              setRows((prev) => [...prev, { ...emptyRow(), itemId: items[0]?.id ?? "" }])
+            }
+            className="text-sm font-semibold text-[var(--brand)] hover:underline"
+          >
+            + Add line
+          </button>
+          <div className="text-right">
+            <span className="text-sm text-[var(--muted)]">Receipt total</span>
+            <p className="text-2xl font-bold tabular-nums text-slate-900">
+              {formatAmount(total, currency)}{" "}
+              <span className="text-base font-normal text-slate-400">{currency}</span>
+            </p>
+          </div>
+        </div>
       </div>
 
-      <label className="block">
-        <span className="text-sm font-medium text-slate-700">Notes (optional)</span>
-        <textarea
-          name="notes"
-          rows={2}
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-        />
-      </label>
+      <div className="card-surface p-5 sm:p-6">
+        <label className="block">
+          <span className={labelClass}>Notes (optional)</span>
+          <textarea name="notes" rows={3} className="input-modern resize-y" />
+        </label>
+      </div>
 
+      <input type="hidden" name="partyId" value={partyId} />
+      <input type="hidden" name="partyName" value={partyId ? "" : partyName} />
       <input type="hidden" name="lines" value={JSON.stringify(payload)} />
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
         {state.error ? (
-          <span className="text-sm text-red-600">{state.error}</span>
+          <p className="rounded-xl bg-red-50 px-4 py-2.5 text-sm text-red-700">{state.error}</p>
         ) : (
-          <span className="text-sm text-slate-500">
+          <p className="text-sm text-[var(--muted)]">
             Increases stock and posts Dr Inventory / Cr Accounts payable.
-          </span>
+          </p>
         )}
         <button
           type="submit"
           disabled={pending || total <= 0n || items.length === 0}
-          className="rounded-lg bg-slate-900 px-5 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-40"
+          className="btn-brand disabled:cursor-not-allowed disabled:opacity-40"
         >
           {pending ? "Saving…" : "Receive goods"}
         </button>

@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { normalizeText, rankMatches } from "@/lib/bantoo/match";
+import { MATCH_HIGH, normalizeText, rankMatches } from "@/lib/bantoo/match";
 
 export function listParties(orgId: string, type?: "customer" | "supplier") {
   return prisma.party.findMany({
@@ -36,6 +36,45 @@ export async function createParty(orgId: string, data: CreatePartyInput) {
       city: data.city?.trim() || null,
     },
   });
+}
+
+export type ResolvePartyResult =
+  | { ok: true; partyId: string }
+  | { ok: false; error: string };
+
+// Used by every manual "New <document>" form's party picker (BantooCombobox):
+// pass through an existing selection unchanged, otherwise resolve the typed
+// name to a party — but refuse to silently create a near-duplicate. Returns a
+// discriminated result (not a thrown error) so the duplicate-warning message
+// survives intact through each server action's existing `{ error }` return
+// shape. MATCH_HIGH (>=90, "confident enough to auto-select") is deliberately
+// stricter than findPossiblePartyDuplicates' own default floor (60, used for
+// its "here are some possible matches, pick one or continue" UI elsewhere) —
+// a plain form has no interactive duplicate-review step, so only block on a
+// near-certain match; a merely similar name (e.g. "John Doe" vs "John Doe
+// Jr") should still be allowed to create.
+export async function resolvePartyId(
+  orgId: string,
+  partyId: string,
+  partyName: string,
+  type: "customer" | "supplier",
+): Promise<ResolvePartyResult> {
+  if (partyId) return { ok: true, partyId };
+
+  const name = partyName.trim();
+  if (!name) return { ok: true, partyId: "" };
+
+  const duplicates = await findPossiblePartyDuplicates(orgId, { name });
+  const bestMatch = duplicates[0];
+  if (bestMatch && bestMatch.score >= MATCH_HIGH) {
+    return {
+      ok: false,
+      error: `A ${type} named "${bestMatch.name}" already exists — search for it and select it instead of typing a new name.`,
+    };
+  }
+
+  const created = await createParty(orgId, { name, type });
+  return { ok: true, partyId: created.id };
 }
 
 // Extended "Profile" fields, editable separately from quick-add. All

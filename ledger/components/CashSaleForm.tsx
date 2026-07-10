@@ -7,6 +7,8 @@ import {
   createRefundReceiptAction,
   type DocState,
 } from "@/app/actions/documents";
+import { searchBantooEntities } from "@/app/actions/bantoo";
+import { BantooCombobox } from "@/components/BantooCombobox";
 import { parseAmount, formatAmount } from "@/lib/money";
 
 type Option = { id: string; label: string };
@@ -66,6 +68,11 @@ export function CashSaleForm({
   const [rows, setRows] = useState<Row[]>([
     { ...emptyRow(), accountId: defaultAccount },
   ]);
+
+  const [partyId, setPartyId] = useState(defaults?.partyId ?? "");
+  const [partyName, setPartyName] = useState(
+    () => parties.find((p) => p.id === defaults?.partyId)?.label ?? "",
+  );
 
   const lineTotal = (r: Row): bigint => {
     const qty = Number(r.quantity || "0");
@@ -148,21 +155,23 @@ export function CashSaleForm({
           Details
         </h2>
         <div className="grid gap-4 sm:grid-cols-2">
-          <label className="block">
-            <span className={labelClass}>{partyLabel}</span>
-            <select
-              name="partyId"
-              defaultValue={defaults?.partyId ?? ""}
-              className="input-modern"
-            >
-              <option value="">Walk-in / no customer</option>
-              {parties.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <BantooCombobox
+            label={partyLabel}
+            text={partyName}
+            selectedId={partyId || null}
+            options={parties}
+            onSearch={(q) => searchBantooEntities("customer", q).then((r) => r.candidates)}
+            placeholder="Walk-in / no customer"
+            createLabel={(name) => `Create new customer "${name}"`}
+            onSelectExisting={(opt) => {
+              setPartyId(opt.id);
+              setPartyName(opt.label);
+            }}
+            onTextChange={(v) => {
+              setPartyName(v);
+              setPartyId("");
+            }}
+          />
           <label className="block">
             <span className={labelClass}>{bankLabel}</span>
             <select name="bankAccountId" className="input-modern" required>
@@ -347,6 +356,8 @@ export function CashSaleForm({
         </label>
       </div>
 
+      <input type="hidden" name="partyId" value={partyId} />
+      <input type="hidden" name="partyName" value={partyId ? "" : partyName} />
       <input type="hidden" name="lines" value={JSON.stringify(linesPayload)} />
 
       <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">

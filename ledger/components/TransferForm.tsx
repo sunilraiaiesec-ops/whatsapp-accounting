@@ -11,6 +11,7 @@ import { updateInterAccountTransferAction } from "@/app/actions/document-update"
 type Option = { id: string; label: string };
 
 const initial: DocState = {};
+const labelClass = "mb-1.5 block text-sm font-medium text-slate-700";
 
 export function TransferForm({
   accounts,
@@ -49,90 +50,96 @@ export function TransferForm({
   const toList = toAccounts ?? accounts;
 
   return (
-    <form action={action} className="mt-6 space-y-5">
+    <form action={action} className="space-y-6">
       {documentId ? <input type="hidden" name="id" value={documentId} /> : null}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">{fromLabel}</span>
-          <select
-            name="fromAccountId"
-            defaultValue={defaults?.fromAccountId ?? fromList[0]?.id ?? ""}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-          >
-            <option value="">Select…</option>
-            {fromList.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">{toLabel}</span>
-          <select
-            name="toAccountId"
-            defaultValue={defaults?.toAccountId ?? toList[0]?.id ?? ""}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-          >
-            <option value="">Select…</option>
-            {toList.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">Amount ({currency})</span>
-          <input
-            name="amount"
-            inputMode="decimal"
-            required
-            placeholder="0"
-            defaultValue={defaults?.amount ?? ""}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-right text-sm"
-          />
-        </label>
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">Date</span>
-          <input
-            type="date"
-            name="date"
-            defaultValue={defaults?.date ?? today}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-          />
-        </label>
-        <label className="block sm:col-span-2">
-          <span className="text-sm font-medium text-slate-700">Reference (optional)</span>
-          <input
-            name="reference"
-            defaultValue={defaults?.reference ?? ""}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-          />
-        </label>
-        <label className="block sm:col-span-2">
-          <span className="text-sm font-medium text-slate-700">Description (optional)</span>
-          <textarea
-            name="description"
-            rows={2}
-            defaultValue={defaults?.description ?? ""}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-          />
-        </label>
+
+      <div className="card-surface p-5 sm:p-6">
+        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
+          Transfer details
+        </h2>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="block">
+            <span className={labelClass}>{fromLabel}</span>
+            <select
+              name="fromAccountId"
+              defaultValue={defaults?.fromAccountId ?? fromList[0]?.id ?? ""}
+              className="input-modern"
+            >
+              <option value="">Select…</option>
+              {fromList.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className={labelClass}>{toLabel}</span>
+            <select
+              name="toAccountId"
+              defaultValue={defaults?.toAccountId ?? toList[0]?.id ?? ""}
+              className="input-modern"
+            >
+              <option value="">Select…</option>
+              {toList.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className={labelClass}>Amount ({currency})</span>
+            <input
+              name="amount"
+              inputMode="decimal"
+              required
+              placeholder="0"
+              defaultValue={defaults?.amount ?? ""}
+              className="input-modern text-right tabular-nums"
+            />
+          </label>
+          <label className="block">
+            <span className={labelClass}>Date</span>
+            <input
+              type="date"
+              name="date"
+              defaultValue={defaults?.date ?? today}
+              className="input-modern"
+            />
+          </label>
+          <label className="block sm:col-span-2">
+            <span className={labelClass}>Reference (optional)</span>
+            <input
+              name="reference"
+              defaultValue={defaults?.reference ?? ""}
+              className="input-modern"
+            />
+          </label>
+          <label className="block sm:col-span-2">
+            <span className={labelClass}>Description (optional)</span>
+            <textarea
+              name="description"
+              rows={2}
+              defaultValue={defaults?.description ?? ""}
+              className="input-modern resize-y"
+            />
+          </label>
+        </div>
       </div>
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
         {state.error ? (
-          <span className="text-sm text-red-600">{state.error}</span>
+          <p className="rounded-xl bg-red-50 px-4 py-2.5 text-sm text-red-700">{state.error}</p>
         ) : (
-          <span className="text-sm text-slate-500">
+          <p className="text-sm text-[var(--muted)]">
             Moves money from one account to another. The ledger stays balanced.
-          </span>
+          </p>
         )}
         <button
           type="submit"
           disabled={pending}
-          className="rounded-lg bg-slate-900 px-5 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-40"
+          className="btn-brand disabled:cursor-not-allowed disabled:opacity-40"
         >
           {pending
             ? "Saving…"

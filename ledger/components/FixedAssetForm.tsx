@@ -7,6 +7,8 @@ import {
   updateFixedAssetAction,
   type FixedAssetState,
 } from "@/app/actions/fixed-assets";
+import { searchBantooEntities } from "@/app/actions/bantoo";
+import { BantooCombobox } from "@/components/BantooCombobox";
 import { AccountingPreview } from "@/components/ui/AccountingPreview";
 import { parseAmount } from "@/lib/money";
 
@@ -42,6 +44,7 @@ type Defaults = {
 };
 
 const initial: FixedAssetState = {};
+const labelClass = "mb-1.5 block text-sm font-medium text-slate-700";
 
 export function FixedAssetForm({
   currency,
@@ -110,6 +113,11 @@ export function FixedAssetForm({
     defaults?.sourceAccountId ?? sourceAccounts[0]?.id ?? "",
   );
 
+  const [partyId, setPartyId] = useState(defaults?.partyId ?? "");
+  const [partyName, setPartyName] = useState(
+    () => suppliers.find((s) => s.id === defaults?.partyId)?.label ?? "",
+  );
+
   function applyCategory(id: string) {
     setCategoryId(id);
     const cat = categories.find((c) => c.id === id);
@@ -135,256 +143,276 @@ export function FixedAssetForm({
   }, [purchaseCost, currency, fixedAssetAccountId, sourceAccountId, assetAccounts, sourceAccounts]);
 
   return (
-    <form action={action} className="mt-6 space-y-5">
+    <form action={action} className="space-y-6">
       {assetId && <input type="hidden" name="id" value={assetId} />}
 
-      <label className="block">
-        <span className="text-sm font-medium text-slate-700">Asset name</span>
-        <input
-          name="name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          required
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-        />
-      </label>
-
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="card-surface p-5 sm:p-6">
+        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
+          Asset details
+        </h2>
         <label className="block">
-          <span className="text-sm font-medium text-slate-700">Category (optional)</span>
-          <select
-            name="categoryId"
-            value={categoryId}
-            onChange={(e) => applyCategory(e.target.value)}
-            disabled={locked}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50"
-          >
-            <option value="">No category</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">Supplier (optional)</span>
-          <select
-            name="partyId"
-            defaultValue={defaults?.partyId ?? ""}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-          >
-            <option value="">None</option>
-            {suppliers.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">Purchase date</span>
+          <span className={labelClass}>Asset name</span>
           <input
-            type="date"
-            name="purchaseDate"
-            defaultValue={defaults?.purchaseDate ?? today}
-            disabled={locked}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50"
-          />
-        </label>
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">Placed in service</span>
-          <input
-            type="date"
-            name="placedInServiceDate"
-            defaultValue={defaults?.placedInServiceDate ?? today}
-            disabled={locked}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50"
-          />
-        </label>
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">Purchase cost</span>
-          <input
-            inputMode="decimal"
-            name="purchaseCost"
-            value={purchaseCost}
-            onChange={(e) => setPurchaseCost(e.target.value)}
-            disabled={locked}
+            name="name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
             required
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-right text-sm disabled:bg-slate-50"
+            className="input-modern"
           />
         </label>
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">Salvage value</span>
-          <input
-            inputMode="decimal"
-            name="salvageValue"
-            value={salvageValue}
-            onChange={(e) => setSalvageValue(e.target.value)}
-            disabled={locked}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-right text-sm disabled:bg-slate-50"
+
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <label className="block">
+            <span className={labelClass}>Category (optional)</span>
+            <select
+              name="categoryId"
+              value={categoryId}
+              onChange={(e) => applyCategory(e.target.value)}
+              disabled={locked}
+              className="input-modern disabled:bg-slate-50"
+            >
+              <option value="">No category</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <BantooCombobox
+            label="Supplier (optional)"
+            text={partyName}
+            selectedId={partyId || null}
+            options={suppliers}
+            onSearch={(q) => searchBantooEntities("supplier", q).then((r) => r.candidates)}
+            placeholder="Search or type a new supplier…"
+            createLabel={(name) => `Create new supplier "${name}"`}
+            onSelectExisting={(opt) => {
+              setPartyId(opt.id);
+              setPartyName(opt.label);
+            }}
+            onTextChange={(v) => {
+              setPartyName(v);
+              setPartyId("");
+            }}
           />
-        </label>
+        </div>
+
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <label className="block">
+            <span className={labelClass}>Purchase date</span>
+            <input
+              type="date"
+              name="purchaseDate"
+              defaultValue={defaults?.purchaseDate ?? today}
+              disabled={locked}
+              className="input-modern disabled:bg-slate-50"
+            />
+          </label>
+          <label className="block">
+            <span className={labelClass}>Placed in service</span>
+            <input
+              type="date"
+              name="placedInServiceDate"
+              defaultValue={defaults?.placedInServiceDate ?? today}
+              disabled={locked}
+              className="input-modern disabled:bg-slate-50"
+            />
+          </label>
+        </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">Useful life (months)</span>
-          <input
-            inputMode="numeric"
-            name="usefulLifeMonths"
-            value={usefulLifeMonths}
-            onChange={(e) => setUsefulLifeMonths(e.target.value)}
-            disabled={locked}
-            required
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-right text-sm disabled:bg-slate-50"
-          />
-        </label>
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">Depreciation method</span>
-          <select
-            name="depreciationMethod"
-            value={depreciationMethod}
-            onChange={(e) =>
-              setDepreciationMethod(e.target.value as "STRAIGHT_LINE" | "DECLINING_BALANCE")
-            }
-            disabled={locked}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50"
-          >
-            <option value="STRAIGHT_LINE">Straight line</option>
-            <option value="DECLINING_BALANCE">Declining balance</option>
-          </select>
-        </label>
+      <div className="card-surface p-5 sm:p-6">
+        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
+          Cost & depreciation
+        </h2>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="block">
+            <span className={labelClass}>Purchase cost</span>
+            <input
+              inputMode="decimal"
+              name="purchaseCost"
+              value={purchaseCost}
+              onChange={(e) => setPurchaseCost(e.target.value)}
+              disabled={locked}
+              required
+              className="input-modern text-right tabular-nums disabled:bg-slate-50"
+            />
+          </label>
+          <label className="block">
+            <span className={labelClass}>Salvage value</span>
+            <input
+              inputMode="decimal"
+              name="salvageValue"
+              value={salvageValue}
+              onChange={(e) => setSalvageValue(e.target.value)}
+              disabled={locked}
+              className="input-modern text-right tabular-nums disabled:bg-slate-50"
+            />
+          </label>
+          <label className="block">
+            <span className={labelClass}>Useful life (months)</span>
+            <input
+              inputMode="numeric"
+              name="usefulLifeMonths"
+              value={usefulLifeMonths}
+              onChange={(e) => setUsefulLifeMonths(e.target.value)}
+              disabled={locked}
+              required
+              className="input-modern text-right tabular-nums disabled:bg-slate-50"
+            />
+          </label>
+          <label className="block">
+            <span className={labelClass}>Depreciation method</span>
+            <select
+              name="depreciationMethod"
+              value={depreciationMethod}
+              onChange={(e) =>
+                setDepreciationMethod(e.target.value as "STRAIGHT_LINE" | "DECLINING_BALANCE")
+              }
+              disabled={locked}
+              className="input-modern disabled:bg-slate-50"
+            >
+              <option value="STRAIGHT_LINE">Straight line</option>
+              <option value="DECLINING_BALANCE">Declining balance</option>
+            </select>
+          </label>
+        </div>
+
+        {depreciationMethod === "DECLINING_BALANCE" ? (
+          <label className="mt-4 block">
+            <span className={labelClass}>
+              Declining balance rate (% per year, optional)
+            </span>
+            <input
+              inputMode="decimal"
+              name="decliningBalanceRate"
+              value={decliningBalanceRate}
+              onChange={(e) => setDecliningBalanceRate(e.target.value)}
+              disabled={locked}
+              placeholder="Defaults to double-declining (200 / useful life in years)"
+              className="input-modern disabled:bg-slate-50"
+            />
+          </label>
+        ) : null}
       </div>
 
-      {depreciationMethod === "DECLINING_BALANCE" ? (
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">
-            Declining balance rate (% per year, optional)
-          </span>
-          <input
-            inputMode="decimal"
-            name="decliningBalanceRate"
-            value={decliningBalanceRate}
-            onChange={(e) => setDecliningBalanceRate(e.target.value)}
-            disabled={locked}
-            placeholder="Defaults to double-declining (200 / useful life in years)"
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50"
-          />
-        </label>
-      ) : null}
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">Fixed asset account</span>
-          <select
-            name="fixedAssetAccountId"
-            value={fixedAssetAccountId}
-            onChange={(e) => setFixedAssetAccountId(e.target.value)}
-            disabled={locked}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50"
-          >
-            {assetAccounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">Accumulated depreciation account</span>
-          <select
-            name="accumulatedDeprecAccountId"
-            value={accumulatedDeprecAccountId}
-            onChange={(e) => setAccumulatedDeprecAccountId(e.target.value)}
-            disabled={locked}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50"
-          >
-            {assetAccounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.label}
-              </option>
-            ))}
-          </select>
-        </label>
+      <div className="card-surface p-5 sm:p-6">
+        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
+          Accounts
+        </h2>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="block">
+            <span className={labelClass}>Fixed asset account</span>
+            <select
+              name="fixedAssetAccountId"
+              value={fixedAssetAccountId}
+              onChange={(e) => setFixedAssetAccountId(e.target.value)}
+              disabled={locked}
+              className="input-modern disabled:bg-slate-50"
+            >
+              {assetAccounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className={labelClass}>Accumulated depreciation account</span>
+            <select
+              name="accumulatedDeprecAccountId"
+              value={accumulatedDeprecAccountId}
+              onChange={(e) => setAccumulatedDeprecAccountId(e.target.value)}
+              disabled={locked}
+              className="input-modern disabled:bg-slate-50"
+            >
+              {assetAccounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className={labelClass}>Depreciation expense account</span>
+            <select
+              name="depreciationExpenseAccountId"
+              value={depreciationExpenseAccountId}
+              onChange={(e) => setDepreciationExpenseAccountId(e.target.value)}
+              disabled={locked}
+              className="input-modern disabled:bg-slate-50"
+            >
+              {expenseAccounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className={labelClass}>Paid from</span>
+            <select
+              name="sourceAccountId"
+              value={sourceAccountId}
+              onChange={(e) => setSourceAccountId(e.target.value)}
+              disabled={locked}
+              className="input-modern disabled:bg-slate-50"
+            >
+              {sourceAccounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">Depreciation expense account</span>
-          <select
-            name="depreciationExpenseAccountId"
-            value={depreciationExpenseAccountId}
-            onChange={(e) => setDepreciationExpenseAccountId(e.target.value)}
-            disabled={locked}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50"
-          >
-            {expenseAccounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">Paid from</span>
-          <select
-            name="sourceAccountId"
-            value={sourceAccountId}
-            onChange={(e) => setSourceAccountId(e.target.value)}
-            disabled={locked}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50"
-          >
-            {sourceAccounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.label}
-              </option>
-            ))}
-          </select>
-        </label>
+      <div className="card-surface p-5 sm:p-6">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="block">
+            <span className={labelClass}>Reference / invoice number (optional)</span>
+            <input
+              name="reference"
+              defaultValue={defaults?.reference ?? ""}
+              className="input-modern"
+            />
+          </label>
+          <label className="block">
+            <span className={labelClass}>Notes (optional)</span>
+            <input
+              name="notes"
+              defaultValue={defaults?.notes ?? ""}
+              className="input-modern"
+            />
+          </label>
+        </div>
+
+        {locked ? (
+          <p className="mt-4 rounded-xl border border-[var(--border)] bg-slate-50 p-3 text-xs text-slate-500">
+            Depreciation has already posted for this asset, so cost, dates, useful life, method, and
+            accounts are locked. Only the name, category, supplier, reference, and notes can be
+            changed.
+          </p>
+        ) : null}
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">Reference / invoice number (optional)</span>
-          <input
-            name="reference"
-            defaultValue={defaults?.reference ?? ""}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-          />
-        </label>
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">Notes (optional)</span>
-          <input
-            name="notes"
-            defaultValue={defaults?.notes ?? ""}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-          />
-        </label>
-      </div>
-
-      {locked ? (
-        <p className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">
-          Depreciation has already posted for this asset, so cost, dates, useful life, method, and
-          accounts are locked. Only the name, category, supplier, reference, and notes can be
-          changed.
-        </p>
-      ) : null}
+      <input type="hidden" name="partyId" value={partyId} />
+      <input type="hidden" name="partyName" value={partyId ? "" : partyName} />
 
       <AccountingPreview lines={previewLines} currency={currency} />
 
-      <div className="flex items-center justify-between">
-        {state.error ? <span className="text-sm text-red-600">{state.error}</span> : <span />}
+      <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
+        {state.error ? (
+          <p className="rounded-xl bg-red-50 px-4 py-2.5 text-sm text-red-700">{state.error}</p>
+        ) : (
+          <span />
+        )}
         <button
           type="submit"
           disabled={pending}
-          className="rounded-lg bg-slate-900 px-5 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-40"
+          className="btn-brand disabled:cursor-not-allowed disabled:opacity-40"
         >
           {pending ? "Saving…" : assetId ? "Save changes" : "Add asset"}
         </button>

@@ -14,6 +14,7 @@ import { DocumentError } from "@/lib/documents";
 import { LedgerError } from "@/lib/ledger";
 import { checkPlanLimit } from "@/lib/billing/enforce";
 import { gateTransaction } from "@/lib/approvals/gate";
+import { resolvePartyId } from "@/lib/parties";
 
 export type InvState = { error?: string; info?: string };
 
@@ -81,8 +82,16 @@ export async function createGoodsReceiptAction(
       unitCost: parseAmount(l.unitCost ?? "0", ctx.baseCurrency),
     }));
 
+  const resolvedParty = await resolvePartyId(
+    ctx.orgId,
+    String(formData.get("partyId") || ""),
+    String(formData.get("partyName") || ""),
+    "supplier",
+  );
+  if (!resolvedParty.ok) return { error: resolvedParty.error };
+
   const payload = {
-    partyId: String(formData.get("partyId") || ""),
+    partyId: resolvedParty.partyId,
     date: parseDate(formData.get("date")),
     reference: String(formData.get("reference") || "") || null,
     notes: String(formData.get("notes") || "") || null,
