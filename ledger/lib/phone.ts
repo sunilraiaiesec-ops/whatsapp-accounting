@@ -9,6 +9,11 @@
 // wa.me expects digits only (country code + national number, no leading
 // "+", no spaces/dashes). See https://faq.whatsapp.com/5913398998672934 for
 // the click-to-chat link format.
+//
+// For E.164 ("+237...") normalization/validation (User.phone storage format
+// via components/PhoneField.tsx), see lib/phone-e164.ts instead — kept
+// separate and server-only so libphonenumber-js's metadata never lands in a
+// client bundle that only needs this file's lighter WhatsApp helpers.
 // ---------------------------------------------------------------------------
 
 const CAMEROON_COUNTRY_CODE = "237";

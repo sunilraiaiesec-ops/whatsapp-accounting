@@ -32,7 +32,8 @@ function invoice(overrides: Partial<Record<string, unknown>> = {}) {
     reference: null,
     notes: null,
     total: 50_000n,
-    status: "unpaid",
+    amountPaid: 0n,
+    status: "UNPAID",
     journalEntryId: "je_1",
     createdAt: new Date("2026-06-01"),
     party: PARTY_A,
@@ -85,7 +86,7 @@ describe("getDueSoonAndOverdueInvoices — bucketing", () => {
       expect.objectContaining({
         where: expect.objectContaining({
           orgId: "org_B",
-          status: { not: "paid" },
+          status: { in: ["UNPAID", "PARTIALLY_PAID"] },
           dueDate: { not: null },
         }),
       }),

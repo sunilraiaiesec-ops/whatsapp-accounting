@@ -87,6 +87,11 @@ export default async function EditPaymentPage({
               className: l.className ?? "",
               taxRate: l.taxRate ? l.taxRate.toString() : "",
             })),
+          allocations: payment.allocations.map((a) => ({
+            invoiceId: a.purchaseInvoiceId,
+            invoiceNumber: a.invoice.number,
+            amount: formatAmount(a.amountApplied, ctx.baseCurrency),
+          })),
         }}
       />
     </div>

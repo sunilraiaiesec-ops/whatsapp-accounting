@@ -157,15 +157,27 @@ async function shiftOrgDates(orgId: string, days: number): Promise<void> {
 }
 
 // Every demo invoice is settled — no overdue, no due-soon, no reminders.
+// A bare status flip isn't enough now that PAID implies amountPaid >= total
+// (see lib/invoice-lifecycle.ts#deriveInvoiceStatus) — each row's own total
+// must be copied into amountPaid too, so this can't be a single updateMany.
 async function normalizePaymentReminders(orgId: string): Promise<{
   unpaid: number;
   overdue: number;
   dueSoon: number;
 }> {
-  await prisma.salesInvoice.updateMany({
-    where: { orgId, status: { not: "paid" } },
-    data: { status: "paid" },
+  const outstanding = await prisma.salesInvoice.findMany({
+    where: { orgId, status: { in: ["UNPAID", "PARTIALLY_PAID"] } },
+    select: { id: true, total: true },
   });
+
+  await Promise.all(
+    outstanding.map((inv) =>
+      prisma.salesInvoice.update({
+        where: { id: inv.id },
+        data: { status: "PAID", amountPaid: inv.total },
+      }),
+    ),
+  );
 
   return { unpaid: 0, overdue: 0, dueSoon: 0 };
 }
@@ -215,12 +227,12 @@ export async function auditDemoOrgHealth(
   const today = startOfUtcDay(now);
   const [unpaidInvoices, reminders, lowStockItems, openInvoices] = await Promise.all([
     prisma.salesInvoice.count({
-      where: { orgId, status: { not: "paid" }, dueDate: { not: null } },
+      where: { orgId, status: { in: ["UNPAID", "PARTIALLY_PAID"] }, dueDate: { not: null } },
     }),
     getDueSoonAndOverdueInvoices(orgId, 7, now),
     countLowStockItems(orgId),
     prisma.salesInvoice.findMany({
-      where: { orgId, status: { not: "paid" }, dueDate: { not: null } },
+      where: { orgId, status: { in: ["UNPAID", "PARTIALLY_PAID"] }, dueDate: { not: null } },
       select: { dueDate: true },
       orderBy: { dueDate: "asc" },
     }),

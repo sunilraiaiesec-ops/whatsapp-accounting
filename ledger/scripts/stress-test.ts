@@ -287,6 +287,7 @@ async function setupAgent(profile: Profile, index: number): Promise<AgentState> 
     name: `${profile.key} CFO`,
     email: `stress+${STAMP}_${index}@example.com`,
     password: "stress-12345",
+    phone: "+237600000000",
     orgName,
     baseCurrency: profile.currency,
   });

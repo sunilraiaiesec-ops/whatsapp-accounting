@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 
 import { signupAction, type AuthState } from "@/app/actions/auth";
 import { BrandLogo } from "@/components/BrandLogo";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { PhoneField } from "@/components/PhoneField";
 
 const initial: AuthState = {};
 
@@ -15,6 +16,10 @@ const CURRENCIES = ["XAF", "XOF", "USD", "EUR", "GBP", "NGN", "GHS", "KES"];
 export default function SignupPage() {
   const [state, action, pending] = useActionState(signupAction, initial);
   const t = useTranslations("auth");
+
+  const [email, setEmail] = useState("");
+  const [confirmEmail, setConfirmEmail] = useState("");
+  const emailMismatch = confirmEmail.length > 0 && email.trim().toLowerCase() !== confirmEmail.trim().toLowerCase();
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-[var(--background)] p-6">
@@ -29,7 +34,34 @@ export default function SignupPage() {
         <form action={action} className="mt-6 space-y-4">
           <Field label={t("name")} name="name" autoComplete="name" />
           <Field label={t("companyName")} name="orgName" autoComplete="organization" />
-          <Field label={t("email")} name="email" type="email" autoComplete="email" />
+          <label className="block">
+            <span className="text-sm font-medium text-slate-700">{t("email")}</span>
+            <input
+              name="email"
+              type="email"
+              autoComplete="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="input-modern mt-1"
+            />
+          </label>
+          <label className="block">
+            <span className="text-sm font-medium text-slate-700">{t("confirmEmail")}</span>
+            <input
+              name="confirmEmail"
+              type="email"
+              autoComplete="email"
+              required
+              value={confirmEmail}
+              onChange={(e) => setConfirmEmail(e.target.value)}
+              onPaste={(e) => e.preventDefault()}
+              className="input-modern mt-1"
+            />
+            {emailMismatch ? (
+              <span className="mt-1 block text-xs text-red-600">{t("emailMismatch")}</span>
+            ) : null}
+          </label>
           <Field
             label={t("password")}
             name="password"
@@ -37,6 +69,8 @@ export default function SignupPage() {
             autoComplete="new-password"
             hint={t("passwordHint")}
           />
+          <PhoneField label={t("phone")} name="phone" />
+          <PhoneField label={t("whatsapp")} name="whatsapp" required={false} hint={t("whatsappHint")} />
 
           <label className="block">
             <span className="text-sm font-medium text-slate-700">{t("currency")}</span>
@@ -82,23 +116,51 @@ function Field({
   type = "text",
   autoComplete,
   hint,
+  required = true,
 }: {
   label: string;
   name: string;
   type?: string;
   autoComplete?: string;
   hint?: string;
+  required?: boolean;
 }) {
+  const tc = useTranslations("common");
+  const isPassword = type === "password";
+  const [visible, setVisible] = useState(false);
+
   return (
     <label className="block">
       <span className="text-sm font-medium text-slate-700">{label}</span>
-      <input
-        name={name}
-        type={type}
-        autoComplete={autoComplete}
-        required
-        className="input-modern mt-1"
-      />
+      <div className="relative mt-1">
+        <input
+          name={name}
+          type={isPassword && visible ? "text" : type}
+          autoComplete={autoComplete}
+          required={required}
+          className={`input-modern ${isPassword ? "pr-10" : ""}`}
+        />
+        {isPassword ? (
+          <button
+            type="button"
+            onClick={() => setVisible((v) => !v)}
+            aria-label={visible ? tc("hidePassword") : tc("showPassword")}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+          >
+            {visible ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-10-8-10-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 8 10 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                <line x1="1" y1="1" x2="23" y2="23" />
+              </svg>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M1 12s3-8 11-8 11 8 11 8-3 8-11 8-11-8-11-8Z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            )}
+          </button>
+        ) : null}
+      </div>
       {hint ? <span className="mt-1 block text-xs text-slate-400">{hint}</span> : null}
     </label>
   );

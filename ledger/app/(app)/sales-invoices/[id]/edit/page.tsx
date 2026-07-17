@@ -19,6 +19,7 @@ export default async function EditSalesInvoicePage({
   const data = await getSalesInvoice(ctx.orgId, id);
   if (!data) notFound();
   const { invoice } = data;
+  if (invoice.status === "VOIDED") notFound();
 
   const [customers, income, items] = await Promise.all([
     listParties(ctx.orgId, "customer"),

@@ -82,6 +82,10 @@ model Organization {
   fixedAssetCategories            FixedAssetCategory[]
   fixedAssetDepreciationSchedules FixedAssetDepreciationSchedule[]
 
+  // --- Invoice status lifecycle & payment allocation (see lib/invoice-lifecycle.ts) ---
+  receiptAllocations  ReceiptAllocation[]
+  paymentAllocations  PaymentAllocation[]
+
   @@map("organizations")
 }
 
@@ -89,14 +93,24 @@ model User {
   id            String    @id @default(cuid())
   email         String    @unique
   name          String
+  // Stored in E.164 format (e.g. "+237612345678") once set — see
+  // components/PhoneField.tsx and lib/phone.ts for parsing/formatting.
   phone         String?
+  // Distinct from phone (same convention as Party.whatsapp) — a user may
+  // reach out via WhatsApp on a different number than their phone contact.
+  whatsapp      String?
   passwordHash  String
   emailVerified DateTime?
+  // Additional verification, never a substitute for emailVerified — login
+  // is gated on email alone (see loginAction). A verified phone unlocks
+  // SMS-based account recovery as an alternative to the email reset link.
+  phoneVerified DateTime?
   createdAt     DateTime  @default(now())
 
   memberships          Membership[]
   resetRequests        OrgResetRequest[]
   authTokens           AuthToken[]
+  verificationCodes    VerificationCode[]
   migrationWizardsDone MigrationWizard[] @relation("MigrationWizardCompletedBy")
   documentsUploaded    Document[]        @relation("DocumentUploadedBy")
   // A user MAY also be a referral partner (see Partner below). Optional and
@@ -127,6 +141,33 @@ model AuthToken {
 
   @@index([userId, type])
   @@map("auth_tokens")
+}
+
+enum VerificationCodeType {
+  PHONE_VERIFY
+  PHONE_RECOVERY
+}
+
+// Short numeric SMS codes (OTP) — a different shape from AuthToken's link
+// tokens on purpose: a long random link token has enough entropy that
+// guessing isn't a real threat, but a 6-digit code absolutely needs a
+// retry limit (attempts/maxAttempts) alongside its expiry. See
+// lib/auth/phone-verification.ts.
+model VerificationCode {
+  id          String               @id @default(cuid())
+  userId      String
+  type        VerificationCodeType
+  codeHash    String
+  expiresAt   DateTime
+  attempts    Int                  @default(0)
+  maxAttempts Int                  @default(5)
+  usedAt      DateTime?
+  createdAt   DateTime             @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+  @@map("verification_codes")
 }
 
 // Fixed-window counter used to throttle auth endpoints (login, signup,
@@ -371,10 +412,11 @@ model Receipt {
   journalEntryId String   @unique
   createdAt      DateTime @default(now())
 
-  org         Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  bankAccount Account       @relation(fields: [bankAccountId], references: [id])
-  party       Party?        @relation(fields: [partyId], references: [id])
+  org         Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  bankAccount Account             @relation(fields: [bankAccountId], references: [id])
+  party       Party?              @relation(fields: [partyId], references: [id])
   lines       ReceiptLine[]
+  allocations ReceiptAllocation[]
 
   @@unique([orgId, number])
   @@index([orgId, date])
@@ -417,10 +459,11 @@ model Payment {
   journalEntryId String   @unique
   createdAt      DateTime @default(now())
 
-  org         Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  bankAccount Account       @relation(fields: [bankAccountId], references: [id])
-  party       Party?        @relation(fields: [partyId], references: [id])
+  org         Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  bankAccount Account             @relation(fields: [bankAccountId], references: [id])
+  party       Party?              @relation(fields: [partyId], references: [id])
   lines       PaymentLine[]
+  allocations PaymentAllocation[]
 
   @@unique([orgId, number])
   @@index([orgId, date])
@@ -448,28 +491,50 @@ model PaymentLine {
   @@map("payment_lines")
 }
 
+enum InvoiceStatus {
+  DRAFT
+  UNPAID
+  PARTIALLY_PAID
+  PAID
+  VOIDED
+}
+
 // Credit sale to a customer.
 // Posts: Dr Accounts receivable (total, with party); Cr each income line.
 model SalesInvoice {
-  id             String    @id @default(cuid())
+  id             String        @id @default(cuid())
   orgId          String
   number         String
   partyId        String
-  date           DateTime  @db.Date
-  dueDate        DateTime? @db.Date
+  date           DateTime      @db.Date
+  dueDate        DateTime?     @db.Date
   reference      String?
   notes          String?
-  total          BigInt    @default(0)
-  status         String    @default("unpaid")
-  journalEntryId String    @unique
-  createdAt      DateTime  @default(now())
+  total          BigInt        @default(0)
+  // Denormalized running total of ReceiptAllocation.amountApplied against
+  // this invoice, kept in sync transactionally (same philosophy as
+  // InventoryItem.qtyOnHand) so aging/reminders/list queries stay simple
+  // WHERE filters instead of live SUM()s. Always 0 for DRAFT/VOIDED.
+  amountPaid     BigInt        @default(0)
+  // DRAFT: saved but not posted to the ledger (no journalEntryId yet).
+  // UNPAID/PARTIALLY_PAID/PAID: derived from amountPaid vs total, see
+  // lib/invoice-lifecycle.ts#deriveInvoiceStatus. VOIDED: a posted invoice
+  // that was reversed and kept for audit trail, locked from further edits.
+  // "Overdue" is intentionally NOT a stored value here — it's a derived
+  // date-based overlay (status in [UNPAID, PARTIALLY_PAID] && dueDate <
+  // today), computed at render/query time, so it never needs a cron job.
+  status         InvoiceStatus @default(UNPAID)
+  journalEntryId String?       @unique
+  createdAt      DateTime      @default(now())
 
-  org   Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  party Party              @relation(fields: [partyId], references: [id])
-  lines SalesInvoiceLine[]
+  org         Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  party       Party               @relation(fields: [partyId], references: [id])
+  lines       SalesInvoiceLine[]
+  allocations ReceiptAllocation[]
 
   @@unique([orgId, number])
   @@index([orgId, date])
+  @@index([orgId, status])
   @@map("sales_invoices")
 }
 
@@ -494,28 +559,56 @@ model SalesInvoiceLine {
   @@map("sales_invoice_lines")
 }
 
+// A Receipt settling all or part of a SalesInvoice's balance. A receipt can
+// be split across multiple invoices; an invoice can be paid off across
+// multiple receipts over time. Does not require full allocation of the
+// receipt's total — an overpayment or an unrelated-income receipt can leave
+// some amount unallocated.
+model ReceiptAllocation {
+  id             String   @id @default(cuid())
+  orgId          String
+  receiptId      String
+  salesInvoiceId String
+  amountApplied  BigInt
+  createdAt      DateTime @default(now())
+
+  org     Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  receipt Receipt      @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  invoice SalesInvoice @relation(fields: [salesInvoiceId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([receiptId])
+  @@index([salesInvoiceId])
+  @@map("receipt_allocations")
+}
+
 // Credit purchase from a supplier (a bill).
 // Posts: Dr each expense/asset line; Cr Accounts payable (total, with party).
 model PurchaseInvoice {
-  id             String    @id @default(cuid())
+  id             String        @id @default(cuid())
   orgId          String
   number         String
   partyId        String
   supplierRef    String?
-  date           DateTime  @db.Date
-  dueDate        DateTime? @db.Date
+  date           DateTime      @db.Date
+  dueDate        DateTime?     @db.Date
   notes          String?
-  total          BigInt    @default(0)
-  status         String    @default("unpaid")
-  journalEntryId String    @unique
-  createdAt      DateTime  @default(now())
+  total          BigInt        @default(0)
+  // See SalesInvoice.amountPaid for the denormalization rationale.
+  amountPaid     BigInt        @default(0)
+  // See SalesInvoice.status for the full lifecycle explanation.
+  status         InvoiceStatus @default(UNPAID)
+  journalEntryId String?       @unique
+  createdAt      DateTime      @default(now())
 
-  org   Organization          @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  party Party                 @relation(fields: [partyId], references: [id])
-  lines PurchaseInvoiceLine[]
+  org         Organization          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  party       Party                 @relation(fields: [partyId], references: [id])
+  lines       PurchaseInvoiceLine[]
+  allocations PaymentAllocation[]
 
   @@unique([orgId, number])
   @@index([orgId, date])
+  @@index([orgId, status])
   @@map("purchase_invoices")
 }
 
@@ -535,6 +628,26 @@ model PurchaseInvoiceLine {
 
   @@index([invoiceId])
   @@map("purchase_invoice_lines")
+}
+
+// A Payment settling all or part of a PurchaseInvoice's balance. Mirrors
+// ReceiptAllocation's shape/semantics on the payable side.
+model PaymentAllocation {
+  id                String   @id @default(cuid())
+  orgId             String
+  paymentId         String
+  purchaseInvoiceId String
+  amountApplied     BigInt
+  createdAt         DateTime @default(now())
+
+  org     Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  payment Payment         @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  invoice PurchaseInvoice @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([paymentId])
+  @@index([purchaseInvoiceId])
+  @@map("payment_allocations")
 }
 
 // Moving money between two bank/cash accounts.

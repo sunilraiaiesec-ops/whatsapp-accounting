@@ -3,10 +3,15 @@ import { notFound } from "next/navigation";
 import { requireContext } from "@/lib/auth/current";
 import { getSalesInvoice } from "@/lib/documents";
 import { cloneSalesInvoiceAction } from "@/app/actions/documents";
+import {
+  postSalesInvoiceDraftAction,
+  voidSalesInvoiceAction,
+} from "@/app/actions/invoice-lifecycle";
 import { formatAmount } from "@/lib/money";
 import { DocToolbar } from "@/components/DocToolbar";
 import { TransactionJournal } from "@/components/TransactionJournal";
 import { StatusBadge } from "@/components/ui/PageHeader";
+import { ActionButton } from "@/components/ui/ActionButton";
 
 export default async function SalesInvoiceViewPage({
   params,
@@ -40,6 +45,29 @@ export default async function SalesInvoiceViewPage({
         total={nav.total}
       />
 
+      {invoice.status !== "VOIDED" ? (
+        <div className="mb-5 flex flex-wrap items-center gap-3 print:hidden">
+          {invoice.status === "DRAFT" ? (
+            <ActionButton
+              action={postSalesInvoiceDraftAction}
+              hiddenFields={{ id: invoice.id }}
+              label="Post invoice"
+              pendingLabel="Posting…"
+            />
+          ) : null}
+          <ActionButton
+            action={voidSalesInvoiceAction}
+            hiddenFields={{ id: invoice.id }}
+            label="Void"
+            pendingLabel="Voiding…"
+            variant="danger"
+            confirmMessage="Void this invoice? This reverses its ledger and stock effects but keeps it for your records. This cannot be undone."
+            disabled={invoice.amountPaid > 0n}
+            disabledTitle="Unapply payments against this invoice before voiding it."
+          />
+        </div>
+      ) : null}
+
       <article className="card-surface overflow-hidden print:border-0 print:shadow-none">
         {/* Header band */}
         <div className="border-b border-[var(--border)] bg-gradient-to-r from-[var(--brand)]/5 to-transparent px-6 py-8 sm:px-10">
@@ -55,7 +83,7 @@ export default async function SalesInvoiceViewPage({
                 <p className="mt-1 text-sm text-[var(--muted)]">Ref: {invoice.reference}</p>
               ) : null}
               <div className="mt-3">
-                <StatusBadge status={invoice.status} />
+                <StatusBadge status={invoice.status} dueDate={invoice.dueDate} />
               </div>
             </div>
             <div className="text-left sm:text-right">

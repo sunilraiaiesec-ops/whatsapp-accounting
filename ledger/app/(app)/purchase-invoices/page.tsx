@@ -26,6 +26,7 @@ export default async function PurchaseInvoicesPage() {
     date: isoDate(inv.date),
     supplier: inv.party.name,
     due: inv.dueDate ? isoDate(inv.dueDate) : "—",
+    dueDate: inv.dueDate ? isoDate(inv.dueDate) : "",
     status: inv.status,
     amount: formatAmount(inv.total, cur),
   }));
@@ -54,6 +55,8 @@ export default async function PurchaseInvoicesPage() {
           searchKeys={["number", "supplier"]}
           emptyText="No purchase invoices yet."
           mobile={{ title: "supplier", subtitle: "number", amount: "amount", status: "status" }}
+          statusFilterKey="status"
+          defaultHiddenStatuses={["VOIDED"]}
           columns={[
             { key: "number", header: "Number", kind: "link" },
             { key: "date", header: "Date", kind: "muted" },

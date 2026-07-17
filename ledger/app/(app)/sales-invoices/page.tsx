@@ -28,6 +28,9 @@ export default async function SalesInvoicesPage() {
     date: isoDate(inv.date),
     customer: inv.party.name,
     due: inv.dueDate ? isoDate(inv.dueDate) : "—",
+    // Raw ISO string (or empty) for StatusBadge's Overdue overlay — distinct
+    // from `due` above, which is the "—"-when-null display column.
+    dueDate: inv.dueDate ? isoDate(inv.dueDate) : "",
     status: inv.status,
     amount: formatAmount(inv.total, cur),
   }));
@@ -51,6 +54,8 @@ export default async function SalesInvoicesPage() {
           searchKeys={["number", "customer"]}
           emptyText={t("emptyTitle")}
           mobile={{ title: "customer", subtitle: "number", amount: "amount", status: "status" }}
+          statusFilterKey="status"
+          defaultHiddenStatuses={["VOIDED"]}
           columns={[
             { key: "number", header: t("number"), kind: "link" },
             { key: "date", header: tc("date"), kind: "muted" },

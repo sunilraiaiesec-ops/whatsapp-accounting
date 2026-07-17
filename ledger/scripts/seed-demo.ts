@@ -316,6 +316,7 @@ async function setupCompany(cfg: CompanyConfig, index: number): Promise<Company>
     name: `Administrator — ${cfg.name}`,
     email: cfg.email,
     password: DEMO_PASSWORD,
+    phone: "+237600000000",
     orgName: cfg.name,
     baseCurrency: CURRENCY,
   });
@@ -774,25 +775,33 @@ async function monthEnd(c: Company, monthDate: Date) {
 
 async function reconcileInvoiceStatuses(orgId: string) {
   const unpaid = await withRetry(() =>
-    prisma.salesInvoice.count({ where: { orgId, status: { not: "paid" }, dueDate: { not: null } } }),
+    prisma.salesInvoice.count({
+      where: { orgId, status: { in: ["UNPAID", "PARTIALLY_PAID"] }, dueDate: { not: null } },
+    }),
   );
   const keepOpen = 25;
   const excess = unpaid - keepOpen;
   if (excess <= 0) return;
   const old = await withRetry(() =>
     prisma.salesInvoice.findMany({
-      where: { orgId, status: { not: "paid" } },
+      where: { orgId, status: { in: ["UNPAID", "PARTIALLY_PAID"] } },
       orderBy: { date: "asc" },
       take: excess,
-      select: { id: true },
+      select: { id: true, total: true },
     }),
   );
   if (old.length === 0) return;
+  // PAID implies amountPaid >= total (lib/invoice-lifecycle.ts#deriveInvoiceStatus),
+  // so each row's own total must be copied in — can't be a single updateMany.
   await withRetry(() =>
-    prisma.salesInvoice.updateMany({
-      where: { id: { in: old.map((o) => o.id) } },
-      data: { status: "paid" },
-    }),
+    Promise.all(
+      old.map((o) =>
+        prisma.salesInvoice.update({
+          where: { id: o.id },
+          data: { status: "PAID", amountPaid: o.total },
+        }),
+      ),
+    ),
   );
 }
 

@@ -43,6 +43,7 @@ async function main() {
     name: "Fixed Assets Bot",
     email: `fixedassets+${stamp}@example.com`,
     password: "verify-12345",
+    phone: "+237600000000",
     orgName: `Fixed Assets Co ${stamp}`,
     baseCurrency: cur,
   });
@@ -248,6 +249,7 @@ async function main() {
     name: "Other Org Bot",
     email: `fixedassets-org2+${stamp}@example.com`,
     password: "verify-12345",
+    phone: "+237600000001",
     orgName: `Other Org ${stamp}`,
     baseCurrency: cur,
   });

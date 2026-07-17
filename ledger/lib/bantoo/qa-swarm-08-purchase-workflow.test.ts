@@ -312,6 +312,7 @@ beforeAll(async () => {
     name: "QA Swarm 08",
     email: `qa-swarm-08+${STAMP}@example.com`,
     password: "verify-12345",
+    phone: "+237600000000",
     orgName: `QA Swarm 08 Purchase ${STAMP}`,
     baseCurrency: "XAF",
   });

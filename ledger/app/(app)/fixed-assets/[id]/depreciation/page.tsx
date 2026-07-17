@@ -6,7 +6,7 @@ import { can } from "@/lib/permissions";
 import { getFixedAsset } from "@/lib/fixed-assets/assets";
 import { formatAmount } from "@/lib/money";
 import { isoDate } from "@/lib/format";
-import { FixedAssetActionButton } from "@/components/FixedAssetActionButton";
+import { ActionButton } from "@/components/ui/ActionButton";
 import { postDepreciationPeriodAction, postDuePeriodsAction } from "@/app/actions/fixed-assets";
 
 export default async function FixedAssetDepreciationPage({
@@ -48,7 +48,7 @@ export default async function FixedAssetDepreciationPage({
 
       {canManage && asset.status === "ACTIVE" && duePeriods.length > 0 ? (
         <div className="mt-4">
-          <FixedAssetActionButton
+          <ActionButton
             action={postDuePeriodsAction}
             hiddenFields={{ assetId: asset.id }}
             label={`Post all ${duePeriods.length} due period${duePeriods.length === 1 ? "" : "s"}`}
@@ -87,7 +87,7 @@ export default async function FixedAssetDepreciationPage({
                 <td className="px-4 py-2 text-xs text-slate-500">{p.status}</td>
                 <td className="px-4 py-2 text-right">
                   {canManage && p.status === "SCHEDULED" && asset.status === "ACTIVE" ? (
-                    <FixedAssetActionButton
+                    <ActionButton
                       action={postDepreciationPeriodAction}
                       hiddenFields={{ scheduleId: p.id, assetId: asset.id }}
                       label="Post"

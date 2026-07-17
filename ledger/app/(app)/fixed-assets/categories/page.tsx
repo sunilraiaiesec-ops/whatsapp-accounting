@@ -5,7 +5,7 @@ import { can } from "@/lib/permissions";
 import { accountsByType, fixedAssetCapableAccounts } from "@/lib/accounts";
 import { listFixedAssetCategories } from "@/lib/fixed-assets/categories";
 import { FixedAssetCategoryForm } from "@/components/FixedAssetCategoryForm";
-import { FixedAssetActionButton } from "@/components/FixedAssetActionButton";
+import { ActionButton } from "@/components/ui/ActionButton";
 import { createDefaultCategoriesAction } from "@/app/actions/fixed-assets";
 
 export default async function FixedAssetCategoriesPage() {
@@ -43,7 +43,7 @@ export default async function FixedAssetCategoriesPage() {
           </p>
         </div>
         {canManage ? (
-          <FixedAssetActionButton
+          <ActionButton
             action={createDefaultCategoriesAction}
             hiddenFields={{}}
             label="Quick add common categories"

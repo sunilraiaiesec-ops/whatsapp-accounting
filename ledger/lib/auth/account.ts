@@ -52,10 +52,29 @@ export async function sendUserVerification(userId: string, email: string): Promi
   }
 }
 
-/** Consumes a verification token and marks the email verified. Returns success. */
-export async function verifyEmail(token: string): Promise<boolean> {
+/**
+ * Consumes a verification token and marks the email verified. Returns the
+ * verified user's id (so the caller can activate a session — accounts are
+ * gated behind email confirmation, see loginAction) or null if the token is
+ * invalid/expired/already used.
+ */
+export async function verifyEmail(token: string): Promise<{ userId: string } | null> {
   const userId = await consumeAuthToken(token, "email_verify");
-  if (!userId) return false;
+  if (!userId) return null;
   await prisma.user.update({ where: { id: userId }, data: { emailVerified: new Date() } });
-  return true;
+  return { userId };
+}
+
+/**
+ * Resends a verification email for an unauthenticated visitor who knows only
+ * their email address (e.g. from the check-email page after signup, or after
+ * a blocked login attempt). Never reveals whether an account exists, and is a
+ * no-op for accounts that are already verified — mirrors requestPasswordReset's
+ * privacy pattern. Never throws on delivery failure.
+ */
+export async function resendVerificationForEmail(rawEmail: string): Promise<void> {
+  const email = rawEmail.trim().toLowerCase();
+  const user = await prisma.user.findUnique({ where: { email } });
+  if (!user || user.emailVerified) return;
+  await sendUserVerification(user.id, user.email);
 }

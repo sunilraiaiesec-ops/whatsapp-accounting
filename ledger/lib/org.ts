@@ -3,6 +3,7 @@ import { hashPassword } from "@/lib/auth/password";
 import { DEFAULT_CHART_OF_ACCOUNTS } from "@/lib/chart-of-accounts";
 import { trialSubscriptionCreateData } from "@/lib/billing/subscription";
 import { attributeReferralWithin } from "@/lib/billing/partners";
+import { sendNewMemberNotification } from "@/lib/email";
 
 export class SignupError extends Error {}
 
@@ -12,6 +13,8 @@ export type SignupInput = {
   password: string;
   orgName: string;
   baseCurrency?: string;
+  phone: string;
+  whatsapp?: string | null;
   // Referral code captured from the `?ref=CODE` 90-day cookie at signup time
   // (see lib/billing/partners.ts#REFERRAL_COOKIE_NAME). Optional — most
   // signups have no referrer.
@@ -59,6 +62,8 @@ export async function createOrganizationWithOwner(input: SignupInput) {
         name: input.name.trim(),
         email,
         passwordHash,
+        phone: input.phone.trim(),
+        whatsapp: input.whatsapp?.trim() || null,
       },
     });
 
@@ -72,4 +77,24 @@ export async function createOrganizationWithOwner(input: SignupInput) {
 
     return { org, user };
   });
+}
+
+/**
+ * Notifies the team of a new signup. Never throws — mirrors
+ * lib/auth/account.ts#sendUserVerification's delivery-failure handling, so a
+ * Resend outage can never block or fail the signup flow itself.
+ */
+export async function notifyNewMemberSignup(input: SignupInput): Promise<void> {
+  try {
+    await sendNewMemberNotification({
+      name: input.name.trim(),
+      email: input.email.trim().toLowerCase(),
+      phone: input.phone.trim(),
+      whatsapp: input.whatsapp?.trim() || null,
+      orgName: input.orgName.trim(),
+      baseCurrency: (input.baseCurrency ?? "XAF").toUpperCase(),
+    });
+  } catch (err) {
+    console.error("[org] new member notification failed:", err);
+  }
 }

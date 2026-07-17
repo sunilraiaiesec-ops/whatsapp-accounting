@@ -68,6 +68,11 @@ export default async function EditReceiptPage({
             className: l.className ?? "",
             taxRate: l.taxRate ? l.taxRate.toString() : "",
           })),
+          allocations: receipt.allocations.map((a) => ({
+            invoiceId: a.salesInvoiceId,
+            invoiceNumber: a.invoice.number,
+            amount: formatAmount(a.amountApplied, ctx.baseCurrency),
+          })),
         }}
       />
     </div>

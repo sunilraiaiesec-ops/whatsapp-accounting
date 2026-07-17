@@ -23,6 +23,7 @@
     "@sentry/nextjs": "^10.63.0",
     "bcryptjs": "^3.0.3",
     "jose": "^6.2.3",
+    "libphonenumber-js": "^1.13.8",
     "next": "16.2.9",
     "next-intl": "^4.13.0",
     "openai": "^6.45.0",

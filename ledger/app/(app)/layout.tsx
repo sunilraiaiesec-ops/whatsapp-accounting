@@ -1,6 +1,8 @@
 import { requireContext } from "@/lib/auth/current";
+import { prisma } from "@/lib/prisma";
 import { AppShell } from "@/components/AppShell";
 import { EmailVerifyBanner } from "@/components/EmailVerifyBanner";
+import { PhoneVerifyBanner } from "@/components/PhoneVerifyBanner";
 import { TrialBanner } from "@/components/TrialBanner";
 import { getTrialBannerInfo } from "@/lib/billing/subscription";
 import { hasPermission } from "@/lib/permissions";
@@ -11,7 +13,16 @@ export default async function AppLayout({
   children: React.ReactNode;
 }) {
   const ctx = await requireContext();
-  const trialBanner = await getTrialBannerInfo(ctx.orgId);
+  const [trialBanner, phoneStatus] = await Promise.all([
+    getTrialBannerInfo(ctx.orgId),
+    // Scoped query rather than a CurrentContext field — phone verification
+    // is a niche, skippable extra that only this banner needs, not worth
+    // widening a type used by ~20 call sites (including many test mocks).
+    prisma.user.findUnique({
+      where: { id: ctx.userId },
+      select: { phoneVerified: true },
+    }),
+  ]);
 
   return (
     <AppShell
@@ -20,6 +31,7 @@ export default async function AppLayout({
       userEmail={ctx.userEmail}
     >
       <EmailVerifyBanner verified={ctx.emailVerified} email={ctx.userEmail} />
+      <PhoneVerifyBanner verified={phoneStatus?.phoneVerified != null} />
       {trialBanner ? (
         <TrialBanner
           plan={trialBanner.plan}

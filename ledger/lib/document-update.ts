@@ -17,6 +17,13 @@ import {
   normalizeCurrency,
   type CashItemLineInput,
 } from "@/lib/documents";
+import {
+  applyReceiptAllocations,
+  reverseReceiptAllocations,
+  applyPaymentAllocations,
+  reversePaymentAllocations,
+  type AllocationInput,
+} from "@/lib/invoice-lifecycle";
 
 type LineInput = {
   accountId: string;
@@ -59,7 +66,9 @@ async function controlIdsFor(
   return new Set(accounts.filter((a) => a.isControl).map((a) => a.id));
 }
 
-async function reverseSalesInvoiceStock(
+// Exported for reuse by lib/invoice-lifecycle.ts's postSalesInvoiceDraft and
+// voidSalesInvoice, which need this exact stock-movement logic.
+export async function reverseSalesInvoiceStock(
   tx: Prisma.TransactionClient,
   oldLines: { itemId: string | null; quantity: Prisma.Decimal; cost: bigint }[],
 ) {
@@ -76,7 +85,7 @@ async function reverseSalesInvoiceStock(
   }
 }
 
-async function applySalesInvoiceStock(
+export async function applySalesInvoiceStock(
   tx: Prisma.TransactionClient,
   orgId: string,
   lines: { quantity: string; itemId?: string | null }[],
@@ -141,6 +150,7 @@ export async function updateReceipt(
     currency?: string | null;
     exchangeRate?: number | string | null;
     lines: LineInput[];
+    allocations?: AllocationInput[];
   },
 ) {
   const existing = await prisma.receipt.findFirst({
@@ -159,6 +169,11 @@ export async function updateReceipt(
   const fx = normalizeCurrency(input.currency, input.exchangeRate);
 
   return prisma.$transaction(async (tx) => {
+    // Reverse the receipt's existing allocations first, so the invoice
+    // balances the new allocation set validates against reflect the
+    // pre-edit state (not double-counted against this same receipt).
+    await reverseReceiptAllocations(tx, orgId, id);
+
     await assertCashDocLines(tx, orgId, input.bankAccountId, lines, "receipt");
 
     const controlIds = await controlIdsFor(
@@ -226,6 +241,10 @@ export async function updateReceipt(
     });
 
     await removeEntryWithin(tx, existing.journalEntryId);
+
+    if (input.allocations?.length) {
+      await applyReceiptAllocations(tx, orgId, id, input.allocations);
+    }
     return receipt;
   });
 }
@@ -246,6 +265,7 @@ export async function updatePayment(
     exchangeRate?: number | string | null;
     lines: LineInput[];
     itemLines?: CashItemLineInput[];
+    allocations?: AllocationInput[];
   },
 ) {
   const existing = await prisma.payment.findFirst({
@@ -281,6 +301,11 @@ export async function updatePayment(
   const fx = normalizeCurrency(input.currency, input.exchangeRate);
 
   return prisma.$transaction(async (tx) => {
+    // Reverse the payment's existing allocations first, so the invoice
+    // balances the new allocation set validates against reflect the
+    // pre-edit state (not double-counted against this same payment).
+    await reversePaymentAllocations(tx, orgId, id);
+
     // Roll back the stock the original item lines added before re-applying.
     for (const l of existing.lines) {
       if (!l.itemId) continue;
@@ -397,6 +422,10 @@ export async function updatePayment(
     }
 
     await removeEntryWithin(tx, existing.journalEntryId);
+
+    if (input.allocations?.length) {
+      await applyPaymentAllocations(tx, orgId, id, input.allocations);
+    }
     return payment;
   });
 }
@@ -473,6 +502,7 @@ export async function updateSalesInvoice(
     include: { lines: true },
   });
   if (!existing) throw new DocumentError("Invoice not found");
+  if (existing.status === "VOIDED") throw new DocumentError("Voided invoices cannot be edited");
 
   const rawLines = input.lines.filter((l) => l.description.trim() && l.accountId);
   if (rawLines.length === 0) throw new DocumentError("Add at least one line");
@@ -482,6 +512,38 @@ export async function updateSalesInvoice(
   const taxTotal = lines.reduce((s, l) => s + l.tax, 0n);
   const total = subtotal + taxTotal;
   if (total <= 0n) throw new DocumentError("Invoice total must be positive");
+
+  // A Draft never posted to the ledger or touched stock, so editing one just
+  // updates the record in place — no reversal/repost, stays a Draft.
+  if (existing.status === "DRAFT") {
+    return prisma.$transaction(async (tx) => {
+      await tx.salesInvoiceLine.deleteMany({ where: { invoiceId: id } });
+      return tx.salesInvoice.update({
+        where: { id },
+        data: {
+          partyId: input.partyId,
+          date: input.date,
+          dueDate: input.dueDate ?? null,
+          reference: input.reference ?? null,
+          notes: input.notes ?? null,
+          total,
+          lines: {
+            create: lines.map((l) => ({
+              description: l.description.trim(),
+              quantity: new Prisma.Decimal(l.quantity || "0"),
+              unitPrice: l.unitPrice,
+              lineTotal: l.lineTotal,
+              accountId: l.accountId,
+              itemId: l.itemId ?? null,
+              cost: 0n,
+              taxRate: l.taxRate != null ? new Prisma.Decimal(l.taxRate) : null,
+              taxAmount: l.tax,
+            })),
+          },
+        },
+      });
+    });
+  }
 
   return prisma.$transaction(async (tx) => {
     await reverseSalesInvoiceStock(tx, existing.lines);
@@ -546,7 +608,9 @@ export async function updateSalesInvoice(
       },
     });
 
-    await removeEntryWithin(tx, existing.journalEntryId);
+    // DRAFT/VOIDED were already excluded above, so a posted invoice always
+    // has a journalEntryId here — the guard is for type-safety only.
+    if (existing.journalEntryId) await removeEntryWithin(tx, existing.journalEntryId);
     return invoice;
   });
 }
@@ -569,6 +633,7 @@ export async function updatePurchaseInvoice(
     include: { lines: true },
   });
   if (!existing) throw new DocumentError("Bill not found");
+  if (existing.status === "VOIDED") throw new DocumentError("Voided bills cannot be edited");
 
   const rawLines = input.lines.filter((l) => l.description.trim() && l.accountId);
   if (rawLines.length === 0) throw new DocumentError("Add at least one line");
@@ -578,6 +643,38 @@ export async function updatePurchaseInvoice(
   const taxTotal = lines.reduce((s, l) => s + l.tax, 0n);
   const total = subtotal + taxTotal;
   if (total <= 0n) throw new DocumentError("Bill total must be positive");
+
+  // A Draft never posted to the ledger, so editing one just updates the
+  // record in place — no reversal/repost, stays a Draft. Purchase invoices
+  // never move stock (only Goods Receipts do), so there's no stock branch
+  // to worry about here unlike updateSalesInvoice.
+  if (existing.status === "DRAFT") {
+    return prisma.$transaction(async (tx) => {
+      await tx.purchaseInvoiceLine.deleteMany({ where: { invoiceId: id } });
+      return tx.purchaseInvoice.update({
+        where: { id },
+        data: {
+          partyId: input.partyId,
+          date: input.date,
+          dueDate: input.dueDate ?? null,
+          supplierRef: input.supplierRef ?? null,
+          notes: input.notes ?? null,
+          total,
+          lines: {
+            create: lines.map((l) => ({
+              description: l.description.trim(),
+              quantity: new Prisma.Decimal(l.quantity || "0"),
+              unitPrice: l.unitPrice,
+              lineTotal: l.lineTotal,
+              accountId: l.accountId,
+              taxRate: l.taxRate != null ? new Prisma.Decimal(l.taxRate) : null,
+              taxAmount: l.tax,
+            })),
+          },
+        },
+      });
+    });
+  }
 
   return prisma.$transaction(async (tx) => {
     const ap = await payableAccount(orgId);
@@ -631,7 +728,9 @@ export async function updatePurchaseInvoice(
       },
     });
 
-    await removeEntryWithin(tx, existing.journalEntryId);
+    // DRAFT/VOIDED were already excluded above, so a posted bill always has
+    // a journalEntryId here — the guard is for type-safety only.
+    if (existing.journalEntryId) await removeEntryWithin(tx, existing.journalEntryId);
     return invoice;
   });
 }

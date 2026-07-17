@@ -100,7 +100,7 @@ function seedSupplierHistory(orgId: string, partyId: string, itemId: string) {
       date: invoiceDate,
       dueDate: null,
       total: 210_000n,
-      status: "unpaid",
+      status: "UNPAID",
     });
     // Paid ~30 days after each invoice.
     paymentRows.push({
@@ -146,8 +146,8 @@ describe("getPartyOverviewStats — supplier relationship intelligence", () => {
 
   it("uses real invoice due dates instead of the approximation when they exist", async () => {
     purchaseInvoiceRows.push(
-      { id: "inv_1", orgId: "org_A", partyId: "sup_1", date: day("2026-01-01"), dueDate: day("2026-01-15"), total: 100_000n, status: "unpaid" },
-      { id: "inv_2", orgId: "org_A", partyId: "sup_1", date: day("2026-02-01"), dueDate: day("2026-02-15"), total: 100_000n, status: "unpaid" },
+      { id: "inv_1", orgId: "org_A", partyId: "sup_1", date: day("2026-01-01"), dueDate: day("2026-01-15"), total: 100_000n, status: "UNPAID" },
+      { id: "inv_2", orgId: "org_A", partyId: "sup_1", date: day("2026-02-01"), dueDate: day("2026-02-15"), total: 100_000n, status: "UNPAID" },
     );
     const stats = await getPartyOverviewStats("org_A", "sup_1", "supplier");
     expect(stats.avgDaysToPay).toBe(14);

@@ -16,6 +16,7 @@ async function main() {
     name: "Verify Bot",
     email,
     password: "verify-12345",
+    phone: "+237600000000",
     orgName: `Verify Co ${stamp}`,
     baseCurrency: "XAF",
   });

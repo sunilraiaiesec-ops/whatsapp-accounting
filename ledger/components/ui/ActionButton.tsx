@@ -6,16 +6,19 @@ type ActionState = { error?: string; info?: string };
 type Action = (prevState: ActionState, formData: FormData) => Promise<ActionState>;
 
 // A single-button form bound to a (prevState, formData) => State server
-// action (the useActionState shape every action in app/actions/fixed-assets.ts
-// uses) — for the simple "post due periods" / "delete" buttons that don't
-// need a full form component of their own.
-export function FixedAssetActionButton({
+// action (the useActionState shape most single-purpose actions in this app
+// use) — for simple "post"/"void"/"delete" buttons that don't need a full
+// form component of their own. Originally built for Fixed Assets, now
+// shared by anything with the same action shape (e.g. invoice lifecycle).
+export function ActionButton({
   action,
   hiddenFields,
   label,
   pendingLabel,
   confirmMessage,
   variant = "primary",
+  disabled = false,
+  disabledTitle,
 }: {
   action: Action;
   hiddenFields: Record<string, string>;
@@ -23,6 +26,8 @@ export function FixedAssetActionButton({
   pendingLabel?: string;
   confirmMessage?: string;
   variant?: "primary" | "danger" | "outline";
+  disabled?: boolean;
+  disabledTitle?: string;
 }) {
   const [state, formAction, pending] = useActionState(action, {});
 
@@ -46,8 +51,9 @@ export function FixedAssetActionButton({
       ))}
       <button
         type="submit"
-        disabled={pending}
-        className={`rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-40 ${variantClass}`}
+        disabled={pending || disabled}
+        title={disabled ? disabledTitle : undefined}
+        className={`rounded-lg px-4 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40 ${variantClass}`}
       >
         {pending ? (pendingLabel ?? "Working…") : label}
       </button>

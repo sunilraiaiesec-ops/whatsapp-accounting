@@ -8,14 +8,11 @@ import { buildWhatsAppLink } from "@/lib/reorder-message";
 // or overdue so a user can send a polite WhatsApp nudge (draft-only, never
 // auto-sent — see buildPaymentReminderMessage below).
 //
-// "Paid" tracking is approximate: SalesInvoice.status only ever transitions
-// away from its default "unpaid" value if some other feature sets it (there
-// is no visible payment-application/allocation feature in this codebase
-// today — see lib/documents.ts's createSalesInvoice, which always writes
-// status: "unpaid"). We therefore treat ANY invoice whose status is not the
-// literal string "paid" as still outstanding/reminder-eligible, which today
-// in practice means every invoice with a dueDate set. This should be
-// revisited once a real payment-application feature exists.
+// Eligibility is driven by SalesInvoice.status: UNPAID and PARTIALLY_PAID
+// are reminder-eligible (a partial payment doesn't retire the reminder, just
+// reduces what's still owed — see lib/invoice-lifecycle.ts#applyReceiptAllocations
+// for how amountPaid/status are kept in sync); DRAFT, PAID, and VOIDED are
+// excluded.
 // ---------------------------------------------------------------------------
 
 export type SalesInvoiceWithParty = SalesInvoice & { party: Party };
@@ -46,7 +43,7 @@ export async function getDueSoonAndOverdueInvoices(
   const invoices = (await prisma.salesInvoice.findMany({
     where: {
       orgId,
-      status: { not: "paid" },
+      status: { in: ["UNPAID", "PARTIALLY_PAID"] },
       dueDate: { not: null },
     },
     include: { party: true },

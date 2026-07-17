@@ -16,6 +16,7 @@ async function main() {
     name: "Buy Bot",
     email: `buy+${stamp}@example.com`,
     password: "verify-12345",
+    phone: "+237600000000",
     orgName: `Buy Co ${stamp}`,
     baseCurrency: cur,
   });

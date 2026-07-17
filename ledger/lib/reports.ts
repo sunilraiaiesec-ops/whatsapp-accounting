@@ -227,7 +227,7 @@ export async function receivablesAging(
   asOf = new Date(),
 ): Promise<{ asOf: Date; rows: AgingRow[]; totals: AgingRow }> {
   const invoices = await prisma.salesInvoice.findMany({
-    where: { orgId, status: "unpaid" },
+    where: { orgId, status: { in: ["UNPAID", "PARTIALLY_PAID"] } },
     include: { party: { select: { id: true, name: true } } },
   });
 
@@ -240,8 +240,11 @@ export async function receivablesAging(
       row = emptyAgingRow(inv.partyId, inv.party.name);
       byParty.set(inv.partyId, row);
     }
-    row[bucket] += inv.total;
-    row.total += inv.total;
+    // Only the outstanding balance is a real receivable — a partially paid
+    // invoice's already-collected amount is not still owed.
+    const outstanding = inv.total - inv.amountPaid;
+    row[bucket] += outstanding;
+    row.total += outstanding;
   }
 
   const rows = [...byParty.values()].sort((a, b) =>
@@ -269,7 +272,7 @@ export async function payablesAging(
   asOf = new Date(),
 ): Promise<{ asOf: Date; rows: AgingRow[]; totals: AgingRow }> {
   const invoices = await prisma.purchaseInvoice.findMany({
-    where: { orgId, status: "unpaid" },
+    where: { orgId, status: { in: ["UNPAID", "PARTIALLY_PAID"] } },
     include: { party: { select: { id: true, name: true } } },
   });
 
@@ -282,8 +285,9 @@ export async function payablesAging(
       row = emptyAgingRow(inv.partyId, inv.party.name);
       byParty.set(inv.partyId, row);
     }
-    row[bucket] += inv.total;
-    row.total += inv.total;
+    const outstanding = inv.total - inv.amountPaid;
+    row[bucket] += outstanding;
+    row.total += outstanding;
   }
 
   const rows = [...byParty.values()].sort((a, b) =>

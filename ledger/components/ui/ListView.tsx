@@ -47,6 +47,8 @@ export function ListView({
   emptyText,
   searchPlaceholder,
   mobile,
+  statusFilterKey,
+  defaultHiddenStatuses = [],
 }: {
   rows: ListRow[];
   columns: Column[];
@@ -56,6 +58,14 @@ export function ListView({
   emptyText: string;
   searchPlaceholder?: string;
   mobile?: { title: string; subtitle?: string; amount?: string; status?: string };
+  // Which row field holds a status value — when set, renders a status filter
+  // dropdown (options derived from the distinct values actually present in
+  // `rows`, so this stays generic across document types).
+  statusFilterKey?: string;
+  // Statuses excluded by default (e.g. "VOIDED") until the user explicitly
+  // picks "All statuses" or that status — keeps the everyday list free of
+  // clutter without hiding anything from reach.
+  defaultHiddenStatuses?: string[];
 }) {
   const t = useTranslations("common");
   const [period, setPeriod] = useState<Period>("all");
@@ -63,6 +73,7 @@ export function ListView({
   const [query, setQuery] = useState("");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
+  const [statusFilter, setStatusFilter] = useState("__default__");
 
   const periodLabels: Record<Period, string> = {
     all: t("periodAll"),
@@ -72,14 +83,38 @@ export function ListView({
     custom: t("periodCustom"),
   };
 
+  const statusOptions = useMemo(() => {
+    if (!statusFilterKey) return [];
+    return [...new Set(rows.map((r) => r[statusFilterKey]).filter(Boolean))];
+  }, [rows, statusFilterKey]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return rows.filter((r) => {
       if (hasDateFilter && !inPeriod(r._date, period, customFrom, customTo)) return false;
+      if (statusFilterKey) {
+        const value = r[statusFilterKey] ?? "";
+        if (statusFilter === "__default__") {
+          if (defaultHiddenStatuses.includes(value)) return false;
+        } else if (statusFilter !== "__all__" && value !== statusFilter) {
+          return false;
+        }
+      }
       if (!q) return true;
       return searchKeys.some((k) => (r[k] ?? "").toLowerCase().includes(q));
     });
-  }, [rows, period, query, customFrom, customTo, hasDateFilter, searchKeys]);
+  }, [
+    rows,
+    period,
+    query,
+    customFrom,
+    customTo,
+    hasDateFilter,
+    searchKeys,
+    statusFilterKey,
+    statusFilter,
+    defaultHiddenStatuses,
+  ]);
 
   function cell(row: ListRow, col: Column) {
     const value = row[col.key] ?? "—";
@@ -97,7 +132,7 @@ export function ListView({
           </>
         );
       case "status":
-        return <StatusBadge status={value} />;
+        return <StatusBadge status={value} dueDate={row.dueDate || null} />;
       default:
         return value;
     }
@@ -116,6 +151,27 @@ export function ListView({
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
+        {statusFilterKey && statusOptions.length > 0 && (
+          <div className="relative">
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="appearance-none rounded-full border border-[var(--border)] bg-white py-2 pr-9 pl-4 text-sm font-medium text-slate-700 shadow-sm outline-none transition hover:border-slate-300 focus:border-[var(--brand)]"
+              aria-label="Status"
+            >
+              <option value="__default__">{t("statusDefaultView")}</option>
+              <option value="__all__">{t("allStatuses")}</option>
+              {statusOptions.map((s) => (
+                <option key={s} value={s}>
+                  {s.toLowerCase().replace("_", " ")}
+                </option>
+              ))}
+            </select>
+            <svg className="pointer-events-none absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2 text-slate-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+              <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.085l3.71-3.855a.75.75 0 111.08 1.04l-4.25 4.41a.75.75 0 01-1.08 0l-4.25-4.41a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+            </svg>
+          </div>
+        )}
         {hasDateFilter && period === "custom" && (
           <div className="flex items-center gap-2">
             <input
@@ -199,7 +255,9 @@ export function ListView({
                         <p className="mt-0.5 font-mono text-xs text-[var(--muted)]">{r[mobile.subtitle]}</p>
                       ) : null}
                     </div>
-                    {mobile.status ? <StatusBadge status={r[mobile.status]} /> : null}
+                    {mobile.status ? (
+                      <StatusBadge status={r[mobile.status]} dueDate={r.dueDate || null} />
+                    ) : null}
                   </div>
                   <div className="mt-3 flex items-end justify-between">
                     <p className="text-xs text-[var(--muted)]">{r._date}</p>

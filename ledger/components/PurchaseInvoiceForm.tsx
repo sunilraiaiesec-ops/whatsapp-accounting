@@ -67,6 +67,9 @@ export function PurchaseInvoiceForm({
   const [partyName, setPartyName] = useState(
     () => suppliers.find((s) => s.id === defaults?.partyId)?.label ?? "",
   );
+  // See SalesInvoiceForm's canChooseDraft for why this only applies at
+  // creation, not when editing an existing Draft.
+  const canChooseDraft = !documentId;
 
   const lineTotal = (r: Row): bigint => {
     const qty = Number(r.quantity || "0");
@@ -314,13 +317,36 @@ export function PurchaseInvoiceForm({
             Posts to your expense/asset accounts and Accounts payable.
           </p>
         )}
-        <button
-          type="submit"
-          disabled={pending || total <= 0n}
-          className="btn-brand disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {pending ? "Saving…" : documentId ? "Save changes" : "Save bill"}
-        </button>
+        {canChooseDraft ? (
+          <div className="flex gap-3">
+            <button
+              type="submit"
+              name="mode"
+              value="draft"
+              disabled={pending || total <= 0n}
+              className="rounded-xl border border-[var(--border)] bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {pending ? "Saving…" : "Save as draft"}
+            </button>
+            <button
+              type="submit"
+              name="mode"
+              value="post"
+              disabled={pending || total <= 0n}
+              className="btn-brand disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {pending ? "Saving…" : "Save and post"}
+            </button>
+          </div>
+        ) : (
+          <button
+            type="submit"
+            disabled={pending || total <= 0n}
+            className="btn-brand disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {pending ? "Saving…" : "Save changes"}
+          </button>
+        )}
       </div>
     </form>
   );

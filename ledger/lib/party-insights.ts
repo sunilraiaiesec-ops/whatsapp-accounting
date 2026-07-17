@@ -22,10 +22,11 @@ import { paymentTermsPatternForSupplier } from "@/lib/command-patterns";
 //     re-deriving it, so the two features never disagree.
 //
 // PROXIES / LIMITATIONS (documented once here, referenced from the report):
-//   - "Average days to pay" has no direct schema support: invoices never
-//     transition their `status` away from "unpaid" (see lib/documents.ts)
-//     and Payment/Receipt aren't linked to a specific invoice. We use the
-//     same heuristic as command-patterns.ts: elapsed days between each
+//   - "Average days to pay" still uses a heuristic, not the exact
+//     ReceiptAllocation/PaymentAllocation records now available (see
+//     lib/invoice-lifecycle.ts) — computing a true per-invoice paid-on-date
+//     from those would be a more precise follow-up, not done here. We use
+//     the same heuristic as command-patterns.ts: elapsed days between each
 //     invoice's date and the next payment/receipt made to/by that party,
 //     bounded to 0-180 days. It's an approximation, not an exact allocation
 //     — flagged via `avgDaysToPayApproximate` and the reason string.

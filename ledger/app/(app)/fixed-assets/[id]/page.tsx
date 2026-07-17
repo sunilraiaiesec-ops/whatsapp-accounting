@@ -7,7 +7,7 @@ import { getFixedAsset } from "@/lib/fixed-assets/assets";
 import { formatAmount } from "@/lib/money";
 import { isoDate } from "@/lib/format";
 import { AccountingPreview } from "@/components/ui/AccountingPreview";
-import { FixedAssetActionButton } from "@/components/FixedAssetActionButton";
+import { ActionButton } from "@/components/ui/ActionButton";
 import { postDuePeriodsAction, deleteFixedAssetAction } from "@/app/actions/fixed-assets";
 
 export default async function FixedAssetDetailPage({
@@ -181,7 +181,7 @@ export default async function FixedAssetDetailPage({
 
       {canManage && asset.status === "ACTIVE" && duePeriods.length > 0 ? (
         <div className="mt-3">
-          <FixedAssetActionButton
+          <ActionButton
             action={postDuePeriodsAction}
             hiddenFields={{ assetId: asset.id }}
             label={`Post ${duePeriods.length} due period${duePeriods.length === 1 ? "" : "s"}`}
@@ -232,7 +232,7 @@ export default async function FixedAssetDetailPage({
             Edit
           </Link>
           {canDelete ? (
-            <FixedAssetActionButton
+            <ActionButton
               action={deleteFixedAssetAction}
               hiddenFields={{ id: asset.id }}
               label="Delete"

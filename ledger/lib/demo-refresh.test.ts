@@ -1,7 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 const salesInvoiceFindMany = vi.fn();
-const salesInvoiceUpdateMany = vi.fn();
 const salesInvoiceUpdate = vi.fn();
 const salesInvoiceCount = vi.fn();
 const inventoryItemFindMany = vi.fn();
@@ -13,7 +12,6 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     salesInvoice: {
       findMany: (...args: unknown[]) => salesInvoiceFindMany(...args),
-      updateMany: (...args: unknown[]) => salesInvoiceUpdateMany(...args),
       update: (...args: unknown[]) => salesInvoiceUpdate(...args),
       count: (...args: unknown[]) => salesInvoiceCount(...args),
     },
@@ -60,6 +58,8 @@ beforeEach(() => {
   resetDemoRefreshCooldown();
   // Production memberships use role OWNER — guard matches on demo email, not role string.
   membershipFindFirst.mockResolvedValue({ id: "membership_demo" });
+  // Default: no outstanding invoices to settle — tests that care override this.
+  salesInvoiceFindMany.mockResolvedValue([]);
 });
 
 describe("demo-accounts guards", () => {
@@ -118,24 +118,27 @@ describe("refreshDemoAccountData", () => {
     membershipFindFirst.mockResolvedValue(null);
     const result = await refreshDemoAccountData("real-org", NOW);
     expect(result).toBeNull();
-    expect(salesInvoiceUpdateMany).not.toHaveBeenCalled();
+    expect(salesInvoiceFindMany).not.toHaveBeenCalled();
+    expect(salesInvoiceUpdate).not.toHaveBeenCalled();
   });
 
   it("force refresh bypasses the demo-org guard", async () => {
     membershipFindFirst.mockResolvedValue(null);
     queryRaw.mockResolvedValue([{ max_date: new Date("2026-07-08") }]);
-    salesInvoiceUpdateMany.mockResolvedValue({ count: 0 });
     inventoryItemFindMany.mockResolvedValue([]);
     vi.mocked(countLowStockItems).mockResolvedValue(0);
 
     const result = await refreshDemoAccountData("any-org", NOW, { force: true });
     expect(result).not.toBeNull();
-    expect(salesInvoiceUpdateMany).toHaveBeenCalled();
+    expect(salesInvoiceFindMany).toHaveBeenCalled();
   });
 
   it("settles every unpaid invoice and leaves zero reminders", async () => {
     queryRaw.mockResolvedValue([{ max_date: new Date("2025-02-01") }]);
-    salesInvoiceUpdateMany.mockResolvedValue({ count: 668 });
+    salesInvoiceFindMany.mockResolvedValue([
+      { id: "inv_1", total: 668_000n },
+      { id: "inv_2", total: 12_000n },
+    ]);
     inventoryItemFindMany.mockResolvedValue([
       {
         id: "item_1",
@@ -149,11 +152,20 @@ describe("refreshDemoAccountData", () => {
     const result = await refreshDemoAccountData(DEMO_ORG, NOW);
 
     expect(result).not.toBeNull();
-    expect(salesInvoiceUpdateMany).toHaveBeenCalledWith({
-      where: { orgId: DEMO_ORG, status: { not: "paid" } },
-      data: { status: "paid" },
+    expect(salesInvoiceFindMany).toHaveBeenCalledWith({
+      where: { orgId: DEMO_ORG, status: { in: ["UNPAID", "PARTIALLY_PAID"] } },
+      select: { id: true, total: true },
     });
-    expect(salesInvoiceUpdate).not.toHaveBeenCalled();
+    // Each row is settled individually so its own total becomes amountPaid
+    // (PAID implies amountPaid >= total — a blind updateMany can't do this).
+    expect(salesInvoiceUpdate).toHaveBeenCalledWith({
+      where: { id: "inv_1" },
+      data: { status: "PAID", amountPaid: 668_000n },
+    });
+    expect(salesInvoiceUpdate).toHaveBeenCalledWith({
+      where: { id: "inv_2" },
+      data: { status: "PAID", amountPaid: 12_000n },
+    });
     expect(result!.unpaidInvoices).toBe(0);
     expect(result!.overdueInvoices).toBe(0);
     expect(result!.dueSoonInvoices).toBe(0);
@@ -162,7 +174,6 @@ describe("refreshDemoAccountData", () => {
 
   it("restocks every item above its reorder level, leaving zero low-stock", async () => {
     queryRaw.mockResolvedValue([{ max_date: new Date("2026-07-08") }]);
-    salesInvoiceUpdateMany.mockResolvedValue({ count: 500 });
     inventoryItemFindMany.mockResolvedValue([
       {
         id: "item_1",
@@ -190,7 +201,6 @@ describe("maybeRefreshDemoAccount", () => {
     vi.mocked(getPaymentReminderCount).mockResolvedValue(0);
     vi.mocked(countLowStockItems).mockResolvedValue(0);
     queryRaw.mockResolvedValue([{ max_date: new Date("2026-07-08") }]);
-    salesInvoiceUpdateMany.mockResolvedValue({ count: 0 });
     inventoryItemFindMany.mockResolvedValue([]);
 
     await refreshDemoAccountData(DEMO_ORG, NOW);
@@ -207,7 +217,6 @@ describe("maybeRefreshDemoAccount", () => {
     vi.mocked(getPaymentReminderCount).mockResolvedValue(600);
     vi.mocked(countLowStockItems).mockResolvedValue(0);
     queryRaw.mockResolvedValue([{ max_date: new Date("2025-01-01") }]);
-    salesInvoiceUpdateMany.mockResolvedValue({ count: 600 });
     inventoryItemFindMany.mockResolvedValue([]);
 
     await refreshDemoAccountData(DEMO_ORG, NOW);

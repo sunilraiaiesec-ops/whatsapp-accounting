@@ -3,9 +3,15 @@ import { notFound } from "next/navigation";
 import { requireContext } from "@/lib/auth/current";
 import { getPurchaseInvoice } from "@/lib/documents";
 import { clonePurchaseInvoiceAction } from "@/app/actions/documents";
+import {
+  postPurchaseInvoiceDraftAction,
+  voidPurchaseInvoiceAction,
+} from "@/app/actions/invoice-lifecycle";
 import { formatAmount } from "@/lib/money";
 import { DocToolbar } from "@/components/DocToolbar";
 import { TransactionJournal } from "@/components/TransactionJournal";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { ActionButton } from "@/components/ui/ActionButton";
 
 export default async function PurchaseInvoiceViewPage({
   params,
@@ -37,11 +43,37 @@ export default async function PurchaseInvoiceViewPage({
         total={nav.total}
       />
 
+      {invoice.status !== "VOIDED" ? (
+        <div className="mb-5 flex flex-wrap items-center gap-3 print:hidden">
+          {invoice.status === "DRAFT" ? (
+            <ActionButton
+              action={postPurchaseInvoiceDraftAction}
+              hiddenFields={{ id: invoice.id }}
+              label="Post bill"
+              pendingLabel="Posting…"
+            />
+          ) : null}
+          <ActionButton
+            action={voidPurchaseInvoiceAction}
+            hiddenFields={{ id: invoice.id }}
+            label="Void"
+            pendingLabel="Voiding…"
+            variant="danger"
+            confirmMessage="Void this bill? This reverses its ledger effects but keeps it for your records. This cannot be undone."
+            disabled={invoice.amountPaid > 0n}
+            disabledTitle="Unapply payments against this bill before voiding it."
+          />
+        </div>
+      ) : null}
+
       <div className="rounded-xl border border-slate-200 bg-white p-8">
         <div className="flex items-start justify-between">
           <div>
             <h1 className="text-2xl font-bold">Purchase Invoice</h1>
             <p className="mt-1 text-lg text-slate-700">{invoice.party.name}</p>
+            <div className="mt-3">
+              <StatusBadge status={invoice.status} dueDate={invoice.dueDate} />
+            </div>
           </div>
           <div className="text-right text-sm">
             <div className="font-semibold text-slate-900">{ctx.orgName}</div>

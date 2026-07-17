@@ -11,6 +11,11 @@ import {
   ensureTaxRecoverableAccount,
   ensureTaxPayableAccount,
 } from "@/lib/accounts";
+import {
+  applyReceiptAllocations,
+  applyPaymentAllocations,
+  type AllocationInput,
+} from "@/lib/invoice-lifecycle";
 
 export class DocumentError extends Error {}
 
@@ -105,6 +110,7 @@ export async function createReceipt(
     currency?: string | null;
     exchangeRate?: number | string | null;
     lines: LineInput[];
+    allocations?: AllocationInput[];
   },
 ) {
   const lines = input.lines
@@ -187,6 +193,10 @@ export async function createReceipt(
       where: { id: entry.id },
       data: { sourceId: receipt.id },
     });
+
+    if (input.allocations?.length) {
+      await applyReceiptAllocations(tx, orgId, receipt.id, input.allocations);
+    }
     return receipt;
   });
 }
@@ -209,6 +219,7 @@ export async function createPayment(
     exchangeRate?: number | string | null;
     lines: LineInput[];
     itemLines?: CashItemLineInput[];
+    allocations?: AllocationInput[];
   },
 ) {
   const lines = input.lines
@@ -343,6 +354,10 @@ export async function createPayment(
       where: { id: entry.id },
       data: { sourceId: payment.id },
     });
+
+    if (input.allocations?.length) {
+      await applyPaymentAllocations(tx, orgId, payment.id, input.allocations);
+    }
     return payment;
   });
 }
@@ -555,7 +570,7 @@ export async function createSalesInvoice(
         reference: input.reference ?? null,
         notes: input.notes ?? null,
         total,
-        status: "unpaid",
+        status: "UNPAID",
         journalEntryId: entry.id,
         lines: {
           create: lines.map((l, i) => ({
@@ -882,7 +897,7 @@ export async function createPurchaseInvoice(
         supplierRef: input.supplierRef ?? null,
         notes: input.notes ?? null,
         total,
-        status: "unpaid",
+        status: "UNPAID",
         journalEntryId: entry.id,
         lines: {
           create: lines.map((l) => ({
@@ -1161,7 +1176,12 @@ async function journalFor(journalEntryId: string) {
 export async function getReceipt(orgId: string, id: string) {
   const receipt = await prisma.receipt.findFirst({
     where: { orgId, id },
-    include: { lines: { include: { account: true } }, party: true, bankAccount: true },
+    include: {
+      lines: { include: { account: true } },
+      party: true,
+      bankAccount: true,
+      allocations: { include: { invoice: { select: { id: true, number: true } } } },
+    },
   });
   if (!receipt) return null;
   const [entry, total, before, prev, next] = await Promise.all([
@@ -1195,6 +1215,7 @@ export async function getPayment(orgId: string, id: string) {
       lines: { include: { account: true, item: true } },
       party: true,
       bankAccount: true,
+      allocations: { include: { invoice: { select: { id: true, number: true } } } },
     },
   });
   if (!payment) return null;
@@ -1253,7 +1274,7 @@ export async function getSalesInvoice(orgId: string, id: string) {
   });
   if (!invoice) return null;
   const [entry, total, before, prev, next] = await Promise.all([
-    journalFor(invoice.journalEntryId),
+    invoice.journalEntryId ? journalFor(invoice.journalEntryId) : null,
     prisma.salesInvoice.count({ where: { orgId } }),
     prisma.salesInvoice.count({ where: { orgId, createdAt: { lt: invoice.createdAt } } }),
     prisma.salesInvoice.findFirst({
@@ -1283,7 +1304,7 @@ export async function getPurchaseInvoice(orgId: string, id: string) {
   });
   if (!invoice) return null;
   const [entry, total, before, prev, next] = await Promise.all([
-    journalFor(invoice.journalEntryId),
+    invoice.journalEntryId ? journalFor(invoice.journalEntryId) : null,
     prisma.purchaseInvoice.count({ where: { orgId } }),
     prisma.purchaseInvoice.count({
       where: { orgId, createdAt: { lt: invoice.createdAt } },

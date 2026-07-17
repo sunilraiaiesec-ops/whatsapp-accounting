@@ -11,6 +11,7 @@ import {
 } from "@/lib/documents";
 import { receiveGoods, adjustInventory, type ReceiptLineInput, type AdjustmentLineInput } from "@/lib/inventory";
 import { ApprovalError, type PendingTransactionType } from "@/lib/approvals/types";
+import type { AllocationInput } from "@/lib/invoice-lifecycle";
 
 // ---------------------------------------------------------------------------
 // The exact input shapes the 6 real posting functions expect (§10/§11: "the
@@ -31,6 +32,10 @@ export type RawPaymentPayload = {
   exchangeRate?: number | string | null;
   lines: LineInput[];
   itemLines?: CashItemLineInput[];
+  // A Cashier-submitted receipt/payment can already name which invoice(s) it
+  // settles — must survive the approval round-trip so a Manager's approval
+  // doesn't silently drop the submitter's allocation intent.
+  allocations?: AllocationInput[];
 };
 
 export type RawReceiptPayload = Omit<RawPaymentPayload, "itemLines">;
@@ -105,6 +110,7 @@ type StoredInvoiceLine = {
 };
 type StoredGoodsLine = { itemId: string; quantity: string; unitCost: string };
 type StoredAdjustmentLine = { itemId: string; newQuantity: string };
+type StoredAllocation = { invoiceId: string; amount: string };
 
 export type StoredPaymentPayload = {
   date: string;
@@ -118,6 +124,7 @@ export type StoredPaymentPayload = {
   exchangeRate: string | null;
   lines: StoredLine[];
   itemLines: StoredItemLine[];
+  allocations: StoredAllocation[];
 };
 
 export type StoredReceiptPayload = Omit<StoredPaymentPayload, "itemLines">;
@@ -200,6 +207,10 @@ export function serializePaymentPayload(input: RawPaymentPayload): StoredPayment
       memo: l.memo ?? null,
       className: l.className ?? null,
       taxRate: l.taxRate ?? null,
+    })),
+    allocations: (input.allocations ?? []).map((a) => ({
+      invoiceId: a.invoiceId,
+      amount: a.amount.toString(),
     })),
   };
 }
@@ -320,6 +331,10 @@ function hydratePaymentPayload(stored: StoredPaymentPayload): RawPaymentPayload 
       memo: l.memo,
       className: l.className,
       taxRate: l.taxRate,
+    })),
+    allocations: stored.allocations.map((a) => ({
+      invoiceId: a.invoiceId,
+      amount: BigInt(a.amount),
     })),
   };
 }

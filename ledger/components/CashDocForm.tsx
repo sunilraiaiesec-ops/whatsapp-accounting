@@ -1,11 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useMemo, useState } from "react";
+import { useActionState, useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 
 import type { DocState } from "@/app/actions/documents";
 import { searchBantooEntities } from "@/app/actions/bantoo";
+import {
+  getOpenInvoicesForPartyAction,
+  type OpenInvoiceOption,
+} from "@/app/actions/invoice-lifecycle";
 import { BantooCombobox } from "@/components/BantooCombobox";
 import { parseAmount, formatAmount } from "@/lib/money";
 
@@ -63,6 +67,8 @@ const PAYMENT_METHODS = [
   { value: "other", key: "methodOther" },
 ] as const;
 
+type AllocationDefault = { invoiceId: string; invoiceNumber: string; amount: string };
+
 type CashDefaults = {
   date: string;
   bankAccountId: string;
@@ -75,6 +81,7 @@ type CashDefaults = {
   exchangeRate?: string | null;
   lines: Row[];
   itemLines?: ItemRow[];
+  allocations?: AllocationDefault[];
 };
 
 function Chevron({ open }: { open: boolean }) {
@@ -151,6 +158,9 @@ export function CashDocForm({
   const [rate, setRate] = useState(defaults?.exchangeRate ?? "");
   const [catOpen, setCatOpen] = useState(true);
   const [itemOpen, setItemOpen] = useState((defaults?.itemLines?.length ?? 0) > 0);
+  const [allocOpen, setAllocOpen] = useState((defaults?.allocations?.length ?? 0) > 0);
+  const [openInvoices, setOpenInvoices] = useState<OpenInvoiceOption[]>([]);
+  const [allocRows, setAllocRows] = useState<AllocationDefault[]>(defaults?.allocations ?? []);
 
   const isReceipt = mode === "receipt";
   const showItems = !isReceipt;
@@ -169,6 +179,62 @@ export function CashDocForm({
   const lineAccounts = useMemo(
     () => accounts.filter((a) => a.id !== bankAccountId),
     [accounts, bankAccountId],
+  );
+
+  // Refetch the party's open invoices whenever the selected party changes.
+  // A genuine async I/O effect (not a synchronous state mirror), so a plain
+  // useEffect is the right tool here, guarded against out-of-order responses.
+  // No party selected: skip the fetch entirely rather than setState-ing a
+  // clear — the render below already hides the invoice table whenever
+  // !partyId, so stale openInvoices sitting unused in state is harmless.
+  useEffect(() => {
+    if (!partyId) return;
+    let cancelled = false;
+    getOpenInvoicesForPartyAction(partyId, isReceipt ? "sales" : "purchase").then((invoices) => {
+      if (!cancelled) setOpenInvoices(invoices);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [partyId, isReceipt]);
+
+  // Rows to render in the allocation table: every currently-open invoice for
+  // the party, plus any invoice this document already has an allocation
+  // against even if it's no longer "open" (e.g. this very allocation is what
+  // pushed it to fully paid) — otherwise editing would silently drop it.
+  const candidateInvoices = useMemo(() => {
+    const byId = new Map(openInvoices.map((inv) => [inv.id, inv]));
+    for (const r of allocRows) {
+      if (!byId.has(r.invoiceId)) {
+        byId.set(r.invoiceId, {
+          id: r.invoiceId,
+          number: r.invoiceNumber,
+          date: "",
+          dueDate: null,
+          balance: "",
+        });
+      }
+    }
+    return [...byId.values()];
+  }, [openInvoices, allocRows]);
+
+  const allocAmountFor = (invoiceId: string) =>
+    allocRows.find((r) => r.invoiceId === invoiceId)?.amount ?? "";
+
+  const setAllocAmount = (invoiceId: string, invoiceNumber: string, amount: string) => {
+    setAllocRows((prev) => {
+      if (!amount.trim()) return prev.filter((r) => r.invoiceId !== invoiceId);
+      const exists = prev.some((r) => r.invoiceId === invoiceId);
+      if (exists) {
+        return prev.map((r) => (r.invoiceId === invoiceId ? { ...r, amount } : r));
+      }
+      return [...prev, { invoiceId, invoiceNumber, amount }];
+    });
+  };
+
+  const allocatedTotal = useMemo(
+    () => allocRows.reduce((s, r) => s + parseAmount(r.amount, currency), 0n),
+    [allocRows, currency],
   );
 
   const taxOf = (net: bigint, taxRate: string): bigint => {
@@ -227,6 +293,14 @@ export function CashDocForm({
           taxRate: r.taxRate.trim() || undefined,
         })),
     [itemRows],
+  );
+
+  const allocationsPayload = useMemo(
+    () =>
+      allocRows
+        .filter((r) => r.invoiceId && r.amount)
+        .map((r) => ({ invoiceId: r.invoiceId, amount: r.amount })),
+    [allocRows],
   );
 
   const selectedBank = bankAccounts.find((b) => b.id === bankAccountId);
@@ -761,6 +835,76 @@ export function CashDocForm({
           </>
         ) : null}
 
+        {/* Apply to invoices (collapsible) */}
+        <button
+          type="button"
+          onClick={() => setAllocOpen((v) => !v)}
+          className="flex w-full items-center gap-2 border-b border-[var(--border)] px-5 py-3 text-left sm:px-6"
+        >
+          <Chevron open={allocOpen} />
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">
+            {tc("applyToInvoices")}
+          </h2>
+          {allocatedTotal > 0n ? (
+            <span className="ml-auto text-xs font-medium text-[var(--brand)]">
+              {formatAmount(allocatedTotal, currency)} {currency}
+            </span>
+          ) : null}
+        </button>
+        {allocOpen ? (
+          !partyId ? (
+            <div className="border-b border-[var(--border)] px-5 py-4 text-sm text-[var(--muted)] sm:px-6">
+              {tc("applyToInvoicesNeedsParty")}
+            </div>
+          ) : candidateInvoices.length === 0 ? (
+            <div className="border-b border-[var(--border)] px-5 py-4 text-sm text-[var(--muted)] sm:px-6">
+              {tc("noOpenInvoices")}
+            </div>
+          ) : (
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[560px] text-sm">
+                  <thead>
+                    <tr className="border-b border-[var(--border)] bg-slate-50/80 text-left text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+                      <th className="px-4 py-3">{tc("invoiceNumber")}</th>
+                      <th className="px-4 py-3">{tc("dueDate")}</th>
+                      <th className="w-32 px-4 py-3 text-right">{tc("balanceRemaining")}</th>
+                      <th className="w-36 px-4 py-3 text-right">
+                        {tc("amountToApply")} ({currency})
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {candidateInvoices.map((inv) => (
+                      <tr key={inv.id} className="border-b border-slate-100 last:border-0">
+                        <td className="px-4 py-2.5 font-medium text-slate-900">{inv.number}</td>
+                        <td className="px-4 py-2.5 text-slate-600">{inv.dueDate || "—"}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums text-slate-600">
+                          {inv.balance || "—"}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <input
+                            inputMode="decimal"
+                            value={allocAmountFor(inv.id)}
+                            onChange={(e) => setAllocAmount(inv.id, inv.number, e.target.value)}
+                            className="input-modern py-2 text-right tabular-nums"
+                            placeholder="0"
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="border-b border-[var(--border)] bg-slate-50/50 px-5 py-3 text-right text-xs text-[var(--muted)] sm:px-6">
+                {allocatedTotal > total
+                  ? tc("allocationExceedsTotal")
+                  : `${tc("unallocatedAmount")}: ${formatAmount(total - allocatedTotal, currency)} ${currency}`}
+              </div>
+            </>
+          )
+        ) : null}
+
         {/* Totals */}
         <div className="flex flex-col gap-2 border-b border-[var(--border)] bg-slate-50/50 px-5 py-4 sm:items-end sm:px-6">
           <div className="w-full max-w-xs space-y-1.5 text-sm">
@@ -810,6 +954,7 @@ export function CashDocForm({
         <input type="hidden" name="partyName" value={partyId ? "" : partyName} />
         <input type="hidden" name="lines" value={JSON.stringify(linesPayload)} />
         <input type="hidden" name="itemLines" value={JSON.stringify(itemLinesPayload)} />
+        <input type="hidden" name="allocations" value={JSON.stringify(allocationsPayload)} />
         <input type="hidden" name="currency" value={isForeign ? docCurrency : ""} />
         <input type="hidden" name="exchangeRate" value={isForeign ? rate : ""} />
         {classOptions.length > 0 ? (

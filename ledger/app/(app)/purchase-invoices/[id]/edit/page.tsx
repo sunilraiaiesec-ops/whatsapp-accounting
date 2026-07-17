@@ -18,6 +18,7 @@ export default async function EditPurchaseInvoicePage({
   const data = await getPurchaseInvoice(ctx.orgId, id);
   if (!data) notFound();
   const { invoice } = data;
+  if (invoice.status === "VOIDED") notFound();
 
   const [suppliers, expense, asset] = await Promise.all([
     listParties(ctx.orgId, "supplier"),

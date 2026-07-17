@@ -74,6 +74,12 @@ export function SalesInvoiceForm({
   const [partyName, setPartyName] = useState(
     () => customers.find((c) => c.id === defaults?.partyId)?.label ?? "",
   );
+  // Only offer the Draft-vs-Post choice at creation time. Editing an
+  // existing Draft always just saves it (still a Draft) — finalizing is a
+  // separate, explicit "Post" action from the invoice detail page, so
+  // there's no ambiguity about what a save-time "post" button would do to
+  // an invoice whose lines/total may have just changed.
+  const canChooseDraft = !documentId;
 
   const lineTotal = (r: Row): bigint => {
     const qty = Number(r.quantity || "0");
@@ -365,13 +371,36 @@ export function SalesInvoiceForm({
             Posts to Accounts receivable and your income accounts.
           </p>
         )}
-        <button
-          type="submit"
-          disabled={pending || total <= 0n}
-          className="btn-brand disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {pending ? "Saving…" : documentId ? "Save changes" : "Save invoice"}
-        </button>
+        {canChooseDraft ? (
+          <div className="flex gap-3">
+            <button
+              type="submit"
+              name="mode"
+              value="draft"
+              disabled={pending || total <= 0n}
+              className="rounded-xl border border-[var(--border)] bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {pending ? "Saving…" : "Save as draft"}
+            </button>
+            <button
+              type="submit"
+              name="mode"
+              value="post"
+              disabled={pending || total <= 0n}
+              className="btn-brand disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {pending ? "Saving…" : "Save and post"}
+            </button>
+          </div>
+        ) : (
+          <button
+            type="submit"
+            disabled={pending || total <= 0n}
+            className="btn-brand disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {pending ? "Saving…" : "Save changes"}
+          </button>
+        )}
       </div>
     </form>
   );

@@ -36,6 +36,7 @@ async function main() {
     name: "Probe CFO",
     email: `probe+${STAMP}@example.com`,
     password: "probe-12345",
+    phone: "+237600000000",
     orgName: `Probe Co [${STAMP}]`,
     baseCurrency: "XAF",
   });
@@ -79,6 +80,7 @@ async function main() {
   // Cross-org account use rejected.
   const { org: other } = await createOrganizationWithOwner({
     name: "Other", email: `probe2+${STAMP}@example.com`, password: "probe-12345",
+    phone: "+237600000001",
     orgName: `Other Co [${STAMP}]`, baseCurrency: "XAF",
   });
   const otherAccounts = await listAccounts(other.id);

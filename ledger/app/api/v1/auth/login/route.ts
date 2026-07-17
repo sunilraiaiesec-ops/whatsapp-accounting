@@ -44,6 +44,9 @@ export async function POST(request: Request) {
   if (!user || !(await verifyPassword(parsed.data.password, user.passwordHash))) {
     return error("Invalid email or password", 401);
   }
+  if (!user.emailVerified) {
+    return error("Please confirm your email before signing in.", 403);
+  }
 
   const membership = user.memberships[0];
   if (!membership) {

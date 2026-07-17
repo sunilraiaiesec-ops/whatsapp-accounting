@@ -23,6 +23,7 @@ import {
   cloneDebitNote,
   DocumentError,
 } from "@/lib/documents";
+import { createSalesInvoiceDraft, createPurchaseInvoiceDraft } from "@/lib/invoice-lifecycle";
 import { LedgerError } from "@/lib/ledger";
 import { checkPlanLimit } from "@/lib/billing/enforce";
 import { gateTransaction } from "@/lib/approvals/gate";
@@ -140,6 +141,22 @@ function parseInvoiceLines(formData: FormData, currency: string) {
     }));
 }
 
+function parseAllocations(formData: FormData, currency: string) {
+  let raw: { invoiceId?: string; amount?: string }[];
+  try {
+    raw = JSON.parse(String(formData.get("allocations") || "[]"));
+  } catch {
+    return [];
+  }
+  return raw
+    .filter((a) => a.invoiceId)
+    .map((a) => ({
+      invoiceId: a.invoiceId as string,
+      amount: parseAmount(a.amount ?? "0", currency),
+    }))
+    .filter((a) => a.amount > 0n);
+}
+
 function fail(err: unknown): DocState {
   if (err instanceof DocumentError || err instanceof LedgerError) {
     return { error: err.message };
@@ -180,6 +197,7 @@ export async function createReceiptAction(
     currency: fx.currency,
     exchangeRate: fx.exchangeRate,
     lines,
+    allocations: parseAllocations(formData, ctx.baseCurrency),
   };
 
   try {
@@ -318,6 +336,7 @@ export async function createPaymentAction(
     exchangeRate: fx.exchangeRate,
     lines,
     itemLines,
+    allocations: parseAllocations(formData, ctx.baseCurrency),
   };
 
   try {
@@ -389,6 +408,20 @@ export async function createSalesInvoiceAction(
     lines,
   };
 
+  // A Draft is saved but never posts to the ledger, so it isn't a real
+  // transaction yet — it doesn't need Manager approval at creation time
+  // (approval gates the moment of ledger posting, which for a Draft happens
+  // later via postSalesInvoiceDraftAction).
+  if (String(formData.get("mode") || "post") === "draft") {
+    let invoice;
+    try {
+      invoice = await createSalesInvoiceDraft(ctx.orgId, payload);
+    } catch (err) {
+      return fail(err);
+    }
+    redirect(`/sales-invoices/${invoice.id}`);
+  }
+
   try {
     const gate = await gateTransaction(ctx, "sales_invoice", payload);
     if (gate.gated) {
@@ -450,6 +483,16 @@ export async function createPurchaseInvoiceAction(
     notes: String(formData.get("notes") || "") || null,
     lines,
   };
+
+  if (String(formData.get("mode") || "post") === "draft") {
+    let invoice;
+    try {
+      invoice = await createPurchaseInvoiceDraft(ctx.orgId, payload);
+    } catch (err) {
+      return fail(err);
+    }
+    redirect(`/purchase-invoices/${invoice.id}`);
+  }
 
   try {
     const gate = await gateTransaction(ctx, "purchase_invoice", payload);

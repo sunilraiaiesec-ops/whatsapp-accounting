@@ -95,6 +95,48 @@ export async function sendResetVerificationCode(email: string, code: string, org
   await sendEmail({ to: email, subject, html, text });
 }
 
+// Where the "New Member" signup notification goes — overridable per
+// environment, defaults to the address the team actually monitors.
+export function signupNotificationEmail(): string {
+  return process.env.SIGNUP_NOTIFICATION_EMAIL ?? "members@bantoobooks.com";
+}
+
+export type NewMemberNotificationInput = {
+  name: string;
+  email: string;
+  phone: string;
+  whatsapp?: string | null;
+  orgName: string;
+  baseCurrency: string;
+};
+
+export async function sendNewMemberNotification(input: NewMemberNotificationInput) {
+  const subject = "New Member";
+  const whatsappLine = input.whatsapp ? input.whatsapp : "Same as phone number";
+
+  const text =
+    `A new member signed up on Bantoo Books.\n\n` +
+    `Company name: ${input.orgName}\n` +
+    `Name: ${input.name}\n` +
+    `Email: ${input.email}\n` +
+    `Phone number: ${input.phone}\n` +
+    `WhatsApp number: ${whatsappLine}\n` +
+    `Base currency: ${input.baseCurrency}\n`;
+
+  const html =
+    `<p>A new member signed up on Bantoo Books.</p>` +
+    `<table style="border-collapse:collapse;margin-top:8px">` +
+    `<tr><td style="padding:4px 12px 4px 0;color:#64748b">Company name</td><td><strong>${escapeHtml(input.orgName)}</strong></td></tr>` +
+    `<tr><td style="padding:4px 12px 4px 0;color:#64748b">Name</td><td>${escapeHtml(input.name)}</td></tr>` +
+    `<tr><td style="padding:4px 12px 4px 0;color:#64748b">Email</td><td>${escapeHtml(input.email)}</td></tr>` +
+    `<tr><td style="padding:4px 12px 4px 0;color:#64748b">Phone number</td><td>${escapeHtml(input.phone)}</td></tr>` +
+    `<tr><td style="padding:4px 12px 4px 0;color:#64748b">WhatsApp number</td><td>${escapeHtml(whatsappLine)}</td></tr>` +
+    `<tr><td style="padding:4px 12px 4px 0;color:#64748b">Base currency</td><td>${escapeHtml(input.baseCurrency)}</td></tr>` +
+    `</table>`;
+
+  await sendEmail({ to: signupNotificationEmail(), subject, html, text });
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")

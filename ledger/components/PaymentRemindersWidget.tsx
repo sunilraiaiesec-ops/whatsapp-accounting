@@ -19,6 +19,10 @@ export type PaymentReminderInvoiceVM = {
   id: string;
   number: string;
   total: bigint;
+  // Amount already collected via ReceiptAllocation — the reminder should
+  // nudge about what's still owed, not the original invoice total, once an
+  // invoice has been partially paid.
+  amountPaid: bigint;
   // Nullable to match the underlying SalesInvoice field type directly (the
   // query this widget is fed from already filters to dueDate != null) —
   // any item without one is defensively skipped rather than crashing.
@@ -63,10 +67,11 @@ export function PaymentRemindersWidget({ dueSoon, overdue, currency }: PaymentRe
             phone: invoice.party.phone,
             whatsapp: invoice.party.whatsapp,
           });
+          const outstanding = invoice.total - invoice.amountPaid;
           const message = buildPaymentReminderMessage({
             customerName: invoice.party.name,
             invoiceNumber: invoice.number,
-            amount: formatAmount(invoice.total, currency),
+            amount: formatAmount(outstanding, currency),
             currency,
             dueDate: formatDate(dueDate),
           });
@@ -82,7 +87,7 @@ export function PaymentRemindersWidget({ dueSoon, overdue, currency }: PaymentRe
                   {invoice.party.name} — {invoice.number}
                 </p>
                 <p className="text-xs text-slate-500">
-                  {formatMoney(invoice.total, currency)} · due {formatDate(dueDate)}
+                  {formatMoney(outstanding, currency)} · due {formatDate(dueDate)}
                   {bucket === "overdue" ? (
                     <span className="ml-1 font-semibold text-amber-700">· overdue</span>
                   ) : null}
