@@ -193,6 +193,10 @@ export const expenseSchema = z.object({
 export const salesReceiptSchema = z.object({
   action: z.literal("sales_receipt"),
   amount: numberish,
+  // See salesInvoiceSchema above — optional supplement to amount, not a
+  // replacement.
+  quantity: numberish,
+  unit_price: numberish,
   customer_name: ntext,
   description: ntext,
   payment_method: ntext,
@@ -493,10 +497,20 @@ export const unsupportedSupplierActionSchema = z.object({
 // absolute date OR is resolved server-side from a relative phrase like "net
 // 30" / "due in 30 days" / "échéance dans 30 jours" — see
 // lib/bantoo/fallback.ts's ruleBasedExtract and lib/ai/extract.ts's prompt.
+//
+// quantity/unit_price are OPTIONAL supplements to amount, not a replacement
+// for it — amount stays the authoritative grand total either way (still
+// required when quantity/unit_price aren't extractable, e.g. a genuine
+// lump-sum "invoice him 50,000"). When the user states a per-unit rate
+// ("2560 bags at 7000 XAF a bag"), the model fills quantity+unit_price too
+// so execute() can build a real line item instead of a fake quantity=1 one
+// — see app/actions/bantoo.ts.
 export const salesInvoiceSchema = z.object({
   action: z.literal("sales_invoice"),
   customer_name: ntext,
   amount: numberish,
+  quantity: numberish,
+  unit_price: numberish,
   description: ntext,
   date: isoDate,
   due_date: isoDate,
@@ -510,6 +524,8 @@ export const creditNoteSchema = z.object({
   action: z.literal("credit_note"),
   customer_name: ntext,
   amount: numberish,
+  quantity: numberish,
+  unit_price: numberish,
   description: ntext,
   date: isoDate,
   currency,
@@ -521,6 +537,8 @@ export const refundReceiptSchema = z.object({
   action: z.literal("refund_receipt"),
   customer_name: ntext,
   amount: numberish,
+  quantity: numberish,
+  unit_price: numberish,
   description: ntext,
   date: isoDate,
   currency,

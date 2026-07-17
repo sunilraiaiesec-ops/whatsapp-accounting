@@ -187,6 +187,7 @@
     "suggestedAction": "Suggested action",
     "amount": "Amount",
     "quantity": "Quantity",
+    "unitPrice": "Unit price",
     "inventoryItem": "Inventory item",
     "unitCost": "Unit cost",
     "unitCostPlaceholder": "e.g. 25,000",

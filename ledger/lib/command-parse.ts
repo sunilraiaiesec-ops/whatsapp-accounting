@@ -134,6 +134,13 @@ export type ParsedCommand = {
   amountText: string | null;
   quantityText: string | null;
   quantityUnit: string | null;
+  // Populated only when intent === "sales_action" and the message states a
+  // PER-UNIT price ("at 7000 XAF a bag", "à 7000 XAF le sac") alongside a
+  // quantity — see UNIT_PRICE_PATTERN. Distinct from amountText, which is
+  // extractAmount's generic (and, for this phrasing, WRONG — it has no way to
+  // recognize a trailing "at X a bag" clause as a per-unit rate rather than a
+  // lump-sum total) grand-total guess.
+  unitPriceText: string | null;
   itemDescription: string | null;
   partyName: string | null;
   city: string | null;
@@ -253,6 +260,13 @@ const QUANTITY_PATTERN =
 const CURRENCY_PATTERN = /\b(xaf|fcfa|francs?|cfa)\b/i;
 const MONEY_MODIFIER_PATTERN = /\b(million|millions|mio|\bm\b)\b/i;
 
+// A per-unit rate stated alongside a quantity — "at 7000 XAF a bag", "at
+// 7000 per bag", "à 7000 XAF le sac". Deliberately requires the leading
+// "at"/"à" + a unit word (the same vocabulary as QUANTITY_PATTERN) so it
+// never fires on an unrelated "at" clause (e.g. a date/time phrase).
+const UNIT_PRICE_PATTERN =
+  /\b(?:at|à)\s+(\d[\d\s,.'']*(?:\.\d+)?)\s*(?:xaf|fcfa|francs?|cfa)?\s*(?:a|per|each|\/|le|la|par)\s*(bags?|units?|unit[ée]s?|kgs?|kilos?|kilograms?|kilogrammes?|tons?|tonnes?|cartons?|pieces?|pi[èe]ces?|sacks?|sacs?|boxes?|bo[iî]tes?|crates?|caisses?|pallets?|palettes?|liters?|litres?|pcs|sachets?)\b/i;
+
 const FROM_PATTERN =
   /\b(?:from|de|du|de la|des|customer|client|by)\s+(.+?)(?:\s+(?:for|pour|on|le|today|hier|yesterday)|$)/i;
 
@@ -315,12 +329,85 @@ function stripTrailingPunctuation(text: string): string {
   return text.replace(/[?.!]+\s*$/g, "").trim();
 }
 
+// Bare unit/quantity words (EN + FR) that are never a real party name on
+// their own. The generic "for/pour/de/of" tail-split in splitSalesTail (and
+// its siblings) is a first-match split — for input like "2560 bags of rice
+// baffousam at 7000 xaf a bag", it lands on the "of" inside "bags OF rice"
+// (well before the real name/description boundary), leaving "2560 bags" as
+// the candidate name. cleanLabel's digit-stripping then reduces that to the
+// bare word "bags", which would otherwise sail through as a party name and
+// silently create a bogus customer. Reject that outcome here instead of
+// downstream, so this guard protects every caller of cleanCustomerName/
+// cleanSupplierName, not just the sales-invoice path that reported it.
+const BARE_UNIT_WORDS = new Set([
+  "bag",
+  "bags",
+  "box",
+  "boxes",
+  "carton",
+  "cartons",
+  "case",
+  "cases",
+  "crate",
+  "crates",
+  "sack",
+  "sacks",
+  "piece",
+  "pieces",
+  "pcs",
+  "pc",
+  "unit",
+  "units",
+  "bottle",
+  "bottles",
+  "can",
+  "cans",
+  "pack",
+  "packs",
+  "packet",
+  "packets",
+  "roll",
+  "rolls",
+  "kg",
+  "kgs",
+  "kilogram",
+  "kilograms",
+  "gram",
+  "grams",
+  "ton",
+  "tons",
+  "tonne",
+  "tonnes",
+  "liter",
+  "liters",
+  "litre",
+  "litres",
+  "meter",
+  "meters",
+  "metre",
+  "metres",
+  "dozen",
+  "dozens",
+  "sac",
+  "sacs",
+  "pièce",
+  "pièces",
+  "sachet",
+  "sachets",
+  "boîte",
+  "boîtes",
+]);
+
 function cleanPartyNameGeneric(raw: string): string {
   let s = raw.trim();
   s = s.replace(/^[:,-]+/, "").trim();
   s = s.replace(/['’]s$/i, "").trim();
   s = stripTrailingPunctuation(s);
-  return cleanLabel(s);
+  s = cleanLabel(s);
+  if (!s) return s;
+  const words = s.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length > 0 && words.every((w) => BARE_UNIT_WORDS.has(w))) return "";
+  return s;
 }
 
 function cleanCustomerName(raw: string): string {
@@ -1298,6 +1385,14 @@ function extractQuantity(text: string): { quantity: string; unit: string } | nul
   return { quantity, unit: match[2].toLowerCase() };
 }
 
+function extractUnitPrice(text: string): string | null {
+  const match = text.match(UNIT_PRICE_PATTERN);
+  if (!match?.[1]) return null;
+  const price = match[1].replace(/[\s,.'']/g, "");
+  if (!price || price === "0") return null;
+  return price;
+}
+
 function extractItemDescription(text: string): string | null {
   const match = text.match(/\bof\s+(.+)$/i) ?? text.match(/\bde\s+(.+)$/i);
   if (!match?.[1]) return null;
@@ -1776,7 +1871,9 @@ function extractCreateSupplierDetails(text: string): { name: string | null; city
 function parseCommandTextFull(text: string): ParsedCommand {
   const raw = text.trim();
   const intent = detectIntent(raw);
-  const quantityMatch = intent === "create_goods_receipt" ? extractQuantity(raw) : null;
+  const quantityMatch =
+    intent === "create_goods_receipt" || intent === "sales_action" ? extractQuantity(raw) : null;
+  const unitPriceMatch = intent === "sales_action" ? extractUnitPrice(raw) : null;
   const amountText = intent === "create_goods_receipt" ? null : extractAmount(raw);
 
   let partyName: string | null = null;
@@ -1891,6 +1988,7 @@ function parseCommandTextFull(text: string): ParsedCommand {
     amountText,
     quantityText: quantityMatch?.quantity ?? null,
     quantityUnit: quantityMatch?.unit ?? null,
+    unitPriceText: unitPriceMatch,
     itemDescription,
     partyName,
     city,

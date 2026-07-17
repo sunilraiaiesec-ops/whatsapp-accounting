@@ -104,6 +104,7 @@ function draft(overrides: Record<string, string> = {}) {
     taxRate: "",
     reorderLevel: "",
     amount: "",
+    unitPrice: "",
     partyName: "",
     city: "",
     country: "",
@@ -1410,6 +1411,44 @@ describe("executeBantooAction — Sales Intelligence Sprint", () => {
           expect.objectContaining({
             description: "Rice delivery",
             unitPrice: 50000n,
+            accountId: "acct_income",
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("sales_invoice: posts the real quantity/unitPrice as the line, not the hardcoded quantity-1-at-amount fallback (production bug repro)", async () => {
+    createSalesInvoice.mockResolvedValue({ id: "inv_2", number: "INV-0002" });
+
+    const input: ExecuteBantooInput = {
+      action: "sales_invoice",
+      draft: draft({
+        amount: String(2560 * 7000),
+        quantity: "2560",
+        unitPrice: "7000",
+        description: "Rice",
+        partyName: "Baffoussam",
+      }),
+      partyId: "cust_1",
+      createParty: false,
+      partyType: "customer",
+      itemId: null,
+      bankAccountId: null,
+      lineAccountId: "acct_income",
+    };
+    accountFindFirst.mockResolvedValue({ id: "acct_income" });
+    partyFindFirst.mockResolvedValue({ id: "cust_1" });
+
+    const result = await executeBantooAction(input);
+    expect(result.ok).toBe(true);
+    expect(createSalesInvoice).toHaveBeenCalledWith(
+      "org_A",
+      expect.objectContaining({
+        lines: [
+          expect.objectContaining({
+            quantity: "2560",
+            unitPrice: 7000n,
             accountId: "acct_income",
           }),
         ],

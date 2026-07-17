@@ -13,6 +13,17 @@ export function ruleBasedExtract(text: string): ExtractedAction {
   const amount = parsed.amountText ? Number(parsed.amountText) : null;
   const confidence = 0.75;
 
+  // Sales actions only: when the message states BOTH a quantity and a
+  // per-unit price ("2560 bags... at 7000 XAF a bag"), their product is the
+  // authoritative grand total — extractAmount's generic number-scan has no
+  // way to tell a trailing "at X a bag" clause is a per-unit rate rather
+  // than a lump-sum total, so it lands on the unit price alone. When only a
+  // lump sum is stated, fall back to the plain `amount` above.
+  const salesQuantity = parsed.quantityText ? Number(parsed.quantityText) : null;
+  const salesUnitPrice = parsed.unitPriceText ? Number(parsed.unitPriceText) : null;
+  const salesAmount =
+    salesQuantity && salesUnitPrice ? salesQuantity * salesUnitPrice : amount;
+
   if (parsed.intent === "create_goods_receipt") {
     return {
       action: "receive_stock",
@@ -64,6 +75,8 @@ export function ruleBasedExtract(text: string): ExtractedAction {
       return {
         action: "sales_receipt",
         amount,
+        quantity: null,
+        unit_price: null,
         customer_name: parsed.partyName,
         description: parsed.expenseDescription,
         payment_method: null,
@@ -457,7 +470,9 @@ export function ruleBasedExtract(text: string): ExtractedAction {
         return {
           action: "sales_invoice",
           customer_name: sa.customerName,
-          amount,
+          amount: salesAmount,
+          quantity: salesQuantity,
+          unit_price: salesUnitPrice,
           description: sa.description,
           date: null,
           // Relative phrase ("due in 30 days"/"net 30"/"échéance dans 30
@@ -474,7 +489,9 @@ export function ruleBasedExtract(text: string): ExtractedAction {
         return {
           action: "credit_note",
           customer_name: sa.customerName,
-          amount,
+          amount: salesAmount,
+          quantity: salesQuantity,
+          unit_price: salesUnitPrice,
           description: sa.description,
           date: null,
           currency,
@@ -485,7 +502,9 @@ export function ruleBasedExtract(text: string): ExtractedAction {
         return {
           action: "refund_receipt",
           customer_name: sa.customerName,
-          amount,
+          amount: salesAmount,
+          quantity: salesQuantity,
+          unit_price: salesUnitPrice,
           description: sa.description,
           date: null,
           currency,

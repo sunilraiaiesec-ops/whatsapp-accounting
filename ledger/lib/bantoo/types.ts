@@ -233,6 +233,11 @@ export type BantooDraft = {
   taxRate: string;
   reorderLevel: string;
   amount: string;
+  // Sales-side (sales_invoice/credit_note/refund_receipt/sales_receipt) only:
+  // an optional per-unit price supplement to `amount` — shares `quantity`
+  // above with add_inventory_item/receive_stock (a single flat draft object,
+  // no collision since only one action type is ever active at a time).
+  unitPrice: string;
   partyName: string;
   city: string;
   paymentMethod: string;
@@ -379,6 +384,7 @@ export function emptyDraft(): BantooDraft {
     taxRate: "",
     reorderLevel: "",
     amount: "",
+    unitPrice: "",
     partyName: "",
     city: "",
     paymentMethod: "",

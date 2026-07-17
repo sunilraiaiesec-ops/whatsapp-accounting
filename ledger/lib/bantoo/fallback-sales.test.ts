@@ -24,6 +24,19 @@ describe("ruleBasedExtract — Sales Intelligence Sprint sales_action mapping", 
     }
   });
 
+  it("extracts real quantity/unit_price and computes amount as their product (production bug repro: INV-00706 — customer name mangled into \"bags\", quantity collapsed to 1)", () => {
+    const action = ruleBasedExtract(
+      "Create an invoice for baffousam for 2560 bags of rice at 7000 xaf a bag. He promised to pay within one month",
+    );
+    expect(action.action).toBe("sales_invoice");
+    if (action.action === "sales_invoice") {
+      expect(action.customer_name).toBe("baffousam");
+      expect(action.quantity).toBe(2560);
+      expect(action.unit_price).toBe(7000);
+      expect(action.amount).toBe(2560 * 7000);
+    }
+  });
+
   it('maps "Facturer Musa 50000" to sales_invoice (French)', () => {
     const action = ruleBasedExtract("Facturer Musa 50000");
     expect(action.action).toBe("sales_invoice");
@@ -147,6 +160,8 @@ describe("blendExtraction — Sales Intelligence Sprint", () => {
   it("fills a missing customer_name on low-confidence AI sales_invoice from the rule parser", () => {
     const blended = blendExtraction("Create an invoice for Musa for 50000", {
       action: "sales_invoice",
+      quantity: null,
+      unit_price: null,
       customer_name: null,
       amount: 50000,
       description: null,
@@ -177,6 +192,8 @@ describe("blendExtraction — Sales Intelligence Sprint", () => {
   it("never merges customer_name across different sales action types", () => {
     const blended = blendExtraction("Refund Musa 5000", {
       action: "credit_note",
+      quantity: null,
+      unit_price: null,
       customer_name: null,
       amount: 5000,
       description: null,

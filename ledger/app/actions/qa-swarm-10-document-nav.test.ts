@@ -104,6 +104,7 @@ function draft(overrides: Record<string, string> = {}) {
     taxRate: "",
     reorderLevel: "",
     amount: "",
+    unitPrice: "",
     partyName: "",
     city: "",
     country: "",

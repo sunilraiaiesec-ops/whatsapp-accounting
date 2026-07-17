@@ -75,6 +75,8 @@ describe("resolveExtraction — Sales Intelligence Sprint", () => {
     loadEntityCandidates.mockResolvedValue([MUSA]);
     const action: ExtractedAction = {
       action: "sales_invoice",
+      quantity: null,
+      unit_price: null,
       customer_name: "Musa Ibrahim",
       amount: 50000,
       description: "Rice delivery",
@@ -96,9 +98,31 @@ describe("resolveExtraction — Sales Intelligence Sprint", () => {
     expect(proposal.warnings.some((w) => w.code === "enterSaleAmount")).toBe(false);
   });
 
+  it("sales_invoice: carries real quantity/unit_price through to the draft (not just the lump-sum amount)", async () => {
+    loadEntityCandidates.mockResolvedValue([MUSA]);
+    const action: ExtractedAction = {
+      action: "sales_invoice",
+      quantity: 2560,
+      unit_price: 7000,
+      customer_name: "Musa Ibrahim",
+      amount: 2560 * 7000,
+      description: "Rice",
+      date: null,
+      due_date: null,
+      ...baseFields(),
+    };
+
+    const proposal = await resolveExtraction(ctx, action);
+    expect(proposal.draft.quantity).toBe("2560");
+    expect(proposal.draft.unitPrice).toBe("7000");
+    expect(proposal.draft.amount).toBe(String(2560 * 7000));
+  });
+
   it("sales_invoice: missing customer name warns chooseCustomerForInvoice (never 'not sure')", async () => {
     const action: ExtractedAction = {
       action: "sales_invoice",
+      quantity: null,
+      unit_price: null,
       customer_name: null,
       amount: 50000,
       description: null,
@@ -117,6 +141,8 @@ describe("resolveExtraction — Sales Intelligence Sprint", () => {
     loadEntityCandidates.mockResolvedValue([MUSA]);
     const action: ExtractedAction = {
       action: "sales_invoice",
+      quantity: null,
+      unit_price: null,
       customer_name: "Musa Ibrahim",
       amount: null,
       description: null,
@@ -134,6 +160,8 @@ describe("resolveExtraction — Sales Intelligence Sprint", () => {
     receiptCounterpartAccounts.mockResolvedValue([]);
     const action: ExtractedAction = {
       action: "sales_invoice",
+      quantity: null,
+      unit_price: null,
       customer_name: "Musa Ibrahim",
       amount: 50000,
       description: null,
@@ -150,6 +178,8 @@ describe("resolveExtraction — Sales Intelligence Sprint", () => {
   it("credit_note: resolves the customer and warns chooseCustomerForCreditNote/enterCreditAmount when missing", async () => {
     const action: ExtractedAction = {
       action: "credit_note",
+      quantity: null,
+      unit_price: null,
       customer_name: null,
       amount: null,
       description: null,
@@ -166,6 +196,8 @@ describe("resolveExtraction — Sales Intelligence Sprint", () => {
     loadEntityCandidates.mockResolvedValue([MUSA]);
     const action: ExtractedAction = {
       action: "credit_note",
+      quantity: null,
+      unit_price: null,
       customer_name: "Musa Ibrahim",
       amount: 5000,
       description: "Returned goods",
@@ -185,6 +217,8 @@ describe("resolveExtraction — Sales Intelligence Sprint", () => {
   it("refund_receipt: customer is OPTIONAL — a missing name never blocks with a customer warning", async () => {
     const action: ExtractedAction = {
       action: "refund_receipt",
+      quantity: null,
+      unit_price: null,
       customer_name: null,
       amount: 5000,
       description: null,
@@ -203,6 +237,8 @@ describe("resolveExtraction — Sales Intelligence Sprint", () => {
     loadEntityCandidates.mockResolvedValue([MUSA]);
     const action: ExtractedAction = {
       action: "refund_receipt",
+      quantity: null,
+      unit_price: null,
       customer_name: "Musa Ibrahim",
       amount: null,
       description: null,
@@ -221,6 +257,8 @@ describe("resolveExtraction — Sales Intelligence Sprint", () => {
     bankAndCashAccounts.mockResolvedValue([]);
     const action: ExtractedAction = {
       action: "refund_receipt",
+      quantity: null,
+      unit_price: null,
       customer_name: null,
       amount: 5000,
       description: null,
@@ -281,6 +319,8 @@ describe("resolveExtraction — Sales Intelligence Sprint", () => {
     loadEntityCandidates.mockResolvedValue([MUSA]);
     const action: ExtractedAction = {
       action: "sales_invoice",
+      quantity: null,
+      unit_price: null,
       customer_name: "Musa Ibrahim",
       amount: 50000,
       description: null,

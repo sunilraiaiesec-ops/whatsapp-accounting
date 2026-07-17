@@ -90,6 +90,7 @@ function fullSupplierDraft(overrides: Record<string, string> = {}) {
     taxRate: "",
     reorderLevel: "",
     amount: "",
+    unitPrice: "",
     partyName: "Sahel Grain Traders",
     city: "Maroua",
     country: "",

@@ -30,6 +30,7 @@ import {
 } from "@/lib/bantoo/entities";
 import { listInventoryItems } from "@/lib/inventory";
 import type {
+  BantooDraft,
   BantooExecuteResult,
   EntitySearchType,
   ExecuteBantooInput,
@@ -99,6 +100,7 @@ const draftSchema = z.object({
   taxRate: z.string().max(20).default(""),
   reorderLevel: z.string().max(50).default(""),
   amount: z.string().max(50).default(""),
+  unitPrice: z.string().max(50).default(""),
   partyName: z.string().max(200).default(""),
   city: z.string().max(200).default(""),
   // QA Reliability Swarm (Track 1): see the doc comment on BantooDraft.country
@@ -288,6 +290,25 @@ async function appendPartyNote(
   const existing = existingNotes?.trim();
   const appended = existing ? `${existing}\n[${stamp}] ${noteText}` : `[${stamp}] ${noteText}`;
   await updatePartyNotes(orgId, partyId, appended);
+}
+
+// Sales-side single-line documents (sales_invoice/credit_note/refund_receipt/
+// sales_receipt) used to always post a single "quantity 1" line at the full
+// amount, discarding any real per-unit quantity/price the user stated (e.g.
+// "2560 bags at 7000 XAF a bag"). When the AI/fallback extraction populated
+// both draft.quantity and draft.unitPrice, use them for the real line;
+// otherwise fall back to the previous quantity-1-at-amount behavior.
+function resolveLineQuantityAndPrice(
+  draft: BantooDraft,
+  amount: bigint,
+  currency: string,
+): { quantity: string; unitPrice: bigint } {
+  const qty = Number(draft.quantity);
+  const price = Number(draft.unitPrice);
+  if (draft.quantity.trim() && draft.unitPrice.trim() && qty > 0 && price > 0) {
+    return { quantity: draft.quantity, unitPrice: parseAmount(draft.unitPrice, currency) };
+  }
+  return { quantity: "1", unitPrice: amount };
 }
 
 // Trust boundary for selectable inventory items. A client-supplied itemId must
@@ -538,6 +559,11 @@ export async function executeBantooAction(
           type: "customer",
         });
 
+        const { quantity: lineQuantity, unitPrice: lineUnitPrice } = resolveLineQuantityAndPrice(
+          draft,
+          amount,
+          cur,
+        );
         const receipt = await createSalesReceipt(ctx.orgId, {
           bankAccountId,
           partyId: customerId,
@@ -546,8 +572,8 @@ export async function executeBantooAction(
           lines: [
             {
               description: draft.description.trim() || "Cash sale",
-              quantity: "1",
-              unitPrice: amount,
+              quantity: lineQuantity,
+              unitPrice: lineUnitPrice,
               accountId: lineAccountId,
             },
           ],
@@ -1208,6 +1234,11 @@ export async function executeBantooAction(
         if (!customerId) return { ok: false, error: "Choose the customer to invoice." };
 
         const dueDate = draft.dueDate.trim() ? parseDate(draft.dueDate) : null;
+        const { quantity: lineQuantity, unitPrice: lineUnitPrice } = resolveLineQuantityAndPrice(
+          draft,
+          amount,
+          cur,
+        );
         const invoice = await createSalesInvoice(ctx.orgId, {
           partyId: customerId,
           date,
@@ -1216,8 +1247,8 @@ export async function executeBantooAction(
           lines: [
             {
               description: draft.description.trim() || "Sale",
-              quantity: "1",
-              unitPrice: amount,
+              quantity: lineQuantity,
+              unitPrice: lineUnitPrice,
               accountId: lineAccountId,
             },
           ],
@@ -1243,6 +1274,11 @@ export async function executeBantooAction(
         });
         if (!customerId) return { ok: false, error: "Choose the customer to credit." };
 
+        const { quantity: lineQuantity, unitPrice: lineUnitPrice } = resolveLineQuantityAndPrice(
+          draft,
+          amount,
+          cur,
+        );
         const note = await createCreditNote(ctx.orgId, {
           partyId: customerId,
           date,
@@ -1250,8 +1286,8 @@ export async function executeBantooAction(
           lines: [
             {
               description: draft.description.trim() || "Credit note",
-              quantity: "1",
-              unitPrice: amount,
+              quantity: lineQuantity,
+              unitPrice: lineUnitPrice,
               accountId: lineAccountId,
             },
           ],
@@ -1281,6 +1317,11 @@ export async function executeBantooAction(
           type: "customer",
         });
 
+        const { quantity: lineQuantity, unitPrice: lineUnitPrice } = resolveLineQuantityAndPrice(
+          draft,
+          amount,
+          cur,
+        );
         const refund = await createRefundReceipt(ctx.orgId, {
           bankAccountId,
           partyId: customerId,
@@ -1289,8 +1330,8 @@ export async function executeBantooAction(
           lines: [
             {
               description: draft.description.trim() || "Refund",
-              quantity: "1",
-              unitPrice: amount,
+              quantity: lineQuantity,
+              unitPrice: lineUnitPrice,
               accountId: lineAccountId,
             },
           ],

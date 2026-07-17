@@ -718,6 +718,8 @@ export async function resolveExtraction(
 
     case "sales_receipt": {
       draft.amount = numToStr(action.amount);
+      draft.quantity = numToStr(action.quantity);
+      draft.unitPrice = numToStr(action.unit_price);
       draft.partyName = action.customer_name ?? "";
       draft.description = action.description ?? "";
       draft.paymentMethod = action.payment_method ?? "";
@@ -731,6 +733,15 @@ export async function resolveExtraction(
         proposal.partyOptions = party.options;
         proposal.partyId = party.id;
         proposal.createParty = party.create;
+        // Customer is optional here (walk-in sale) — only warn when a name
+        // WAS given but didn't resolve to anything confident, same trio as
+        // sales_invoice/credit_note. No warning at all when partyName is
+        // empty, since that's a valid, intentional choice for this action.
+        if (!proposal.partyId && proposal.partyOptions.length === 0) {
+          warn("customerNotFound", { name: draft.partyName });
+        } else if (!proposal.partyId && proposal.partyOptions.length > 0) {
+          warn("customerAmbiguous", { name: draft.partyName });
+        }
       }
       if (!draft.amount || Number(draft.amount) <= 0) {
         warn("enterSaleAmount");
@@ -1190,6 +1201,8 @@ export async function resolveExtraction(
     case "sales_invoice": {
       draft.partyName = action.customer_name ?? "";
       draft.amount = numToStr(action.amount);
+      draft.quantity = numToStr(action.quantity);
+      draft.unitPrice = numToStr(action.unit_price);
       draft.description = action.description ?? "";
       draft.date = action.date ?? today();
       draft.dueDate = action.due_date ?? "";
@@ -1201,7 +1214,22 @@ export async function resolveExtraction(
       proposal.partyOptions = party.options;
       proposal.partyId = party.id;
       proposal.createParty = party.create;
-      if (!draft.partyName) warn("chooseCustomerForInvoice");
+      // Was `if (!draft.partyName) warn("chooseCustomerForInvoice")` only —
+      // a name that's present but doesn't match anything (e.g. extraction
+      // mis-parsed a stray word) sailed through silently into "create new
+      // customer" with no warning at all. Now every unmatched/ambiguous
+      // name surfaces a precise, actionable warning with suggestions to
+      // pick from, same trio warnCustomerResolution uses elsewhere — kept
+      // inline here (not calling warnCustomerResolution directly) only to
+      // preserve this action's friendlier "chooseCustomerForInvoice" copy
+      // for the empty-name case specifically.
+      if (!draft.partyName) {
+        warn("chooseCustomerForInvoice");
+      } else if (!proposal.partyId && proposal.partyOptions.length === 0) {
+        warn("customerNotFound", { name: draft.partyName });
+      } else if (!proposal.partyId && proposal.partyOptions.length > 0) {
+        warn("customerAmbiguous", { name: draft.partyName });
+      }
       if (!draft.amount || Number(draft.amount) <= 0) {
         warn("enterSaleAmount");
       }
@@ -1223,6 +1251,8 @@ export async function resolveExtraction(
     case "credit_note": {
       draft.partyName = action.customer_name ?? "";
       draft.amount = numToStr(action.amount);
+      draft.quantity = numToStr(action.quantity);
+      draft.unitPrice = numToStr(action.unit_price);
       draft.description = action.description ?? "";
       draft.date = action.date ?? today();
       proposal.partyType = "customer";
@@ -1233,7 +1263,14 @@ export async function resolveExtraction(
       proposal.partyOptions = party.options;
       proposal.partyId = party.id;
       proposal.createParty = party.create;
-      if (!draft.partyName) warn("chooseCustomerForCreditNote");
+      // See sales_invoice above for why this isn't just warnCustomerResolution.
+      if (!draft.partyName) {
+        warn("chooseCustomerForCreditNote");
+      } else if (!proposal.partyId && proposal.partyOptions.length === 0) {
+        warn("customerNotFound", { name: draft.partyName });
+      } else if (!proposal.partyId && proposal.partyOptions.length > 0) {
+        warn("customerAmbiguous", { name: draft.partyName });
+      }
       if (!draft.amount || Number(draft.amount) <= 0) {
         warn("enterCreditAmount");
       }
@@ -1258,6 +1295,8 @@ export async function resolveExtraction(
       // a nullable partyId, so a missing name is never warned about.
       draft.partyName = action.customer_name ?? "";
       draft.amount = numToStr(action.amount);
+      draft.quantity = numToStr(action.quantity);
+      draft.unitPrice = numToStr(action.unit_price);
       draft.description = action.description ?? "";
       draft.date = action.date ?? today();
       proposal.partyType = "customer";
@@ -1269,6 +1308,13 @@ export async function resolveExtraction(
         proposal.partyOptions = party.options;
         proposal.partyId = party.id;
         proposal.createParty = party.create;
+        // See sales_receipt above — only warn when a name WAS given but
+        // didn't resolve; an empty name stays intentionally unwarned.
+        if (!proposal.partyId && proposal.partyOptions.length === 0) {
+          warn("customerNotFound", { name: draft.partyName });
+        } else if (!proposal.partyId && proposal.partyOptions.length > 0) {
+          warn("customerAmbiguous", { name: draft.partyName });
+        }
       }
       if (!draft.amount || Number(draft.amount) <= 0) {
         warn("enterRefundAmount");

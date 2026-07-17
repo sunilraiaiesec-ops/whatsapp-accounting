@@ -187,6 +187,7 @@
     "suggestedAction": "Action suggérée",
     "amount": "Montant",
     "quantity": "Quantité",
+    "unitPrice": "Prix unitaire",
     "inventoryItem": "Article de stock",
     "unitCost": "Coût unitaire",
     "unitCostPlaceholder": "ex. 25 000",

@@ -338,6 +338,22 @@ export function BantooCommand() {
     setDraft((prev) => ({ ...prev, [key]: value }));
   }
 
+  // Sales-side quantity/unit price fields (sales_invoice/credit_note/
+  // refund_receipt/sales_receipt): keep `amount` as their live product so
+  // execute() (which trusts `amount` for its >0 validation) always sees a
+  // total that matches what the user is looking at.
+  function updateLineDetail(key: "quantity" | "unitPrice", value: string) {
+    setDraft((prev) => {
+      const next = { ...prev, [key]: value };
+      const qty = Number(next.quantity);
+      const price = Number(next.unitPrice);
+      if (next.quantity.trim() && next.unitPrice.trim() && qty > 0 && price > 0) {
+        next.amount = String(qty * price);
+      }
+      return next;
+    });
+  }
+
   async function handleCreateCategory() {
     const name = newCategoryName.trim();
     if (!name) return;
@@ -992,6 +1008,8 @@ export function BantooCommand() {
       case "sales_receipt":
         return (
           <>
+            {field(t("quantity"), draft.quantity, (v) => updateLineDetail("quantity", v), { money: true })}
+            {field(t("unitPrice"), draft.unitPrice, (v) => updateLineDetail("unitPrice", v), { money: true })}
             {field(t("amount"), draft.amount, (v) => updateDraft("amount", v), { money: true })}
             {field(t("expenseDescription"), draft.description, (v) => updateDraft("description", v))}
             {accountCombobox(t("incomeAccount"), "income_account", false)}
@@ -1165,6 +1183,8 @@ export function BantooCommand() {
       case "sales_invoice":
         return (
           <>
+            {field(t("quantity"), draft.quantity, (v) => updateLineDetail("quantity", v), { money: true })}
+            {field(t("unitPrice"), draft.unitPrice, (v) => updateLineDetail("unitPrice", v), { money: true })}
             {field(t("amount"), draft.amount, (v) => updateDraft("amount", v), { money: true })}
             {partyBlock(t("customer"), t("createParty"))}
             {field(t("expenseDescription"), draft.description, (v) => updateDraft("description", v))}
@@ -1178,6 +1198,8 @@ export function BantooCommand() {
       case "credit_note":
         return (
           <>
+            {field(t("quantity"), draft.quantity, (v) => updateLineDetail("quantity", v), { money: true })}
+            {field(t("unitPrice"), draft.unitPrice, (v) => updateLineDetail("unitPrice", v), { money: true })}
             {field(t("amount"), draft.amount, (v) => updateDraft("amount", v), { money: true })}
             {partyBlock(t("customer"), t("createParty"))}
             {field(t("expenseDescription"), draft.description, (v) => updateDraft("description", v))}
@@ -1188,6 +1210,8 @@ export function BantooCommand() {
       case "refund_receipt":
         return (
           <>
+            {field(t("quantity"), draft.quantity, (v) => updateLineDetail("quantity", v), { money: true })}
+            {field(t("unitPrice"), draft.unitPrice, (v) => updateLineDetail("unitPrice", v), { money: true })}
             {field(t("amount"), draft.amount, (v) => updateDraft("amount", v), { money: true })}
             {field(t("expenseDescription"), draft.description, (v) => updateDraft("description", v))}
             {accountCombobox(t("incomeAccount"), "income_account", false)}
