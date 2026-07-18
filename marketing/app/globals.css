@@ -1,0 +1,41 @@
+@import "tailwindcss";
+
+/* Keep in sync with ledger/app/globals.css :root block — copied, not
+   shared, since this repo intentionally has no monorepo/shared-package
+   tooling (see vajton-quiz/ precedent). */
+:root {
+  --background: #e8eaee;
+  --foreground: #1a1a1a;
+  --brand: #2ca01c;
+  --brand-hover: #248517;
+  --card: #ffffff;
+  --border: #e2e4e9;
+  --muted: #6b7280;
+}
+
+body {
+  font-family:
+    "Segoe UI",
+    -apple-system,
+    BlinkMacSystemFont,
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+@layer utilities {
+  .card-surface {
+    @apply rounded-2xl border border-[var(--border)] bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04),0_4px_12px_rgba(16,24,40,0.06)];
+  }
+
+  .btn-brand {
+    @apply inline-flex items-center justify-center rounded-full bg-[var(--brand)] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[var(--brand-hover)];
+  }
+
+  .btn-outline {
+    @apply inline-flex items-center justify-center rounded-full border border-[var(--border)] bg-white px-6 py-3 text-sm font-semibold text-slate-700 transition hover:border-[var(--brand)] hover:text-[var(--brand)];
+  }
+}

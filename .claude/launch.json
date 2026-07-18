@@ -1,0 +1,21 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ledger-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "ledger",
+      "port": 3000,
+      "autoPort": true
+    },
+    {
+      "name": "marketing-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "marketing",
+      "port": 3020,
+      "autoPort": true
+    }
+  ]
+}

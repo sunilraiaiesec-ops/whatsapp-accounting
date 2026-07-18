@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useActionState, useState } from "react";
+import { Suspense, useActionState, useState } from "react";
 
 import { signupAction, type AuthState } from "@/app/actions/auth";
 import { BrandLogo } from "@/components/BrandLogo";
@@ -13,9 +14,27 @@ const initial: AuthState = {};
 
 const CURRENCIES = ["XAF", "XOF", "USD", "EUR", "GBP", "NGN", "GHS", "KES"];
 
+const PLAN_VALUES = ["free", "professional", "enterprise"] as const;
+type PlanParam = (typeof PLAN_VALUES)[number];
+
+function parsePlanParam(value: string | null): PlanParam | null {
+  return value && (PLAN_VALUES as readonly string[]).includes(value) ? (value as PlanParam) : null;
+}
+
 export default function SignupPage() {
+  return (
+    <Suspense fallback={null}>
+      <SignupForm />
+    </Suspense>
+  );
+}
+
+function SignupForm() {
   const [state, action, pending] = useActionState(signupAction, initial);
   const t = useTranslations("auth");
+  const searchParams = useSearchParams();
+  const plan = parsePlanParam(searchParams.get("plan"));
+  const planLabel = plan ? t(`plan${plan[0].toUpperCase()}${plan.slice(1)}` as "planFree" | "planProfessional" | "planEnterprise") : null;
 
   const [email, setEmail] = useState("");
   const [confirmEmail, setConfirmEmail] = useState("");
@@ -30,8 +49,14 @@ export default function SignupPage() {
         <BrandLogo href="/signup" size="auth" />
         <h1 className="mt-3 text-2xl font-semibold tracking-tight">{t("signUp")}</h1>
         <p className="mt-1 text-sm text-[var(--muted)]">{t("signUpSubtitle")}</p>
+        {plan ? (
+          <p className="mt-3 rounded-lg bg-[var(--brand)]/10 px-3 py-2 text-sm font-medium text-[var(--brand)]">
+            {plan === "free" ? t("planConfirmFree") : t("planConfirmTrial", { plan: planLabel ?? "" })}
+          </p>
+        ) : null}
 
         <form action={action} className="mt-6 space-y-4">
+          <input type="hidden" name="plan" value={plan ?? ""} />
           <Field label={t("name")} name="name" autoComplete="name" />
           <Field label={t("companyName")} name="orgName" autoComplete="organization" />
           <label className="block">

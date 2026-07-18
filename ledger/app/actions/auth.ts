@@ -35,6 +35,7 @@ const signupSchema = z
     baseCurrency: z.string().trim().min(3).max(3).default("XAF"),
     phone: z.string().trim().min(1, "Phone number is required"),
     whatsapp: z.string().trim().optional(),
+    plan: z.enum(["free", "professional", "enterprise"]).optional(),
   })
   .refine((data) => data.email.toLowerCase() === data.confirmEmail.toLowerCase(), {
     message: "Email addresses do not match",
@@ -54,6 +55,7 @@ export async function signupAction(
     baseCurrency: formData.get("baseCurrency") || "XAF",
     phone: formData.get("phone"),
     whatsapp: formData.get("whatsapp") || undefined,
+    plan: formData.get("plan") || undefined,
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -76,7 +78,7 @@ export async function signupAction(
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- destructured only to exclude it from the spread below
-  const { confirmEmail, ...signupFields } = parsed.data;
+  const { confirmEmail, plan, ...signupFields } = parsed.data;
 
   let email: string;
   try {
@@ -86,6 +88,7 @@ export async function signupAction(
       phone,
       whatsapp,
       referralCode,
+      requestedPlan: plan,
     });
     await sendUserVerification(user.id, user.email);
     await notifyNewMemberSignup({ ...signupFields, phone, whatsapp });

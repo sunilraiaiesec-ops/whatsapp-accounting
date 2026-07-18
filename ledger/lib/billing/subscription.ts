@@ -28,16 +28,30 @@ export type EffectiveSubscription = {
 // Nested-create payload for use inside the SAME transaction that creates a
 // new Organization (see lib/org.ts#createOrganizationWithOwner) — keeps
 // "org + trial subscription" atomic, exactly like the seeded chart of
-// accounts.
+// accounts. `plan` lets a caller start the trial on a specific tier (e.g. a
+// marketing-site CTA for a named plan) — defaults to TRIAL_PLAN so every
+// existing caller (and a bare /signup visit with no plan chosen) is unaffected.
 export function trialSubscriptionCreateData(
   now: Date = new Date(),
+  plan: PlanId = TRIAL_PLAN,
 ): Prisma.SubscriptionCreateWithoutOrgInput {
   const trialEndsAt = new Date(now.getTime() + TRIAL_LENGTH_DAYS * 24 * 60 * 60 * 1000);
   return {
-    plan: TRIAL_PLAN,
+    plan,
     status: "TRIALING",
     trialStartAt: now,
     trialEndsAt,
+  };
+}
+
+// Nested-create payload for a "start free, no trial" signup — same shape as
+// the state getEffectiveSubscription() already lazily writes once a trial
+// expires, so every other billing-aware code path (banners, plan-limit
+// enforcement) already knows how to treat it correctly.
+export function freeSubscriptionCreateData(): Prisma.SubscriptionCreateWithoutOrgInput {
+  return {
+    plan: "FREE",
+    status: "FREE",
   };
 }
 
