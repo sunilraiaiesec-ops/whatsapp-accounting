@@ -7,6 +7,12 @@ export function PageHeader({
   backLabel,
   actionHref,
   actionLabel,
+  // "compact" is for document-creation screens (new invoice/receipt/etc.)
+  // that carry their own in-card document-style heading (e.g. the "INVOICE"
+  // wordmark) — the page-chrome title there only needs to orient, not
+  // compete with that for visual weight. Every other call site (list pages,
+  // detail pages, settings, ...) keeps the default size unchanged.
+  size = "default",
 }: {
   title: string;
   subtitle?: string;
@@ -14,6 +20,7 @@ export function PageHeader({
   backLabel?: string;
   actionHref?: string;
   actionLabel?: string;
+  size?: "default" | "compact";
 }) {
   return (
     <div className="mb-6">
@@ -27,7 +34,13 @@ export function PageHeader({
       ) : null}
       <div className="mt-2 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900 md:text-3xl">
+          <h1
+            className={
+              size === "compact"
+                ? "text-lg font-semibold tracking-tight text-slate-900"
+                : "text-2xl font-semibold tracking-tight text-slate-900 md:text-3xl"
+            }
+          >
             {title}
           </h1>
           {subtitle ? (

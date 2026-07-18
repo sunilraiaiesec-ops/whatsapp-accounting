@@ -152,7 +152,11 @@ export function AppShell({
 
             <BantooCommand />
 
-            <div className="hidden min-w-0 max-w-xl flex-1 md:block">
+            {/* max-w-sm at rest, expanding to max-w-xl only while focused
+                (:focus-within on this wrapper) — search shouldn't visually
+                dominate the header (competing with Ask Bantoo / the org
+                switcher) until the user actually starts typing. */}
+            <div className="hidden min-w-0 max-w-sm flex-1 transition-[max-width] duration-200 focus-within:max-w-xl md:block">
               <GlobalSearch />
             </div>
 

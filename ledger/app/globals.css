@@ -1,7 +1,11 @@
 @import "tailwindcss";
 
 :root {
-  --background: #eceef1;
+  /* Was #eceef1 — nearly indistinguishable from the white card surface
+     (~1.05:1 contrast), so cards read as flat panels rather than sheets
+     sitting on the workspace. This is still a very light, neutral gray;
+     the difference is deliberately subtle, not a visual overhaul. */
+  --background: #e8eaee;
   --foreground: #1a1a1a;
   --brand: #2ca01c;
   --brand-hover: #248517;
@@ -25,8 +29,13 @@ body {
 }
 
 @layer utilities {
+  /* Two-layer shadow (tight contact shadow + soft ambient falloff) instead
+     of Tailwind's flat shadow-sm — a single faint shadow reads as a hairline,
+     not depth. Reserved for cards specifically (the top of the visual
+     hierarchy); inputs/buttons intentionally stay flatter so shadow still
+     means something when a card has it. */
   .card-surface {
-    @apply rounded-2xl border border-[var(--border)] bg-white shadow-sm;
+    @apply rounded-2xl border border-[var(--border)] bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04),0_4px_12px_rgba(16,24,40,0.06)];
   }
 
   .pill-action {
@@ -41,11 +50,50 @@ body {
     @apply inline-flex items-center justify-center rounded-full bg-[var(--brand)] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[var(--brand-hover)];
   }
 
+  /* rounded-lg (8px), not rounded-xl (12px) — 12px sat awkwardly close to
+     card-surface's 16px (a "close but not equal" mismatch reads as
+     accidental, not intentional). 8px reads clearly as "the small-scale
+     radius for controls" against the card's "large-scale" 16px, and lines
+     up with .cell-input/.cell-select's 6px (rounded-md) as the same tier. */
   .input-modern {
-    @apply w-full rounded-xl border border-[var(--border)] bg-white px-4 py-2.5 text-sm shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/20;
+    @apply w-full rounded-lg border border-[var(--border)] bg-white px-4 py-2.5 text-sm shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/20;
   }
 
   .input-search {
-    @apply w-full rounded-xl border border-[var(--border)] bg-white py-2.5 pr-4 pl-11 text-sm shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/20;
+    @apply w-full rounded-lg border border-[var(--border)] bg-white py-2.5 pr-4 pl-11 text-sm shadow-sm outline-none transition placeholder:text-slate-400 focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/20;
+  }
+
+  /* Table-cell controls (line-item rows): borderless/shadowless at rest so
+     the row itself — not a box drawn around every field — is the unit of
+     visual containment, matching a spreadsheet/ledger feel rather than a
+     stack of form fields. Only reveals a border + ring on focus. */
+  .cell-input {
+    @apply w-full rounded-md border border-transparent bg-transparent px-3 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[var(--brand)] focus:bg-white focus:shadow-sm focus:ring-2 focus:ring-[var(--brand)]/30;
+  }
+
+  .cell-select {
+    @apply w-full appearance-none rounded-md border border-transparent bg-transparent bg-[length:14px] bg-no-repeat px-3 py-2.5 pr-8 text-sm text-slate-900 outline-none transition [background-position:right_0.6rem_center] focus:border-[var(--brand)] focus:bg-white focus:shadow-sm focus:ring-2 focus:ring-[var(--brand)]/30;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%2394a3b8'%3E%3Cpath fill-rule='evenodd' d='M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z' clip-rule='evenodd'/%3E%3C/svg%3E");
+  }
+
+  /* Native <input type="date"> styled to carry one consistent calendar icon
+     (matching the rest of the app's icon set) instead of the browser's own
+     mismatched default — the WebKit-only calendar-picker-indicator is made
+     transparent-but-still-clickable and stretched over the whole field, and
+     a decorative SVG icon (see the date-field wrapper in SalesInvoiceForm)
+     sits on top of it. Native picker/keyboard/mobile behavior is untouched;
+     only the icon's appearance changes. */
+  .input-date {
+    @apply relative w-full rounded-lg border border-[var(--border)] bg-white px-4 py-2.5 pr-10 text-sm shadow-sm outline-none transition focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/20;
+  }
+
+  .input-date::-webkit-calendar-picker-indicator {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
   }
 }

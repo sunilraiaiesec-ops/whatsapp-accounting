@@ -33,10 +33,12 @@ export default async function NewSalesInvoicePage({
         subtitle={t("newSubtitle")}
         backHref="/sales-invoices"
         backLabel={t("backToList")}
+        size="compact"
       />
 
       <SalesInvoiceForm
         currency={ctx.baseCurrency}
+        orgName={ctx.orgName}
         defaults={
           partyId
             ? {

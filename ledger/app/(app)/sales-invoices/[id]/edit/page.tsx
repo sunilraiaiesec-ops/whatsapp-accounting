@@ -35,11 +35,13 @@ export default async function EditSalesInvoicePage({
         subtitle={`Update invoice for ${invoice.party.name}.`}
         backHref={`/sales-invoices/${id}`}
         backLabel="View invoice"
+        size="compact"
       />
 
       <SalesInvoiceForm
         documentId={invoice.id}
         currency={ctx.baseCurrency}
+        orgName={ctx.orgName}
         customers={customers.map((c) => ({ id: c.id, label: c.name }))}
         incomeAccounts={income.map((a) => ({ id: a.id, label: `${a.code} — ${a.name}` }))}
         salesAccountId={salesAccount?.id ?? ""}

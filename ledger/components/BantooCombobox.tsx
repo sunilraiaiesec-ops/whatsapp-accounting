@@ -17,6 +17,9 @@ export type BantooComboboxProps = {
   // Initial candidates from the proposal (already ranked, with score/bucket).
   options: BantooOption[];
   // Debounced remote search as the user types (org-scoped server action).
+  // When omitted, `options` is a bounded local list and gets filtered
+  // client-side by `text` instead (e.g. a table row's Item/Income Account
+  // pick from a fixed, already-loaded list — no remote fetch needed).
   onSearch?: (query: string) => Promise<BantooOption[]>;
   // Called when the user picks an existing record.
   onSelectExisting: (option: BantooOption) => void;
@@ -25,6 +28,14 @@ export type BantooComboboxProps = {
   allowCreate?: boolean;
   createLabel?: (text: string) => string;
   placeholder?: string;
+  // Keeps the label in the DOM (screen readers, associated <label>) but
+  // visually hidden — for dense contexts like a table cell where the
+  // column header already names the field, so a second visible label
+  // would just eat vertical space.
+  hideLabel?: boolean;
+  // Overrides the default boxed input-modern styling — e.g. a table row's
+  // "cell-input" borderless-at-rest treatment, matching its sibling cells.
+  inputClassName?: string;
 };
 
 // A lightweight searchable dropdown (combobox) styled to match BantooBooks.
@@ -43,6 +54,8 @@ export function BantooCombobox({
   allowCreate = true,
   createLabel,
   placeholder,
+  hideLabel = false,
+  inputClassName,
 }: BantooComboboxProps) {
   const t = useTranslations("command");
   const listId = useId();
@@ -61,7 +74,15 @@ export function BantooCombobox({
     setPrevOptions(options);
     setSearchResults(null);
   }
-  const candidates = searchResults ?? options;
+  const trimmed = text.trim();
+  // No onSearch => options is a bounded local list (e.g. inventory items,
+  // income accounts) — filter it client-side instead of showing every
+  // option unfiltered regardless of what's typed.
+  const candidates = onSearch
+    ? (searchResults ?? options)
+    : trimmed
+      ? options.filter((o) => o.label.toLowerCase().includes(trimmed.toLowerCase()))
+      : options;
 
   // Close on outside click.
   useEffect(() => {
@@ -92,7 +113,6 @@ export function BantooCombobox({
     }, 220);
   }
 
-  const trimmed = text.trim();
   const showCreate =
     allowCreate &&
     trimmed.length >= 2 &&
@@ -101,9 +121,9 @@ export function BantooCombobox({
   const selected = selectedId ? candidates.find((c) => c.id === selectedId) : undefined;
 
   return (
-    <div className="block text-sm" ref={rootRef}>
-      <span className="font-medium text-slate-700">{label}</span>
-      <div className="relative mt-1">
+    <div className={hideLabel ? "block" : "block text-sm"} ref={rootRef}>
+      <span className={hideLabel ? "sr-only" : "font-medium text-slate-700"}>{label}</span>
+      <div className={hideLabel ? "relative" : "relative mt-1"}>
         <input
           type="text"
           value={text}
@@ -122,7 +142,7 @@ export function BantooCombobox({
             setOpen(true);
             if (candidates.length === 0 && onSearch) runSearch(text);
           }}
-          className={`${inputClass} ${selectedId ? "border-[var(--brand)]/50" : ""}`}
+          className={`${inputClassName ?? inputClass} ${selectedId && !inputClassName ? "border-[var(--brand)]/50" : ""}`}
         />
         {selectedId ? (
           <span

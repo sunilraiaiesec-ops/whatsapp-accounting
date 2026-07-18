@@ -40,6 +40,22 @@ const ACCEPTED_IMAGE = /^(image\/(png|jpe?g|webp|gif|heic|heif)|application\/pdf
 
 type Attachment = { id: string; file: File; url: string; isPdf: boolean };
 
+// A custom stroke-based sparkle, matching the app's other header/table icons
+// (search, calendar, trash) — a platform emoji here rendered differently
+// per-OS/browser (Apple vs Google vs Windows glyph styles), the one visibly
+// "not really ours" icon in an otherwise consistent icon language.
+function SparkleIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+      <path
+        d="M10 2.5l1.2 4.3 4.3 1.2-4.3 1.2-1.2 4.3-1.2-4.3-4.3-1.2 4.3-1.2L10 2.5z"
+        strokeLinejoin="round"
+      />
+      <path d="M16 13l.6 2 2 .6-2 .6-.6 2-.6-2-2-.6 2-.6.6-2z" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function OpenButton({ onClick, className }: { onClick: () => void; className?: string }) {
   const t = useTranslations("command");
   return (
@@ -51,8 +67,8 @@ function OpenButton({ onClick, className }: { onClick: () => void; className?: s
         "inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:border-[var(--brand)]/40 hover:text-[var(--brand)] md:px-4"
       }
     >
-      <span aria-hidden className="text-base">
-        ✨
+      <span aria-hidden className="text-[var(--brand)]">
+        <SparkleIcon />
       </span>
       <span className="hidden sm:inline">{t("open")}</span>
     </button>

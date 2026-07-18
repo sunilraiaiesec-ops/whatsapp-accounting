@@ -1,9 +1,7 @@
 import { requireContext } from "@/lib/auth/current";
 import { prisma } from "@/lib/prisma";
 import { AppShell } from "@/components/AppShell";
-import { EmailVerifyBanner } from "@/components/EmailVerifyBanner";
-import { PhoneVerifyBanner } from "@/components/PhoneVerifyBanner";
-import { TrialBanner } from "@/components/TrialBanner";
+import { AccountBanners } from "@/components/AccountBanners";
 import { getTrialBannerInfo } from "@/lib/billing/subscription";
 import { hasPermission } from "@/lib/permissions";
 
@@ -30,19 +28,25 @@ export default async function AppLayout({
       userName={ctx.userName}
       userEmail={ctx.userEmail}
     >
-      <EmailVerifyBanner verified={ctx.emailVerified} email={ctx.userEmail} />
-      <PhoneVerifyBanner verified={phoneStatus?.phoneVerified != null} />
-      {trialBanner ? (
-        <TrialBanner
-          plan={trialBanner.plan}
-          daysLeft={trialBanner.daysLeft}
-          expired={trialBanner.expired}
-          // Now backed by the real permission matrix (lib/permissions.ts) —
-          // only OWNER has manageBilling=true today, so this preserves the
-          // exact prior OWNER-only behavior while using the central helper.
-          canManageBilling={hasPermission(ctx, "manageBilling")}
-        />
-      ) : null}
+      <AccountBanners
+        emailVerified={ctx.emailVerified}
+        email={ctx.userEmail}
+        phoneVerified={phoneStatus?.phoneVerified != null}
+        trial={
+          trialBanner
+            ? {
+                plan: trialBanner.plan,
+                daysLeft: trialBanner.daysLeft,
+                expired: trialBanner.expired,
+                // Now backed by the real permission matrix
+                // (lib/permissions.ts) — only OWNER has manageBilling=true
+                // today, so this preserves the exact prior OWNER-only
+                // behavior while using the central helper.
+                canManageBilling: hasPermission(ctx, "manageBilling"),
+              }
+            : null
+        }
+      />
       {children}
     </AppShell>
   );
