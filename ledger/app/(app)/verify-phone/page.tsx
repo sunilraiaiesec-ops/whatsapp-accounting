@@ -2,13 +2,16 @@ import { requireContext } from "@/lib/auth/current";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { VerifyPhoneForm } from "@/components/VerifyPhoneForm";
+import { PHONE_RECOVERY_ENABLED } from "@/lib/feature-flags";
 
 export default async function VerifyPhonePage() {
   const ctx = await requireContext();
-  const user = await prisma.user.findUnique({
-    where: { id: ctx.userId },
-    select: { phone: true, phoneVerified: true },
-  });
+  const user = PHONE_RECOVERY_ENABLED
+    ? await prisma.user.findUnique({
+        where: { id: ctx.userId },
+        select: { phone: true, phoneVerified: true },
+      })
+    : null;
 
   return (
     <div className="mx-auto max-w-md">
@@ -19,7 +22,13 @@ export default async function VerifyPhonePage() {
         backLabel="Back to dashboard"
       />
       <div className="card-surface mt-6 p-6">
-        <VerifyPhoneForm currentPhone={user?.phone ?? ""} alreadyVerified={user?.phoneVerified != null} />
+        {PHONE_RECOVERY_ENABLED ? (
+          <VerifyPhoneForm currentPhone={user?.phone ?? ""} alreadyVerified={user?.phoneVerified != null} />
+        ) : (
+          <p className="text-sm text-[var(--muted)]">
+            Phone verification isn&apos;t available right now — please check back later.
+          </p>
+        )}
       </div>
     </div>
   );

@@ -11,6 +11,7 @@ import {
 } from "@/app/actions/phone-verification";
 import { BrandLogo } from "@/components/BrandLogo";
 import { PhoneField } from "@/components/PhoneField";
+import { PHONE_RECOVERY_ENABLED } from "@/lib/feature-flags";
 
 const initial: AuthState = {};
 const phoneInitial: PhoneVerifyState = {};
@@ -139,15 +140,17 @@ export default function ForgotPasswordPage() {
               </button>
             </form>
 
-            <p className="mt-6 text-center text-sm text-[var(--muted)]">
-              <button
-                type="button"
-                onClick={() => setMode("phone")}
-                className="font-semibold text-[var(--brand)] hover:underline"
-              >
-                Use phone instead
-              </button>
-            </p>
+            {PHONE_RECOVERY_ENABLED ? (
+              <p className="mt-6 text-center text-sm text-[var(--muted)]">
+                <button
+                  type="button"
+                  onClick={() => setMode("phone")}
+                  className="font-semibold text-[var(--brand)] hover:underline"
+                >
+                  Use phone instead
+                </button>
+              </p>
+            ) : null}
           </>
         )}
 

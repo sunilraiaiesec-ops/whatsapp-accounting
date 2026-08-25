@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 
 import { resendVerificationAction } from "@/app/actions/auth";
 import type { PlanId } from "@/lib/billing/plans";
+import { PHONE_RECOVERY_ENABLED } from "@/lib/feature-flags";
 
 const STORAGE_KEY = "bantoo:dismissedBanners";
 
@@ -172,7 +173,7 @@ export function AccountBanners({ emailVerified, email, phoneVerified, trial }: A
     }
   }
 
-  if (!phoneVerified && !dismissed.has("phone-verify")) {
+  if (PHONE_RECOVERY_ENABLED && !phoneVerified && !dismissed.has("phone-verify")) {
     return (
       <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
         <span className="flex-1">{t("phoneVerifyBanner")}</span>
